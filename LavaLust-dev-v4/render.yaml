@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: lsi-smart-track
+    env: php
+    plan: free
+    buildCommand: |
+      cp .env.example .env
+    startCommand: php -S 0.0.0.0:10000 -t public
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_KEY
+        generateValue: true
+      - key: DB_DRIVER
+        value: mysql
+      - key: DB_HOST
+        fromDatabase:
+          name: lsi-smart-track-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: lsi-smart-track-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: lsi-smart-track-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: lsi-smart-track-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: lsi-smart-track-db
+          property: password
+      - key: DB_CHARSET
+        value: utf8mb4
+      - key: BASE_URL
+        value: https://lsi-smart-track.onrender.com
+
+databases:
+  - name: lsi-smart-track-db
+    databaseName: lsi_smarttrack
+    user: lsi_smarttrack_user
+    plan: free
