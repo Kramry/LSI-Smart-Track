@@ -12,7 +12,7 @@ services:
       - key: APP_KEY
         generateValue: true
       - key: DB_DRIVER
-        value: mysql
+        value: postgres
       - key: DB_HOST
         fromDatabase:
           name: lsi-smart-track-db

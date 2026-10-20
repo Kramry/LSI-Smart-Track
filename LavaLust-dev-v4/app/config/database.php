@@ -1,5 +1,7 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
+
+use PDO;
 /**
  * ------------------------------------------------------------------
  * LavaLust - an opensource lightweight PHP MVC Framework
@@ -67,7 +69,13 @@ $database['main'] = array(
     'charset' => getenv('DB_CHARSET') ?: 'utf8mb4',
     'dbprefix'	=> getenv('DB_PREFIX') ?: '',
     // Optional for SQLite
-    'path'      => ''
+    'path'      => '',
+    // PostgreSQL specific
+    'options'   => array(
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    )
 );
 
 ?>
