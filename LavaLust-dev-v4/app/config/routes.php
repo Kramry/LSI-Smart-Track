@@ -45,6 +45,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /** @var object $router **/
 
 $router->get('/', 'SmartTrack::index');
+$router->get('/login', 'SmartTrack::showLogin');
 $router->get('/setup', 'SmartTrack::setup');
 $router->get('/register', 'SmartTrack::register');
 $router->post('/login', 'SmartTrack::login');

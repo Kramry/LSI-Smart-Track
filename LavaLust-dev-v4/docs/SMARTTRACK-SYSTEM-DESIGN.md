@@ -121,6 +121,10 @@ erDiagram
 3. Point the web server to the project `public` directory and open the application. First run prompts for the initial administrator; no default credentials are shipped.
 4. Add programs, accounts, trainees, classes, schedules, and enrollments from the portal.
 
+## Deployment
+
+The production deployment uses the `Dockerfile` (Apache with `public/` as the document root and a front-controller rewrite) and `render.yaml`. The database is MySQL and is supplied by an external host. See `docs/RENDER-DEPLOYMENT.md` for the service configuration, the required environment variables, and the verification checklist.
+
 ## Demonstration Checklist
 
 - Show this feature list, sitemap, wireframes, and ERD.

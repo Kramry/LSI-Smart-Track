@@ -1,0 +1,17 @@
+# Version control and tooling
+.git
+.gitignore
+.idea/
+.vscode/
+node_modules/
+
+# Secrets: the framework loads .env with putenv(), which would override the
+# environment variables configured in Render.
+.env
+.env.*
+!.env.example
+
+# Runtime state is created inside the image
+runtime/
+
+*.log

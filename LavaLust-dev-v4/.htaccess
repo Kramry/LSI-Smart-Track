@@ -24,6 +24,7 @@ AddDefaultCharset UTF-8
 
     # --------------------------------------------------
     # Route all requests through public/index.php
+    RewriteCond %{DOCUMENT_ROOT} ![/\\]public$
     RewriteCond %{REQUEST_URI} !^/public/
     RewriteRule ^(.*)$ public/$1 [L,QSA]
 </IfModule>

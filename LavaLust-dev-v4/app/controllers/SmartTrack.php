@@ -30,6 +30,16 @@ class SmartTrack extends Controller
         $this->dashboard();
     }
 
+    public function showLogin()
+    {
+        if ($this->user) {
+            redirect($this->url('dashboard'));
+            return;
+        }
+
+        $this->render('login');
+    }
+
     public function login()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$this->validCsrf()) {

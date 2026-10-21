@@ -1,45 +1,32 @@
 services:
   - type: web
     name: lsi-smart-track
-    env: php
+    runtime: docker
+    rootDir: LavaLust-dev-v4
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
-    buildCommand: |
-      cp .env.example .env
-    startCommand: php -S 0.0.0.0:10000 -t public
+    healthCheckPath: /login
     envVars:
       - key: APP_ENV
         value: production
       - key: APP_KEY
         generateValue: true
       - key: DB_DRIVER
-        value: postgres
+        value: mysql
+      # Render has no managed MySQL, so point these at your own MySQL 8 host
+      # (Aiven, PlanetScale, DigitalOcean, or a private server).
       - key: DB_HOST
-        fromDatabase:
-          name: lsi-smart-track-db
-          property: host
+        sync: false
       - key: DB_PORT
-        fromDatabase:
-          name: lsi-smart-track-db
-          property: port
-      - key: DB_NAME
-        fromDatabase:
-          name: lsi-smart-track-db
-          property: database
+        sync: false
       - key: DB_USER
-        fromDatabase:
-          name: lsi-smart-track-db
-          property: user
+        sync: false
       - key: DB_PASSWORD
-        fromDatabase:
-          name: lsi-smart-track-db
-          property: password
+        sync: false
+      - key: DB_NAME
+        sync: false
       - key: DB_CHARSET
         value: utf8mb4
       - key: BASE_URL
         value: https://lsi-smart-track.onrender.com
-
-databases:
-  - name: lsi-smart-track-db
-    databaseName: lsi_smarttrack
-    user: lsi_smarttrack_user
-    plan: free
