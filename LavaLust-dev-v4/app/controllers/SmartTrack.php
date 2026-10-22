@@ -573,17 +573,6 @@ class SmartTrack extends Controller
             return;
         }
 
-        $directory = ROOT_DIR . 'runtime/uploads/private';
-        if (!is_dir($directory) && !mkdir($directory, 0750, true) && !is_dir($directory)) {
-            return $this->deny('The private upload directory is unavailable.');
-        }
-        $filename = bin2hex(random_bytes(20)) . '.' . $allowed[$mime];
-        $destination = $directory . DIRECTORY_SEPARATOR . $filename;
-        if (!move_uploaded_file($file['tmp_name'], $destination)) {
-            $this->notice('The document could not be stored.');
-            redirect($this->url('manage/documents'));
-            return;
-        }
         $label = trim((string) $this->input('document_name')) ?: basename($file['name']);
         $access = $this->user['role'] === 'instructor' ? 'class' : (in_array($this->input('access_level'), ['private', 'class', 'staff'], true) ? $this->input('access_level') : 'private');
         $classId = (int) $this->input('class_id');
@@ -595,7 +584,6 @@ class SmartTrack extends Controller
                 $classValues[] = (int) $this->user['user_id'];
             }
             if (!$classId || !$this->model->row($classSql, $classValues)) {
-                unlink($destination);
                 $this->notice('Select a class you are permitted to share this document with.');
                 redirect($this->url('manage/documents'));
                 return;
@@ -606,9 +594,46 @@ class SmartTrack extends Controller
         if ($this->user['role'] === 'trainee') {
             $access = 'private';
         }
-        $this->model->execute('INSERT INTO trainee_documents (trainee_id, class_id, uploaded_by, document_name, file_path, upload_date, status, access_level) VALUES (?, ?, ?, ?, ?, CURDATE(), ?, ?)', [$traineeId ?: null, $classId, (int) $this->user['user_id'], substr($label, 0, 150), 'runtime/uploads/private/' . $filename, 'active', $access]);
-        $this->model->logActivity((int) $this->user['user_id'], 'Uploaded document', substr($label, 0, 150));
-        $this->notice('Document uploaded.');
+
+        // Cloud Storage or Local Storage
+        $this->call->library('CloudStorage');
+        $cloudStorage = new CloudStorage();
+        $useCloud = $cloudStorage->isEnabled();
+
+        $filename = bin2hex(random_bytes(20)) . '.' . $allowed[$mime];
+        $remotePath = 'documents/' . date('Y/m') . '/' . $filename;
+        $dbPath = $remotePath;
+
+        if ($useCloud) {
+            // Upload to cloud storage
+            $cloudUrl = $cloudStorage->upload($file['tmp_name'], $remotePath, $mime);
+            if (!$cloudUrl) {
+                $this->notice('Failed to upload to cloud storage. Using local storage instead.');
+                $useCloud = false;
+            } else {
+                $dbPath = 'cloud://' . $remotePath;
+            }
+        }
+
+        if (!$useCloud) {
+            // Fallback to local storage
+            $directory = ROOT_DIR . 'runtime/uploads/private';
+            if (!is_dir($directory) && !mkdir($directory, 0750, true) && !is_dir($directory)) {
+                return $this->deny('The private upload directory is unavailable.');
+            }
+            $localFilename = bin2hex(random_bytes(20)) . '.' . $allowed[$mime];
+            $destination = $directory . DIRECTORY_SEPARATOR . $localFilename;
+            if (!move_uploaded_file($file['tmp_name'], $destination)) {
+                $this->notice('The document could not be stored.');
+                redirect($this->url('manage/documents'));
+                return;
+            }
+            $dbPath = 'runtime/uploads/private/' . $localFilename;
+        }
+
+        $this->model->execute('INSERT INTO trainee_documents (trainee_id, class_id, uploaded_by, document_name, file_path, upload_date, status, access_level) VALUES (?, ?, ?, ?, ?, CURDATE(), ?, ?)', [$traineeId ?: null, $classId, (int) $this->user['user_id'], substr($label, 0, 150), $dbPath, 'active', $access]);
+        $this->model->logActivity((int) $this->user['user_id'], 'Uploaded document', substr($label, 0, 150) . ($useCloud ? ' (Cloud)' : ' (Local)'));
+        $this->notice('Document uploaded' . ($useCloud ? ' to cloud storage.' : '.'));
         redirect($this->url('manage/documents'));
     }
 
@@ -628,8 +653,33 @@ class SmartTrack extends Controller
                 $isClassDocument = (bool) $this->model->row('SELECT e.enrollment_id FROM class_enrollments e JOIN trainees t ON t.trainee_id = e.trainee_id WHERE e.class_id = ? AND t.user_id = ?', [(int) $document['class_id'], (int) $this->user['user_id']]);
             }
         }
-        $path = $document ? $this->privateDocumentPath($document['file_path']) : null;
-        if (!$document || (!$isAdmin && !$isOwner && !$isClassDocument) || !$path) {
+        if (!$document || (!$isAdmin && !$isOwner && !$isClassDocument)) {
+            http_response_code(404);
+            exit('Document not found.');
+        }
+
+        $filePath = $document['file_path'];
+        $isCloud = strpos($filePath, 'cloud://') === 0;
+
+        if ($isCloud) {
+            // Cloud storage - generate temporary URL
+            $this->call->library('CloudStorage');
+            $cloudStorage = new CloudStorage();
+            $remotePath = substr($filePath, 8); // Remove 'cloud://' prefix
+            $tempUrl = $cloudStorage->getTemporaryUrl($remotePath, 3600);
+
+            if ($tempUrl) {
+                header('Location: ' . $tempUrl);
+                exit;
+            } else {
+                http_response_code(500);
+                exit('Could not generate download URL.');
+            }
+        }
+
+        // Local storage
+        $path = $this->privateDocumentPath($filePath);
+        if (!$path) {
             http_response_code(404);
             exit('Document not found.');
         }
@@ -653,13 +703,25 @@ class SmartTrack extends Controller
             return;
         }
 
-        $path = $this->privateDocumentPath($document['file_path']);
-        if ($path && file_exists($path)) {
-            unlink($path);
+        $filePath = $document['file_path'];
+        $isCloud = strpos($filePath, 'cloud://') === 0;
+
+        if ($isCloud) {
+            // Delete from cloud storage
+            $this->call->library('CloudStorage');
+            $cloudStorage = new CloudStorage();
+            $remotePath = substr($filePath, 8); // Remove 'cloud://' prefix
+            $cloudStorage->delete($remotePath);
+        } else {
+            // Delete from local storage
+            $path = $this->privateDocumentPath($filePath);
+            if ($path && file_exists($path)) {
+                unlink($path);
+            }
         }
 
         $this->model->execute('DELETE FROM trainee_documents WHERE document_id = ?', [(int) $id]);
-        $this->model->logActivity((int) $this->user['user_id'], 'Deleted document', $document['document_name']);
+        $this->model->logActivity((int) $this->user['user_id'], 'Deleted document', $document['document_name'] . ($isCloud ? ' (Cloud)' : ' (Local)'));
         $this->notice('Document deleted.');
         redirect($this->url('manage/documents'));
     }
