@@ -116,8 +116,8 @@ class SmartTrack_model
         $role = $user['role'];
         $queries = [
             'users' => 'SELECT user_id, full_name, username, role, status, created_at FROM users',
-            'trainees' => 'SELECT t.trainee_id, t.first_name, t.last_name, t.sex, t.contact_number, t.course, t.status, t.qr_code, t.user_id, t.program_id, p.program_name FROM trainees t LEFT JOIN training_programs p ON p.program_id = t.program_id',
-            'programs' => 'SELECT program_id, program_name, description, duration_hours, status FROM training_programs',
+            'trainees' => 'SELECT t.trainee_id, t.first_name, t.last_name, t.sex, t.date_of_birth, t.address, t.email, t.contact_number, t.course, t.status, t.qr_code, t.user_id, t.program_id, p.program_name FROM trainees t LEFT JOIN training_programs p ON p.program_id = t.program_id',
+            'programs' => 'SELECT program_id, program_code, program_name, description, duration_hours, status FROM training_programs',
             'classes' => 'SELECT c.class_id, c.class_name, c.program_id, p.program_name, c.instructor_id, u.full_name AS instructor_name, c.start_date, c.end_date, c.status FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id LEFT JOIN users u ON u.user_id = c.instructor_id',
             'schedules' => 'SELECT s.schedule_id, s.class_id, c.class_name, s.schedule_date, s.start_time, s.end_time FROM training_schedules s LEFT JOIN training_classes c ON c.class_id = s.class_id',
             'enrollments' => 'SELECT e.enrollment_id, e.class_id, c.class_name, e.trainee_id, CONCAT(t.first_name, \' \', t.last_name) AS trainee_name, e.enrolled_at FROM class_enrollments e JOIN training_classes c ON c.class_id = e.class_id JOIN trainees t ON t.trainee_id = e.trainee_id',
@@ -293,6 +293,112 @@ class SmartTrack_model
         return $this->rows($sql . ' ORDER BY a.attendance_date DESC, t.last_name, t.first_name', $values);
     }
 
+    public function dashboardChartData(array $user)
+    {
+        $isAdminOrStaff = in_array($user['role'], ['administrator', 'staff'], true);
+        $isInstructor = $user['role'] === 'instructor';
+
+        // Weekly attendance trend (last 7 days)
+        $weeklyData = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $date = date('Y-m-d', strtotime("-$i days"));
+            $dateLabel = date('M j', strtotime("-$i days"));
+
+            $sql = "SELECT COUNT(*) AS total FROM attendance_records WHERE attendance_date = ?";
+            $values = [$date];
+
+            if ($isInstructor) {
+                $sql .= " AND class_id IN (SELECT class_id FROM training_classes WHERE instructor_id = ?)";
+                $values[] = (int) $user['user_id'];
+            }
+
+            $total = (int) ($this->row($sql, $values)['total'] ?? 0);
+
+            $weeklyData[] = [
+                'date' => $dateLabel,
+                'total' => $total
+            ];
+        }
+
+        // Attendance by status (last 30 days)
+        $statusSql = "SELECT status, COUNT(*) AS total FROM attendance_records WHERE attendance_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+        $statusValues = [];
+
+        if ($isInstructor) {
+            $statusSql .= " AND class_id IN (SELECT class_id FROM training_classes WHERE instructor_id = ?)";
+            $statusValues[] = (int) $user['user_id'];
+        }
+
+        $statusSql .= " GROUP BY status";
+        $statusRows = $this->rows($statusSql, $statusValues);
+        $statusData = [
+            'Present' => 0,
+            'Late' => 0,
+            'Absent' => 0
+        ];
+
+        foreach ($statusRows as $row) {
+            if (isset($statusData[$row['status']])) {
+                $statusData[$row['status']] = (int) $row['total'];
+            }
+        }
+
+        // Program-level statistics (admin/staff only)
+        $programData = [];
+        if ($isAdminOrStaff) {
+            $programRows = $this->rows(
+                "SELECT p.program_id, p.program_name, p.program_code,
+                        COUNT(DISTINCT t.trainee_id) AS trainee_count,
+                        COUNT(DISTINCT a.attendance_id) AS attendance_count
+                 FROM training_programs p
+                 LEFT JOIN trainees t ON t.program_id = p.program_id AND t.status = 'active'
+                 LEFT JOIN attendance_records a ON t.trainee_id = a.trainee_id
+                 WHERE p.status = 'active'
+                 GROUP BY p.program_id, p.program_name, p.program_code
+                 ORDER BY attendance_count DESC"
+            );
+
+            foreach ($programRows as $row) {
+                $programData[] = [
+                    'name' => $row['program_name'],
+                    'code' => $row['program_code'],
+                    'trainees' => (int) $row['trainee_count'],
+                    'attendance' => (int) $row['attendance_count']
+                ];
+            }
+        }
+
+        // Late trainees this week
+        $lateSql = "SELECT COUNT(*) AS total FROM attendance_records WHERE status = 'Late' AND attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+        $lateValues = [];
+
+        if ($isInstructor) {
+            $lateSql .= " AND class_id IN (SELECT class_id FROM training_classes WHERE instructor_id = ?)";
+            $lateValues[] = (int) $user['user_id'];
+        }
+
+        $lateCount = (int) ($this->row($lateSql, $lateValues)['total'] ?? 0);
+
+        // Absences this week
+        $absentSql = "SELECT COUNT(*) AS total FROM attendance_records WHERE status = 'Absent' AND attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+        $absentValues = [];
+
+        if ($isInstructor) {
+            $absentSql .= " AND class_id IN (SELECT class_id FROM training_classes WHERE instructor_id = ?)";
+            $absentValues[] = (int) $user['user_id'];
+        }
+
+        $absentCount = (int) ($this->row($absentSql, $absentValues)['total'] ?? 0);
+
+        return [
+            'weekly' => $weeklyData,
+            'status' => $statusData,
+            'programs' => $programData,
+            'late_this_week' => $lateCount,
+            'absent_this_week' => $absentCount
+        ];
+    }
+
     public function scanAttendance($qrCode, $action, $classId, $scheduleId, $userId)
     {
         $trainee = $this->row("SELECT trainee_id, first_name, last_name FROM trainees WHERE qr_code = ? AND status = 'active' LIMIT 1", [$qrCode]);
@@ -334,5 +440,46 @@ class SmartTrack_model
     public function documentById($id)
     {
         return $this->row('SELECT d.*, t.user_id AS trainee_user_id FROM trainee_documents d LEFT JOIN trainees t ON t.trainee_id = d.trainee_id WHERE d.document_id = ? LIMIT 1', [(int) $id]);
+    }
+
+    public function documentStats(array $user)
+    {
+        $isAdminOrStaff = in_array($user['role'], ['administrator', 'staff'], true);
+
+        if ($isAdminOrStaff) {
+            return [
+                'total' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents")['total'] ?? 0),
+                'active' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE status = 'active'")['total'] ?? 0),
+                'archived' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE status = 'archived'")['total'] ?? 0),
+                'private' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE access_level = 'private'")['total'] ?? 0),
+                'class' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE access_level = 'class'")['total'] ?? 0),
+                'staff' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE access_level = 'staff'")['total'] ?? 0),
+            ];
+        }
+
+        if ($user['role'] === 'instructor') {
+            return [
+                'total' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents d JOIN training_classes c ON c.class_id = d.class_id WHERE c.instructor_id = ?", [(int) $user['user_id']])['total'] ?? 0),
+                'active' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents d JOIN training_classes c ON c.class_id = d.class_id WHERE c.instructor_id = ? AND d.status = 'active'", [(int) $user['user_id']])['total'] ?? 0),
+            ];
+        }
+
+        return ['total' => 0, 'active' => 0];
+    }
+
+    public function recentDocuments(array $user, $limit = 10)
+    {
+        $sql = 'SELECT d.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, c.class_name, u.full_name AS uploader_name FROM trainee_documents d LEFT JOIN trainees t ON t.trainee_id = d.trainee_id LEFT JOIN training_classes c ON c.class_id = d.class_id LEFT JOIN users u ON u.user_id = d.uploaded_by';
+        $values = [];
+
+        if ($user['role'] === 'trainee') {
+            $sql .= ' WHERE t.user_id = ?';
+            $values[] = (int) $user['user_id'];
+        } elseif ($user['role'] === 'instructor') {
+            $sql .= ' WHERE d.access_level = "class" AND c.instructor_id = ?';
+            $values[] = (int) $user['user_id'];
+        }
+
+        return $this->rows($sql . ' ORDER BY d.upload_date DESC LIMIT ' . (int) $limit, $values);
     }
 }

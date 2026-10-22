@@ -147,11 +147,18 @@ class SmartTrack extends Controller
             return;
         }
 
-        $this->render('dashboard', [
+        $data = [
             'stats' => $this->model->dashboardStats($this->user),
             'attendance' => $this->model->recentAttendance($this->user),
             'announcements' => $this->model->announcements(),
-        ]);
+        ];
+
+        // Add chart data for admin/staff/instructor
+        if (in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+            $data['charts'] = $this->model->dashboardChartData($this->user);
+        }
+
+        $this->render('dashboard', $data);
     }
 
     public function module($section)
@@ -184,7 +191,7 @@ class SmartTrack extends Controller
             $editing = null;
         }
 
-        $this->render('module', [
+        $data = [
             'section' => $section,
             'title' => $definition['title'],
             'primary_key' => $definition['key'],
@@ -205,7 +212,15 @@ class SmartTrack extends Controller
             'followups' => $section === 'attendance' && $this->user['role'] !== 'trainee'
                 ? $this->model->absenceFollowUps($this->user)
                 : [],
-        ]);
+        ];
+
+        // Add document-specific data for admin/staff
+        if ($section === 'documents' && in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            $data['doc_stats'] = $this->model->documentStats($this->user);
+            $data['recent_docs'] = $this->model->recentDocuments($this->user, 5);
+        }
+
+        $this->render('module', $data);
     }
 
     public function save($section)
@@ -625,6 +640,56 @@ class SmartTrack extends Controller
         exit;
     }
 
+    public function deleteDocument($id)
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to delete documents.');
+        }
+
+        $document = $this->model->documentById((int) $id);
+        if (!$document) {
+            $this->notice('Document not found.');
+            redirect($this->url('manage/documents'));
+            return;
+        }
+
+        $path = $this->privateDocumentPath($document['file_path']);
+        if ($path && file_exists($path)) {
+            unlink($path);
+        }
+
+        $this->model->execute('DELETE FROM trainee_documents WHERE document_id = ?', [(int) $id]);
+        $this->model->logActivity((int) $this->user['user_id'], 'Deleted document', $document['document_name']);
+        $this->notice('Document deleted.');
+        redirect($this->url('manage/documents'));
+    }
+
+    public function updateDocumentStatus($id)
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to update document status.');
+        }
+
+        $status = $this->input('status');
+        if (!in_array($status, ['active', 'inactive', 'archived'], true)) {
+            $this->notice('Invalid status.');
+            redirect($this->url('manage/documents'));
+            return;
+        }
+
+        $document = $this->model->documentById((int) $id);
+        if (!$document) {
+            $this->notice('Document not found.');
+            redirect($this->url('manage/documents'));
+            return;
+        }
+
+        $this->model->execute('UPDATE trainee_documents SET status = ? WHERE document_id = ?', [$status, (int) $id]);
+        $this->model->logActivity((int) $this->user['user_id'], 'Updated document status', $document['document_name'] . ' -> ' . $status);
+        $this->notice('Document status updated.');
+        redirect($this->url('manage/documents'));
+    }
+
     private function privateDocumentPath($relativePath)
     {
         $privateRoot = realpath(ROOT_DIR . 'runtime/uploads/private');
@@ -654,6 +719,7 @@ class SmartTrack extends Controller
             'schedules' => ['title' => 'Schedules', 'table' => 'training_schedules', 'key' => 'schedule_id', 'columns' => ['class_name', 'schedule_date', 'start_time', 'end_time']],
             'enrollments' => ['title' => 'Class enrollments', 'table' => 'class_enrollments', 'key' => 'enrollment_id', 'columns' => ['class_name', 'trainee_name', 'enrolled_at']],
             'attendance' => ['title' => 'Attendance', 'table' => 'attendance_records', 'key' => 'attendance_id', 'columns' => ['trainee_name', 'class_name', 'attendance_date', 'time_in', 'time_out', 'status', 'remarks']],
+            'documents' => ['title' => 'Documents', 'table' => 'trainee_documents', 'key' => 'document_id', 'columns' => ['trainee_name', 'document_name', 'upload_date', 'status', 'access_level']],
             'announcements' => ['title' => 'Announcements', 'table' => 'announcements', 'key' => 'announcement_id', 'columns' => ['title', 'status', 'author', 'created_at']],
             'inquiries' => ['title' => 'Inquiries', 'table' => 'inquiries', 'key' => 'inquiry_id', 'columns' => ['trainee_name', 'subject', 'message', 'reply', 'status', 'created_at']],
             'activity' => ['title' => 'Activity log', 'table' => 'activity_logs', 'key' => 'log_id', 'columns' => ['user_name', 'action', 'details', 'created_at']],
@@ -675,6 +741,9 @@ class SmartTrack extends Controller
                 ['name' => 'first_name', 'label' => 'First name', 'required' => true],
                 ['name' => 'last_name', 'label' => 'Last name', 'required' => true],
                 ['name' => 'sex', 'label' => 'Sex', 'type' => 'select', 'required' => true, 'values' => ['Female', 'Male', 'Other']],
+                ['name' => 'date_of_birth', 'label' => 'Date of birth', 'type' => 'date'],
+                ['name' => 'address', 'label' => 'Address', 'type' => 'textarea'],
+                ['name' => 'email', 'label' => 'Email address', 'type' => 'email'],
                 ['name' => 'contact_number', 'label' => 'Contact number', 'required' => true],
                 ['name' => 'course', 'label' => 'Course / qualification', 'required' => true],
                 ['name' => 'program_id', 'label' => 'Training program', 'type' => 'options', 'options' => 'programs'],
@@ -682,7 +751,7 @@ class SmartTrack extends Controller
                 ['name' => 'status', 'label' => 'Trainee status', 'type' => 'select', 'required' => true, 'values' => ['active', 'inactive']],
             ],
             'programs' => [
-                ['name' => 'program_code', 'label' => 'TESDA program code', 'required' => true],
+                ['name' => 'program_code', 'label' => 'LSI program code', 'required' => true],
                 ['name' => 'program_name', 'label' => 'Program name', 'required' => true],
                 ['name' => 'description', 'label' => 'Description', 'type' => 'textarea'],
                 ['name' => 'duration_hours', 'label' => 'Duration in hours', 'type' => 'number'],

@@ -63,3 +63,5 @@ $router->post('/attendance/scan', 'SmartTrack::scanAttendance');
 $router->get('/reports/export/{period}', 'SmartTrack::exportReport');
 $router->post('/documents/upload', 'SmartTrack::uploadDocument');
 $router->get('/documents/{id}', 'SmartTrack::downloadDocument');
+$router->post('/documents/{id}/delete', 'SmartTrack::deleteDocument');
+$router->post('/documents/{id}/status', 'SmartTrack::updateDocumentStatus');

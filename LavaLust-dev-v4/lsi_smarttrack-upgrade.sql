@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `user_id` int unsigned NOT NULL AUTO_INCREMENT,
   `full_name` varchar(150) NOT NULL,
   `username` varchar(50) NOT NULL,
+  `email` varchar(100) DEFAULT NULL,
   `password` varchar(255) NOT NULL,
   `role` varchar(30) NOT NULL,
   `status` varchar(20) NOT NULL DEFAULT 'active',
@@ -18,6 +19,9 @@ CREATE TABLE IF NOT EXISTS `trainees` (
   `first_name` varchar(100) NOT NULL,
   `last_name` varchar(100) NOT NULL,
   `sex` varchar(20) NOT NULL,
+  `date_of_birth` date DEFAULT NULL,
+  `address` varchar(255) DEFAULT NULL,
+  `email` varchar(100) DEFAULT NULL,
   `contact_number` varchar(20) NOT NULL,
   `course` varchar(100) NOT NULL,
   `program_id` int unsigned DEFAULT NULL,
@@ -161,3 +165,12 @@ CREATE TABLE IF NOT EXISTS `activity_logs` (
   KEY `idx_smarttrack_activity_user` (`user_id`),
   CONSTRAINT `smarttrack_activity_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Add missing columns to existing tables if they don't exist
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `email` varchar(100) DEFAULT NULL AFTER `username`;
+
+ALTER TABLE `trainees` ADD COLUMN IF NOT EXISTS `date_of_birth` date DEFAULT NULL AFTER `sex`;
+ALTER TABLE `trainees` ADD COLUMN IF NOT EXISTS `address` varchar(255) DEFAULT NULL AFTER `date_of_birth`;
+ALTER TABLE `trainees` ADD COLUMN IF NOT EXISTS `email` varchar(100) DEFAULT NULL AFTER `address`;
+
+ALTER TABLE `training_programs` ADD COLUMN IF NOT EXISTS `program_code` varchar(50) DEFAULT NULL AFTER `program_id`;

@@ -18,6 +18,7 @@ $labels = [
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= $e($title ?? 'LSI SmartTrack') ?> | LSI SmartTrack</title>
     <link rel="stylesheet" href="<?= $e($app_url) ?>assets/css/smarttrack.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <?php if (in_array($page, ['login', 'setup', 'register'], true)): ?>
@@ -98,6 +99,68 @@ $labels = [
                         <article class="stat"><span>ON TIME TODAY</span><strong><?= $e($stats['present_today'] ?? 0) ?></strong><small>Present or late check-ins</small></article>
                         <article class="stat alert-stat"><span>FOLLOW-UP NEEDED</span><strong><?= $e($stats['follow_up'] ?? 0) ?></strong><small>Absences in the last 7 days</small></article>
                     </div>
+
+                    <?php if (isset($charts) && in_array($user['role'], ['administrator', 'staff', 'instructor'], true)): ?>
+                    <div class="charts-grid">
+                        <section class="panel chart-panel">
+                            <div class="panel-heading"><div><p class="eyebrow">ANALYTICS</p><h2>Weekly Attendance Trend</h2></div></div>
+                            <div class="chart-container">
+                                <canvas id="weeklyChart"></canvas>
+                            </div>
+                        </section>
+                        <section class="panel chart-panel">
+                            <div class="panel-heading"><div><p class="eyebrow">ANALYTICS</p><h2>Attendance Status (30 Days)</h2></div></div>
+                            <div class="chart-container">
+                                <canvas id="statusChart"></canvas>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div class="charts-row">
+                        <section class="panel chart-panel">
+                            <div class="panel-heading"><div><p class="eyebrow">ANALYTICS</p><h2>This Week's Summary</h2></div></div>
+                            <div class="summary-cards">
+                                <div class="summary-card">
+                                    <span class="summary-label">Late Arrivals</span>
+                                    <strong class="summary-value"><?= $e($charts['late_this_week'] ?? 0) ?></strong>
+                                </div>
+                                <div class="summary-card">
+                                    <span class="summary-label">Absences</span>
+                                    <strong class="summary-value alert-value"><?= $e($charts['absent_this_week'] ?? 0) ?></strong>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+
+                    <?php if (!empty($charts['programs']) && in_array($user['role'], ['administrator', 'staff'], true)): ?>
+                    <section class="panel">
+                        <div class="panel-heading"><div><p class="eyebrow">ANALYTICS</p><h2>Program-Level Statistics</h2></div></div>
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Program</th>
+                                        <th>Code</th>
+                                        <th>Active Trainees</th>
+                                        <th>Total Attendance</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($charts['programs'] as $program): ?>
+                                    <tr>
+                                        <td><?= $e($program['name']) ?></td>
+                                        <td><?= $e($program['code'] ?? 'N/A') ?></td>
+                                        <td><?= $e($program['trainees']) ?></td>
+                                        <td><?= $e($program['attendance']) ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <?php endif; ?>
+                    <?php endif; ?>
+
                     <section class="panel">
                         <div class="panel-heading"><div><p class="eyebrow">ATTENDANCE FEED</p><h2>Recent check-ins</h2></div><a class="inline-link" href="<?= $e($app_url) ?>manage/attendance">View attendance <span aria-hidden="true">&#8599;</span></a></div>
                         <?php if (empty($attendance)): ?><p class="empty-state">Attendance records will appear here as trainees check in.</p><?php else: ?>
@@ -141,6 +204,16 @@ $labels = [
                         </section>
                     <?php endif; ?>
                     <?php if ($section === 'documents'): ?>
+                        <?php if (isset($doc_stats) && in_array($user['role'], ['administrator', 'staff'], true)): ?>
+                        <div class="doc-stats-grid">
+                            <article class="doc-stat"><span>TOTAL DOCUMENTS</span><strong><?= $e($doc_stats['total'] ?? 0) ?></strong></article>
+                            <article class="doc-stat"><span>ACTIVE</span><strong><?= $e($doc_stats['active'] ?? 0) ?></strong></article>
+                            <article class="doc-stat"><span>ARCHIVED</span><strong><?= $e($doc_stats['archived'] ?? 0) ?></strong></article>
+                            <article class="doc-stat"><span>PRIVATE</span><strong><?= $e($doc_stats['private'] ?? 0) ?></strong></article>
+                            <article class="doc-stat"><span>CLASS SHARED</span><strong><?= $e($doc_stats['class'] ?? 0) ?></strong></article>
+                            <article class="doc-stat"><span>STAFF ONLY</span><strong><?= $e($doc_stats['staff'] ?? 0) ?></strong></article>
+                        </div>
+                        <?php endif; ?>
                         <section class="panel workflow-panel"><div class="panel-heading"><div><p class="eyebrow">PRIVATE FILE STORAGE</p><h2>Upload a requirement</h2></div><small>PDF, JPG, PNG, or DOCX / 10 MB max</small></div>
                             <form class="upload-form" method="post" enctype="multipart/form-data" action="<?= $e($app_url) ?>documents/upload">
                                 <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
@@ -152,6 +225,35 @@ $labels = [
                                 <button class="button primary" type="submit">Upload document</button>
                             </form>
                         </section>
+                        <?php if (isset($recent_docs) && !empty($recent_docs)): ?>
+                        <section class="panel">
+                            <div class="panel-heading"><div><p class="eyebrow">RECENT UPLOADS</p><h2>Latest documents</h2></div></div>
+                            <div class="table-scroll">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Document</th>
+                                            <th>Trainee</th>
+                                            <th>Class</th>
+                                            <th>Uploaded By</th>
+                                            <th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($recent_docs as $doc): ?>
+                                        <tr>
+                                            <td><?= $e($doc['document_name']) ?></td>
+                                            <td><?= $e($doc['trainee_name'] ?? 'Institution') ?></td>
+                                            <td><?= $e($doc['class_name'] ?? 'N/A') ?></td>
+                                            <td><?= $e($doc['uploader_name'] ?? 'Unknown') ?></td>
+                                            <td><?= $e($doc['upload_date']) ?></td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <?php endif; ?>
                     <?php endif; ?>
                     <div class="content-grid <?= empty($fields) ? 'single' : '' ?>">
                         <?php if (!empty($fields) && $can_manage && ($editing || $can_create)): ?>
@@ -174,7 +276,7 @@ $labels = [
                             <?php if (empty($records)): ?><p class="empty-state">No records yet. Use the form to add the first one.</p><?php else: ?>
                                 <div class="table-scroll"><table><thead><tr><?php foreach ($columns as $column): ?><th><?= $e(ucwords(str_replace('_', ' ', $column))) ?></th><?php endforeach; ?><?php if ($can_manage || $section === 'documents'): ?><th>Actions</th><?php endif; ?></tr></thead><tbody>
                                     <?php foreach ($records as $record): ?><tr><?php foreach ($columns as $column): ?><td><?php if ($column === 'qr_code'): ?><div class="qr-cell"><code><?= $e($record[$column] ?? '') ?></code><div class="qr-code" data-qr="<?= $e($record[$column] ?? '') ?>"></div><button type="button" class="icon-button" data-print-qr title="Print QR ID" aria-label="Print QR ID">Print</button></div><?php elseif ($column === 'status'): ?><span class="status <?= strtolower($e($record[$column] ?? '')) ?>"><?= $e($record[$column] ?? '') ?></span><?php else: ?><?= nl2br($e($record[$column] ?? '')) ?><?php endif; ?></td><?php endforeach; ?>
-                                        <?php if ($can_manage || $section === 'documents'): ?><td class="row-actions"><?php if ($can_manage && !empty($record[$primary_key]) && !in_array($section, ['activity', 'documents'], true)): ?><a class="text-button" href="<?= $e($app_url) ?>manage/<?= $e($section) ?>?edit=<?= $e($record[$primary_key]) ?>">Edit</a><?php endif; ?><?php if ($section === 'documents'): ?><a class="text-button" href="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>">Download</a><?php endif; ?><?php if ($can_manage && !empty($record[$primary_key]) && $section !== 'activity'): ?><form method="post" action="<?= $e($app_url) ?>manage/<?= $e($section) ?>/delete/<?= $e($record[$primary_key]) ?>" data-confirm="Delete or deactivate this record?"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Delete</button></form><?php endif; ?></td><?php endif; ?></tr><?php endforeach; ?>
+                                        <?php if ($can_manage || $section === 'documents'): ?><td class="row-actions"><?php if ($can_manage && !empty($record[$primary_key]) && !in_array($section, ['activity', 'documents'], true)): ?><a class="text-button" href="<?= $e($app_url) ?>manage/<?= $e($section) ?>?edit=<?= $e($record[$primary_key]) ?>">Edit</a><?php endif; ?><?php if ($section === 'documents'): ?><a class="text-button" href="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>">Download</a><?php if (in_array($user['role'], ['administrator', 'staff'], true)): ?><form method="post" action="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>/status" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="status" value="<?= $e($record['status'] === 'active' ? 'inactive' : 'active') ?>"><button class="text-button" type="submit"><?= $e($record['status'] === 'active' ? 'Deactivate' : 'Activate') ?></button></form><form method="post" action="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>/delete" data-confirm="Delete this document permanently?" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Delete</button></form><?php endif; ?><?php endif; ?><?php if ($can_manage && !empty($record[$primary_key]) && $section !== 'activity'): ?><form method="post" action="<?= $e($app_url) ?>manage/<?= $e($section) ?>/delete/<?= $e($record[$primary_key]) ?>" data-confirm="Delete or deactivate this record?"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Delete</button></form><?php endif; ?></td><?php endif; ?></tr><?php endforeach; ?>
                                 </tbody></table></div>
                             <?php endif; ?>
                         </section>
@@ -196,6 +298,68 @@ $labels = [
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
     <script src="https://unpkg.com/html5-qrcode" defer></script>
     <script src="<?= $e($app_url) ?>assets/js/smarttrack.js" defer></script>
+    <?php if (isset($charts) && in_array($user['role'], ['administrator', 'staff', 'instructor'], true)): ?>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const weeklyData = <?= json_encode($charts['weekly'] ?? []) ?>;
+        const statusData = <?= json_encode($charts['status'] ?? []) ?>;
+
+        // Weekly Attendance Chart
+        const weeklyCtx = document.getElementById('weeklyChart');
+        if (weeklyCtx) {
+            new Chart(weeklyCtx, {
+                type: 'line',
+                data: {
+                    labels: weeklyData.map(d => d.date),
+                    datasets: [{
+                        label: 'Total Attendance',
+                        data: weeklyData.map(d => d.total),
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        // Status Chart
+        const statusCtx = document.getElementById('statusChart');
+        if (statusCtx) {
+            new Chart(statusCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Present', 'Late', 'Absent'],
+                    datasets: [{
+                        data: [statusData['Present'], statusData['Late'], statusData['Absent']],
+                        backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+    });
+    </script>
+    <?php endif; ?>
 <?php endif; ?>
 </body>
 </html>
