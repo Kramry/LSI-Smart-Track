@@ -117,7 +117,7 @@ class SmartTrack_model
         $queries = [
             'users' => 'SELECT user_id, full_name, username, role, status, created_at FROM users',
             'trainees' => 'SELECT t.trainee_id, t.first_name, t.last_name, t.sex, t.contact_number, t.course, t.status, t.qr_code, t.user_id, t.program_id, p.program_name FROM trainees t LEFT JOIN training_programs p ON p.program_id = t.program_id',
-            'programs' => 'SELECT program_id, program_code, program_name, description, duration_hours, status FROM training_programs',
+            'programs' => 'SELECT program_id, program_name, description, duration_hours, status FROM training_programs',
             'classes' => 'SELECT c.class_id, c.class_name, c.program_id, p.program_name, c.instructor_id, u.full_name AS instructor_name, c.start_date, c.end_date, c.status FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id LEFT JOIN users u ON u.user_id = c.instructor_id',
             'schedules' => 'SELECT s.schedule_id, s.class_id, c.class_name, s.schedule_date, s.start_time, s.end_time FROM training_schedules s LEFT JOIN training_classes c ON c.class_id = s.class_id',
             'enrollments' => 'SELECT e.enrollment_id, e.class_id, c.class_name, e.trainee_id, CONCAT(t.first_name, \' \', t.last_name) AS trainee_name, e.enrolled_at FROM class_enrollments e JOIN training_classes c ON c.class_id = e.class_id JOIN trainees t ON t.trainee_id = e.trainee_id',
