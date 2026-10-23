@@ -22,6 +22,11 @@ class CloudStorage
             'bucket' => getenv('AWS_BUCKET'),
             'prefix' => getenv('AWS_PREFIX') ?: 'smarttrack-documents/',
         ];
+
+        $autoload = ROOT_DIR . 'vendor/autoload.php';
+        if (!class_exists('Aws\\S3\\S3Client') && is_file($autoload)) {
+            require_once $autoload;
+        }
     }
 
     /**
@@ -29,7 +34,12 @@ class CloudStorage
      */
     public function isEnabled(): bool
     {
-        return $this->enabled && !empty($this->config['bucket']);
+        return $this->enabled
+            && $this->provider === 'aws'
+            && $this->hasConfiguredValue($this->config['bucket'], 'your-bucket-name')
+            && $this->hasConfiguredValue($this->config['access_key'], 'your_access_key')
+            && $this->hasConfiguredValue($this->config['secret_key'], 'your_secret_key')
+            && class_exists('Aws\\S3\\S3Client');
     }
 
     /**
@@ -53,81 +63,26 @@ class CloudStorage
      */
     private function uploadToS3($localPath, $remotePath, $contentType = null)
     {
-        $key = $this->config['prefix'] . ltrim($remotePath, '/');
+        $key = $this->objectKey($remotePath);
 
-        // Using AWS SDK for PHP (requires composer: aws/aws-sdk-php)
-        if (class_exists('Aws\S3\S3Client')) {
-            try {
-                $s3 = new Aws\S3\S3Client([
-                    'version' => 'latest',
-                    'region' => $this->config['region'],
-                    'credentials' => [
-                        'key' => $this->config['access_key'],
-                        'secret' => $this->config['secret_key'],
-                    ],
-                ]);
-
-                $result = $s3->putObject([
-                    'Bucket' => $this->config['bucket'],
-                    'Key' => $key,
-                    'SourceFile' => $localPath,
-                    'ContentType' => $contentType ?: mime_content_type($localPath),
-                    'ACL' => 'private',
-                ]);
-
-                return $result['ObjectURL'];
-            } catch (Exception $e) {
-                error_log('S3 Upload Error: ' . $e->getMessage());
-                return false;
-            }
-        }
-
-        // Fallback: Manual cURL upload (basic implementation)
-        return $this->uploadToS3Curl($localPath, $key, $contentType);
-    }
-
-    /**
-     * Upload to S3 using cURL (basic implementation without SDK)
-     */
-    private function uploadToS3Curl($localPath, $key, $contentType = null)
-    {
-        $bucket = $this->config['bucket'];
-        $region = $this->config['region'];
-        $accessKey = $this->config['access_key'];
-        $secretKey = $this->config['secret_key'];
-
-        $url = "https://{$bucket}.s3.{$region}.amazonaws.com/{$key}";
-
-        if (!file_exists($localPath)) {
+        if (!is_file($localPath) || !is_readable($localPath)) {
+            error_log('S3 Upload Error: The local upload file is unavailable.');
             return false;
         }
 
-        $file = fopen($localPath, 'rb');
-        if (!$file) {
+        try {
+            $this->s3Client()->putObject([
+                'Bucket' => $this->config['bucket'],
+                'Key' => $key,
+                'SourceFile' => $localPath,
+                'ContentType' => $contentType ?: mime_content_type($localPath),
+            ]);
+
+            return true;
+        } catch (Aws\Exception\AwsException $e) {
+            error_log('S3 Upload Error: ' . $e->getMessage());
             return false;
         }
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_PUT, 1);
-        curl_setopt($ch, CURLOPT_INFILE, $file);
-        curl_setopt($ch, CURLOPT_INFILESIZE, filesize($localPath));
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-        // AWS v4 signature is complex without SDK
-        // This is a simplified version - for production, use AWS SDK
-        $headers = [
-            'Content-Type: ' . ($contentType ?: mime_content_type($localPath)),
-            'x-amz-content-sha256: UNSIGNED-PAYLOAD',
-        ];
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-
-        $result = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        fclose($file);
-
-        return $httpCode === 200 ? $url : false;
     }
 
     /**
@@ -151,32 +106,19 @@ class CloudStorage
      */
     private function deleteFromS3($remotePath)
     {
-        $key = $this->config['prefix'] . ltrim($remotePath, '/');
+        $key = $this->objectKey($remotePath);
 
-        if (class_exists('Aws\S3\S3Client')) {
-            try {
-                $s3 = new Aws\S3\S3Client([
-                    'version' => 'latest',
-                    'region' => $this->config['region'],
-                    'credentials' => [
-                        'key' => $this->config['access_key'],
-                        'secret' => $this->config['secret_key'],
-                    ],
-                ]);
+        try {
+            $this->s3Client()->deleteObject([
+                'Bucket' => $this->config['bucket'],
+                'Key' => $key,
+            ]);
 
-                $s3->deleteObject([
-                    'Bucket' => $this->config['bucket'],
-                    'Key' => $key,
-                ]);
-
-                return true;
-            } catch (Exception $e) {
-                error_log('S3 Delete Error: ' . $e->getMessage());
-                return false;
-            }
+            return true;
+        } catch (Aws\Exception\AwsException $e) {
+            error_log('S3 Delete Error: ' . $e->getMessage());
+            return false;
         }
-
-        return false;
     }
 
     /**
@@ -188,32 +130,44 @@ class CloudStorage
             return false;
         }
 
-        if ($this->provider === 'aws' && class_exists('Aws\S3\S3Client')) {
-            try {
-                $s3 = new Aws\S3\S3Client([
-                    'version' => 'latest',
-                    'region' => $this->config['region'],
-                    'credentials' => [
-                        'key' => $this->config['access_key'],
-                        'secret' => $this->config['secret_key'],
-                    ],
-                ]);
+        try {
+            $s3 = $this->s3Client();
+            $key = $this->objectKey($remotePath);
 
-                $key = $this->config['prefix'] . ltrim($remotePath, '/');
+            $cmd = $s3->getCommand('GetObject', [
+                'Bucket' => $this->config['bucket'],
+                'Key' => $key,
+            ]);
 
-                $cmd = $s3->getCommand('GetObject', [
-                    'Bucket' => $this->config['bucket'],
-                    'Key' => $key,
-                ]);
-
-                $request = $s3->createPresignedRequest($cmd, "+{$expiresIn} seconds");
-                return (string) $request->getUri();
-            } catch (Exception $e) {
-                error_log('S3 Presigned URL Error: ' . $e->getMessage());
-                return false;
-            }
+            $request = $s3->createPresignedRequest($cmd, '+' . max(1, (int) $expiresIn) . ' seconds');
+            return (string) $request->getUri();
+        } catch (Aws\Exception\AwsException $e) {
+            error_log('S3 Presigned URL Error: ' . $e->getMessage());
+            return false;
         }
+    }
 
-        return false;
+    private function s3Client(): Aws\S3\S3Client
+    {
+        return new Aws\S3\S3Client([
+            'version' => 'latest',
+            'region' => $this->config['region'],
+            'credentials' => [
+                'key' => $this->config['access_key'],
+                'secret' => $this->config['secret_key'],
+            ],
+        ]);
+    }
+
+    private function hasConfiguredValue($value, string $placeholder): bool
+    {
+        return is_string($value)
+            && trim($value) !== ''
+            && strcasecmp(trim($value), $placeholder) !== 0;
+    }
+
+    private function objectKey(string $remotePath): string
+    {
+        return trim($this->config['prefix'], '/') . '/' . ltrim($remotePath, '/');
     }
 }

@@ -18,6 +18,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    document.querySelectorAll('[data-review-decision]').forEach((decision) => {
+        const reason = decision.form?.querySelector('[data-review-reason]');
+        if (!reason) return;
+        const updateReasonRequirement = () => {
+            reason.required = decision.value === 'rejected';
+        };
+        decision.addEventListener('change', updateReasonRequirement);
+        updateReasonRequirement();
+    });
+
     const documentScope = document.querySelector('[data-document-scope]');
     const traineeField = document.querySelector('[data-trainee-field]');
     if (documentScope && traineeField) {
@@ -90,4 +100,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // Clear filters button
+    document.querySelectorAll('[data-clear-filters]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const form = button.closest('.filter-form');
+            if (form) {
+                form.reset();
+                form.submit();
+            }
+        });
+    });
 });

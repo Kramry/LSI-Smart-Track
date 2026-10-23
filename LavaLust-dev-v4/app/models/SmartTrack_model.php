@@ -482,4 +482,547 @@ class SmartTrack_model
 
         return $this->rows($sql . ' ORDER BY d.upload_date DESC LIMIT ' . (int) $limit, $values);
     }
+
+    public function filterDocuments(array $user, array $filters = [])
+    {
+        $sql = 'SELECT d.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, c.class_name, u.full_name AS uploader_name FROM trainee_documents d LEFT JOIN trainees t ON t.trainee_id = d.trainee_id LEFT JOIN training_classes c ON c.class_id = d.class_id LEFT JOIN users u ON u.user_id = d.uploaded_by';
+        $values = [];
+        $whereClauses = [];
+
+        // Role-based filtering
+        if ($user['role'] === 'trainee') {
+            $whereClauses[] = "d.access_level <> 'staff' AND (t.user_id = ? OR (d.access_level = 'class' AND d.class_id IN (SELECT e.class_id FROM class_enrollments e JOIN trainees mine ON mine.trainee_id = e.trainee_id WHERE mine.user_id = ?)))";
+            $values[] = (int) $user['user_id'];
+            $values[] = (int) $user['user_id'];
+        } elseif ($user['role'] === 'instructor') {
+            $whereClauses[] = 'd.access_level = "class"';
+            $whereClauses[] = 'c.instructor_id = ?';
+            $values[] = (int) $user['user_id'];
+        }
+
+        // Search by document name or trainee name
+        if (!empty($filters['search'])) {
+            $whereClauses[] = '(d.document_name LIKE ? OR CONCAT(t.first_name, " ", t.last_name) LIKE ?)';
+            $searchTerm = '%' . $filters['search'] . '%';
+            $values[] = $searchTerm;
+            $values[] = $searchTerm;
+        }
+
+        // Filter by document type (file extension)
+        if (!empty($filters['document_type'])) {
+            $whereClauses[] = 'd.file_path LIKE ?';
+            $values[] = '%' . $filters['document_type'];
+        }
+
+        // Filter by class
+        if (!empty($filters['class_id'])) {
+            $whereClauses[] = 'd.class_id = ?';
+            $values[] = (int) $filters['class_id'];
+        }
+
+        // Filter by access level
+        if (!empty($filters['access_level'])) {
+            $whereClauses[] = 'd.access_level = ?';
+            $values[] = $filters['access_level'];
+        }
+
+        // Filter by status
+        if (!empty($filters['status'])) {
+            $whereClauses[] = 'd.status = ?';
+            $values[] = $filters['status'];
+        }
+
+        // Filter by upload date range
+        if (!empty($filters['date_from'])) {
+            $whereClauses[] = 'd.upload_date >= ?';
+            $values[] = $filters['date_from'];
+        }
+        if (!empty($filters['date_to'])) {
+            $whereClauses[] = 'd.upload_date <= ?';
+            $values[] = $filters['date_to'];
+        }
+
+        // Add WHERE clauses
+        if (!empty($whereClauses)) {
+            $sql .= ' WHERE ' . implode(' AND ', $whereClauses);
+        }
+
+        // Sorting
+        $sort = $filters['sort'] ?? 'newest';
+        $sql .= ' ORDER BY d.upload_date ' . ($sort === 'oldest' ? 'ASC' : 'DESC');
+
+        return $this->rows($sql, $values);
+    }
+
+    public function certificateStats()
+    {
+        $eligible = $this->row('SELECT COUNT(*) as count FROM certificate_eligibility WHERE is_eligible = 1');
+        $pending = $this->row("SELECT COUNT(*) AS count FROM certificate_eligibility WHERE is_eligible = 1 AND approval_status = 'pending'");
+        $issued = $this->row('SELECT COUNT(*) as count FROM certificates WHERE status = "issued"');
+        $revoked = $this->row('SELECT COUNT(*) as count FROM certificates WHERE status = "revoked"');
+
+        return [
+            'eligible' => (int) ($eligible['count'] ?? 0),
+            'pending' => (int) ($pending['count'] ?? 0),
+            'issued' => (int) ($issued['count'] ?? 0),
+            'revoked' => (int) ($revoked['count'] ?? 0),
+        ];
+    }
+
+    public function getEligibilityRecords(array $filters = [])
+    {
+        $sql = 'SELECT e.*, cert.certificate_id, cert.status AS certificate_status, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, t.qr_code AS trainee_number, p.program_name, c.class_name, u.full_name AS reviewer_name, approver.full_name AS approver_name FROM certificate_eligibility e JOIN trainees t ON t.trainee_id = e.trainee_id JOIN training_classes c ON c.class_id = e.class_id JOIN training_programs p ON p.program_id = e.program_id LEFT JOIN certificates cert ON cert.trainee_id = e.trainee_id AND cert.class_id = e.class_id LEFT JOIN users u ON u.user_id = e.reviewed_by LEFT JOIN users approver ON approver.user_id = e.approved_by';
+        $values = [];
+        $whereClauses = [];
+
+        if (!empty($filters['search'])) {
+            $whereClauses[] = '(t.first_name LIKE ? OR t.last_name LIKE ? OR t.qr_code LIKE ? OR p.program_name LIKE ?)';
+            $searchTerm = '%' . $filters['search'] . '%';
+            $values[] = $searchTerm;
+            $values[] = $searchTerm;
+            $values[] = $searchTerm;
+            $values[] = $searchTerm;
+        }
+
+        if (isset($filters['eligibility']) && $filters['eligibility'] !== '') {
+            $whereClauses[] = 'e.is_eligible = ?';
+            $values[] = (int) $filters['eligibility'];
+        }
+
+        if (!empty($filters['program_id'])) {
+            $whereClauses[] = 'e.program_id = ?';
+            $values[] = (int) $filters['program_id'];
+        }
+
+        if (!empty($whereClauses)) {
+            $sql .= ' WHERE ' . implode(' AND ', $whereClauses);
+        }
+
+        $sql .= ' ORDER BY e.updated_at DESC';
+
+        return $this->rows($sql, $values);
+    }
+
+    public function deleteEligibilityEnrollment($eligibilityId, $actorId)
+    {
+        $eligibility = $this->row('SELECT trainee_id, class_id FROM certificate_eligibility WHERE eligibility_id = ?', [(int) $eligibilityId]);
+        if (!$eligibility) {
+            return ['success' => false, 'message' => 'Eligibility record not found.'];
+        }
+        if ($this->row('SELECT certificate_id FROM certificates WHERE trainee_id = ? AND class_id = ?', [
+            (int) $eligibility['trainee_id'],
+            (int) $eligibility['class_id'],
+        ])) {
+            return ['success' => false, 'message' => 'Enrollment cannot be removed because a certificate has already been issued or revoked.'];
+        }
+
+        $enrollment = $this->row('SELECT enrollment_id FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [
+            (int) $eligibility['trainee_id'],
+            (int) $eligibility['class_id'],
+        ]);
+        $message = $enrollment
+            ? 'Enrollment removed. Attendance, documents, and assessment history were retained.'
+            : 'Stale eligibility record removed; no enrollment was found.';
+        $this->db->transaction();
+        try {
+            $this->logEligibilityAction(
+                (int) $actorId,
+                (int) $eligibilityId,
+                $enrollment ? 'delete_enrollment' : 'delete_stale_eligibility',
+                $message
+            );
+            if ($enrollment) {
+                $this->execute('DELETE FROM class_enrollments WHERE enrollment_id = ?', [(int) $enrollment['enrollment_id']]);
+            }
+            $this->execute('DELETE FROM certificate_eligibility WHERE eligibility_id = ?', [(int) $eligibilityId]);
+            $this->db->commit();
+        } catch (Throwable $error) {
+            $this->db->roll_back();
+            throw $error;
+        }
+
+        return ['success' => true, 'message' => $message];
+    }
+
+    public function calculateEligibility($traineeId, $classId)
+    {
+        $minAttendance = (float) $this->getConfig('min_attendance_percentage', 75);
+        $requireDocuments = (bool) $this->getConfig('require_documents', 1);
+        $requireAssessments = (bool) $this->getConfig('require_assessments', 0);
+        $requiredAssessments = max(1, (int) $this->getConfig('required_assessment_count', 1));
+
+        $class = $this->row('SELECT c.*, p.program_id FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id WHERE c.class_id = ?', [(int) $classId]);
+        if (!$class) {
+            return ['eligible' => false, 'reasons' => ['Class not found']];
+        }
+
+        $reasons = [];
+        if (empty($class['end_date']) || $class['end_date'] > date('Y-m-d')) {
+            $reasons[] = 'The class has not reached its completion date';
+        }
+
+        $enrollment = $this->row('SELECT * FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [(int) $traineeId, (int) $classId]);
+        if (!$enrollment) {
+            $reasons[] = 'Not enrolled in this class';
+        }
+
+        $attendance = $this->row("SELECT COUNT(*) AS total, SUM(CASE WHEN status IN ('Present', 'Late') THEN 1 ELSE 0 END) AS attended FROM attendance_records WHERE trainee_id = ? AND class_id = ?", [(int) $traineeId, (int) $classId]);
+        $attendancePercentage = $attendance && (int) $attendance['total'] > 0
+            ? ((int) $attendance['attended'] / (int) $attendance['total']) * 100
+            : 0;
+        if ($attendancePercentage < $minAttendance) {
+            $reasons[] = sprintf('Attendance (%.1f%%) below minimum (%.0f%%)', $attendancePercentage, $minAttendance);
+        }
+
+        $requirements = $this->rows('SELECT required_document_name FROM certificate_document_requirements WHERE class_id = ? ORDER BY required_document_name', [(int) $classId]);
+        $submittedDocuments = $this->rows('SELECT document_name FROM trainee_documents WHERE trainee_id = ? AND class_id = ? AND status = "active"', [(int) $traineeId, (int) $classId]);
+        $submittedNames = [];
+        foreach ($submittedDocuments as $document) {
+            $submittedNames[mb_strtolower(trim($document['document_name']))] = true;
+        }
+        $approvedDocuments = 0;
+        $missingDocuments = [];
+        foreach ($requirements as $requirement) {
+            if (isset($submittedNames[mb_strtolower(trim($requirement['required_document_name']))])) {
+                $approvedDocuments++;
+            } else {
+                $missingDocuments[] = $requirement['required_document_name'];
+            }
+        }
+
+        if ($requireDocuments) {
+            if (!$requirements) {
+                $reasons[] = 'No required-document checklist is configured for this class';
+            } elseif ($missingDocuments) {
+                $reasons[] = 'Missing approved documents: ' . implode(', ', $missingDocuments);
+            }
+        }
+
+        $assessmentCounts = $this->row("SELECT COUNT(*) AS total, SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END) AS passed FROM training_assessments WHERE trainee_id = ? AND class_id = ?", [(int) $traineeId, (int) $classId]);
+        $assessmentsPassed = (int) ($assessmentCounts['passed'] ?? 0);
+        if ($requireAssessments) {
+            if ($assessmentsPassed < $requiredAssessments) {
+                $reasons[] = sprintf('Passed assessments (%d/%d) do not meet the requirement', $assessmentsPassed, $requiredAssessments);
+            }
+        }
+
+        $existing = $this->row('SELECT certificate_id FROM certificates WHERE trainee_id = ? AND class_id = ?', [(int) $traineeId, (int) $classId]);
+        if ($existing) {
+            $reasons[] = 'A certificate record already exists for this class';
+        }
+
+        $isEligible = empty($reasons);
+        $reasonText = implode('; ', $reasons);
+        $check = $this->row('SELECT eligibility_id, program_id, attendance_percentage, documents_submitted, documents_required, documents_approved, assessments_completed, assessments_required, is_eligible, ineligibility_reasons FROM certificate_eligibility WHERE trainee_id = ? AND class_id = ?', [(int) $traineeId, (int) $classId]);
+        $documentsSubmitted = count($submittedDocuments);
+        $documentsRequired = count($requirements);
+        $eligibilityChanged = !$check
+            || (int) $check['program_id'] !== (int) $class['program_id']
+            || (float) $check['attendance_percentage'] !== round($attendancePercentage, 2)
+            || (int) $check['documents_submitted'] !== $documentsSubmitted
+            || (int) $check['documents_required'] !== $documentsRequired
+            || (int) $check['documents_approved'] !== $approvedDocuments
+            || (int) $check['assessments_completed'] !== $assessmentsPassed
+            || (int) $check['assessments_required'] !== ($requireAssessments ? $requiredAssessments : 0)
+            || (int) $check['is_eligible'] !== (int) $isEligible
+            || (string) ($check['ineligibility_reasons'] ?? '') !== $reasonText;
+        $resetApproval = $eligibilityChanged && !$existing;
+        if ($check) {
+            $this->execute("UPDATE certificate_eligibility SET program_id = ?, attendance_percentage = ?, documents_submitted = ?, documents_required = ?, documents_approved = ?, assessments_completed = ?, assessments_required = ?, is_eligible = ?, ineligibility_reasons = ?, approval_status = CASE WHEN ? = 1 THEN 'pending' ELSE approval_status END, approval_reason = CASE WHEN ? = 1 THEN NULL ELSE approval_reason END, approved_by = CASE WHEN ? = 1 THEN NULL ELSE approved_by END, approved_at = CASE WHEN ? = 1 THEN NULL ELSE approved_at END, updated_at = CURRENT_TIMESTAMP WHERE eligibility_id = ?", [
+                (int) $class['program_id'],
+                round($attendancePercentage, 2),
+                $documentsSubmitted,
+                $documentsRequired,
+                $approvedDocuments,
+                $assessmentsPassed,
+                $requireAssessments ? $requiredAssessments : 0,
+                $isEligible ? 1 : 0,
+                $reasonText,
+                $resetApproval ? 1 : 0,
+                $resetApproval ? 1 : 0,
+                $resetApproval ? 1 : 0,
+                $resetApproval ? 1 : 0,
+                (int) $check['eligibility_id'],
+            ]);
+        } else {
+            $this->execute('INSERT INTO certificate_eligibility (trainee_id, class_id, program_id, attendance_percentage, documents_submitted, documents_required, documents_approved, assessments_completed, assessments_required, is_eligible, ineligibility_reasons) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+                (int) $traineeId,
+                (int) $classId,
+                (int) $class['program_id'],
+                round($attendancePercentage, 2),
+                $documentsSubmitted,
+                $documentsRequired,
+                $approvedDocuments,
+                $assessmentsPassed,
+                $requireAssessments ? $requiredAssessments : 0,
+                $isEligible ? 1 : 0,
+                $reasonText
+            ]);
+        }
+
+        return [
+            'eligible' => $isEligible,
+            'reasons' => $reasons,
+            'attendance_percentage' => $attendancePercentage,
+            'documents_submitted' => $documentsSubmitted,
+            'documents_required' => $documentsRequired,
+            'documents_approved' => $approvedDocuments,
+            'assessments_passed' => $assessmentsPassed,
+            'assessments_required' => $requireAssessments ? $requiredAssessments : 0,
+        ];
+    }
+
+    public function refreshEligibilityRecords()
+    {
+        $enrollments = $this->rows('SELECT trainee_id, class_id FROM class_enrollments');
+        foreach ($enrollments as $enrollment) {
+            $this->calculateEligibility((int) $enrollment['trainee_id'], (int) $enrollment['class_id']);
+        }
+    }
+
+    public function recalculateClassEligibility($classId)
+    {
+        $enrollments = $this->rows('SELECT trainee_id FROM class_enrollments WHERE class_id = ?', [(int) $classId]);
+        foreach ($enrollments as $enrollment) {
+            $this->calculateEligibility((int) $enrollment['trainee_id'], (int) $classId);
+        }
+    }
+
+    public function assessmentRecords()
+    {
+        return $this->rows('SELECT a.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, t.qr_code AS trainee_number, c.class_name, p.program_name, u.full_name AS assessor_name FROM training_assessments a JOIN trainees t ON t.trainee_id = a.trainee_id JOIN training_classes c ON c.class_id = a.class_id JOIN training_programs p ON p.program_id = c.program_id JOIN users u ON u.user_id = a.assessed_by ORDER BY a.assessment_date DESC, a.assessment_id DESC');
+    }
+
+    public function assessmentById($assessmentId)
+    {
+        return $this->row('SELECT * FROM training_assessments WHERE assessment_id = ?', [(int) $assessmentId]);
+    }
+
+    public function saveAssessment(array $assessment)
+    {
+        if (!empty($assessment['assessment_id'])) {
+            $this->execute('UPDATE training_assessments SET trainee_id = ?, class_id = ?, assessment_name = ?, outcome = ?, assessed_by = ?, assessment_date = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE assessment_id = ?', [
+                (int) $assessment['trainee_id'],
+                (int) $assessment['class_id'],
+                $assessment['assessment_name'],
+                $assessment['outcome'],
+                (int) $assessment['assessed_by'],
+                $assessment['assessment_date'],
+                $assessment['notes'],
+                (int) $assessment['assessment_id'],
+            ]);
+            return (int) $assessment['assessment_id'];
+        }
+
+        $existing = $this->row('SELECT assessment_id FROM training_assessments WHERE trainee_id = ? AND class_id = ? AND assessment_name = ?', [
+            (int) $assessment['trainee_id'],
+            (int) $assessment['class_id'],
+            $assessment['assessment_name'],
+        ]);
+
+        if ($existing) {
+            $this->execute('UPDATE training_assessments SET outcome = ?, assessed_by = ?, assessment_date = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE assessment_id = ?', [
+                $assessment['outcome'],
+                (int) $assessment['assessed_by'],
+                $assessment['assessment_date'],
+                $assessment['notes'],
+                (int) $existing['assessment_id'],
+            ]);
+            return (int) $existing['assessment_id'];
+        }
+
+        $this->execute('INSERT INTO training_assessments (trainee_id, class_id, assessment_name, outcome, assessed_by, assessment_date, notes) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+            (int) $assessment['trainee_id'],
+            (int) $assessment['class_id'],
+            $assessment['assessment_name'],
+            $assessment['outcome'],
+            (int) $assessment['assessed_by'],
+            $assessment['assessment_date'],
+            $assessment['notes'],
+        ]);
+        return (int) $this->row('SELECT assessment_id FROM training_assessments WHERE trainee_id = ? AND class_id = ? AND assessment_name = ?', [
+            (int) $assessment['trainee_id'],
+            (int) $assessment['class_id'],
+            $assessment['assessment_name'],
+        ])['assessment_id'];
+    }
+
+    public function deleteAssessment($assessmentId)
+    {
+        return $this->execute('DELETE FROM training_assessments WHERE assessment_id = ?', [(int) $assessmentId]) > 0;
+    }
+
+    public function documentRequirements()
+    {
+        return $this->rows('SELECT r.*, c.class_name FROM certificate_document_requirements r JOIN training_classes c ON c.class_id = r.class_id ORDER BY c.class_name, r.required_document_name');
+    }
+
+    public function addDocumentRequirement($classId, $documentName, $createdBy)
+    {
+        $this->execute('INSERT INTO certificate_document_requirements (class_id, required_document_name, created_by) VALUES (?, ?, ?)', [
+            (int) $classId,
+            $documentName,
+            (int) $createdBy,
+        ]);
+        $requirement = $this->row('SELECT requirement_id FROM certificate_document_requirements WHERE class_id = ? AND required_document_name = ?', [(int) $classId, $documentName]);
+        return (int) ($requirement['requirement_id'] ?? 0);
+    }
+
+    public function deleteDocumentRequirement($requirementId)
+    {
+        return $this->execute('DELETE FROM certificate_document_requirements WHERE requirement_id = ?', [(int) $requirementId]);
+    }
+
+    public function updateEligibilityApproval($eligibilityId, $decision, $actorId, $reason = null)
+    {
+        $eligibility = $this->row('SELECT is_eligible FROM certificate_eligibility WHERE eligibility_id = ?', [(int) $eligibilityId]);
+        if (!$eligibility || ($decision === 'approved' && !(int) $eligibility['is_eligible'])) {
+            return false;
+        }
+        return $this->execute('UPDATE certificate_eligibility SET approval_status = ?, approval_reason = ?, approved_by = ?, approved_at = CURRENT_TIMESTAMP, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE eligibility_id = ?', [
+            $decision,
+            $reason,
+            (int) $actorId,
+            (int) $actorId,
+            (int) $eligibilityId,
+        ]) > 0;
+    }
+
+    public function getConfig($key, $default = null)
+    {
+        $config = $this->row('SELECT config_value FROM certificate_config WHERE config_key = ?', [$key]);
+        return $config ? $config['config_value'] : $default;
+    }
+
+    public function updateConfig($key, $value, $description = null)
+    {
+        $check = $this->row('SELECT config_id FROM certificate_config WHERE config_key = ?', [$key]);
+        if ($check) {
+            $this->execute('UPDATE certificate_config SET config_value = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE config_key = ?', [$value, $description, $key]);
+        } else {
+            $this->execute('INSERT INTO certificate_config (config_key, config_value, description) VALUES (?, ?, ?)', [$key, $value, $description]);
+        }
+    }
+
+    public function getCertificates(array $filters = [])
+    {
+        $sql = "SELECT e.*, c.certificate_id, c.certificate_number, c.issue_date, c.revocation_reason, c.revoked_at, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, t.qr_code AS trainee_number, p.program_name, cl.class_name, cl.end_date AS completion_date, CASE WHEN c.certificate_id IS NOT NULL THEN c.status WHEN e.is_eligible = 0 THEN 'ineligible' ELSE e.approval_status END AS status FROM certificate_eligibility e JOIN trainees t ON t.trainee_id = e.trainee_id JOIN training_programs p ON p.program_id = e.program_id JOIN training_classes cl ON cl.class_id = e.class_id LEFT JOIN certificates c ON c.trainee_id = e.trainee_id AND c.class_id = e.class_id";
+        $values = [];
+        $whereClauses = [];
+
+        if (!empty($filters['search'])) {
+            $whereClauses[] = "(CONCAT(t.first_name, ' ', t.last_name) LIKE ? OR t.qr_code LIKE ? OR c.certificate_number LIKE ? OR p.program_name LIKE ? OR cl.class_name LIKE ?)";
+            $searchTerm = '%' . $filters['search'] . '%';
+            for ($i = 0; $i < 5; $i++) {
+                $values[] = $searchTerm;
+            }
+        }
+
+        $status = $filters['status'] ?? '';
+        if ($status === 'issued' || $status === 'revoked') {
+            $whereClauses[] = 'c.status = ?';
+            $values[] = $status;
+        } elseif ($status === 'pending') {
+            $whereClauses[] = "c.certificate_id IS NULL AND e.is_eligible = 1 AND e.approval_status = 'pending'";
+        } elseif ($status === 'approved') {
+            $whereClauses[] = "c.certificate_id IS NULL AND e.is_eligible = 1 AND e.approval_status = 'approved'";
+        } elseif ($status === 'rejected') {
+            $whereClauses[] = "c.certificate_id IS NULL AND e.is_eligible = 1 AND e.approval_status = 'rejected'";
+        } elseif ($status === 'ineligible') {
+            $whereClauses[] = 'c.certificate_id IS NULL AND e.is_eligible = 0';
+        }
+
+        if (!empty($filters['program_id'])) {
+            $whereClauses[] = 'e.program_id = ?';
+            $values[] = (int) $filters['program_id'];
+        }
+
+        if (!empty($whereClauses)) {
+            $sql .= ' WHERE ' . implode(' AND ', $whereClauses);
+        }
+
+        $sql .= ' ORDER BY e.updated_at DESC, c.issue_date DESC';
+
+        $records = $this->rows($sql, $values);
+        foreach ($records as &$record) {
+            $record['completion_status'] = !empty($record['completion_date']) && $record['completion_date'] <= date('Y-m-d')
+                ? 'Completed'
+                : 'In progress';
+        }
+        unset($record);
+        return $records;
+    }
+
+    public function generateCertificateNumber()
+    {
+        $prefix = 'CERT';
+        $year = date('Y');
+        $random = strtoupper(bin2hex(random_bytes(4)));
+        return sprintf('%s-%s-%s', $prefix, $year, $random);
+    }
+
+    public function issueCertificate($traineeId, $classId, $issuedBy)
+    {
+        $currentEligibility = $this->calculateEligibility((int) $traineeId, (int) $classId);
+        $eligibility = $this->row('SELECT * FROM certificate_eligibility WHERE trainee_id = ? AND class_id = ?', [(int) $traineeId, (int) $classId]);
+        if (!$currentEligibility['eligible'] || !$eligibility || $eligibility['approval_status'] !== 'approved') {
+            return false;
+        }
+
+        $class = $this->row('SELECT c.*, p.program_id FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id WHERE c.class_id = ?', [(int) $classId]);
+        if (!$class) {
+            return false;
+        }
+
+        $certificateNumber = $this->generateCertificateNumber();
+        $qrCode = bin2hex(random_bytes(32));
+
+        $this->execute('INSERT INTO certificates (trainee_id, class_id, program_id, certificate_number, completion_date, issue_date, status, qr_code) VALUES (?, ?, ?, ?, CURDATE(), CURDATE(), "issued", ?)', [
+            (int) $traineeId,
+            (int) $classId,
+            (int) $class['program_id'],
+            $certificateNumber,
+            $qrCode
+        ]);
+
+        return $this->row('SELECT * FROM certificates WHERE certificate_number = ?', [$certificateNumber]);
+    }
+
+    public function revokeCertificate($certificateId, $revokedBy, $reason)
+    {
+        $this->execute('UPDATE certificates SET status = "revoked", revoked_at = CURDATE(), revoked_by = ?, revocation_reason = ? WHERE certificate_id = ?', [
+            (int) $revokedBy,
+            $reason,
+            (int) $certificateId
+        ]);
+    }
+
+    public function logCertificateAction($actorId, $certificateId, $action, $details = null)
+    {
+        $ipAddress = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $this->execute('INSERT INTO certificate_audit_logs (actor_id, certificate_id, action, details, ip_address) VALUES (?, ?, ?, ?, ?)', [
+            (int) $actorId,
+            (int) $certificateId,
+            $action,
+            $details,
+            $ipAddress
+        ]);
+    }
+
+    public function logEligibilityAction($actorId, $eligibilityId, $action, $details = null)
+    {
+        $ipAddress = $_SERVER['REMOTE_ADDR'] ?? null;
+        $this->execute('INSERT INTO certificate_audit_logs (actor_id, eligibility_id, action, details, ip_address) VALUES (?, ?, ?, ?, ?)', [
+            (int) $actorId,
+            (int) $eligibilityId,
+            $action,
+            $details,
+            $ipAddress,
+        ]);
+    }
+
+    public function certificateAuditRecords($certificateId)
+    {
+        return $this->rows('SELECT a.*, u.full_name AS actor_name FROM certificate_audit_logs a LEFT JOIN users u ON u.user_id = a.actor_id WHERE a.certificate_id = ? ORDER BY a.created_at DESC, a.audit_id DESC', [(int) $certificateId]);
+    }
 }

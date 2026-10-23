@@ -19,14 +19,16 @@ AWS_BUCKET=your-bucket-name
 AWS_PREFIX=smarttrack-documents/
 ```
 
-### 2. Install AWS SDK (Recommended)
+Replace the example bucket and credential values with real AWS values. Cloud storage will remain unavailable while these placeholders are present. When enabled but misconfigured, uploads are stored locally and the user is notified.
 
-For full functionality, install the AWS SDK for PHP:
+### 2. Install project dependencies
 
 ```bash
 cd LavaLust-dev-v4
-composer require aws/aws-sdk-php
+composer install
 ```
+
+The AWS SDK is required for authenticated S3 operations. The application loads Composer's autoloader when the cloud storage library is initialized.
 
 ### 3. AWS S3 Setup
 
@@ -94,7 +96,7 @@ If cloud storage is disabled or upload fails:
 
 ## Testing
 
-To test cloud storage without credentials, the system will use a basic cURL implementation (limited functionality). For production use, install the AWS SDK for full features.
+Upload a document and confirm the application reports that it was stored in cloud storage. Then download and delete it to verify S3 access. If configuration is incomplete or S3 rejects the request, the application reports local fallback or a failed cloud deletion.
 
 ## Migration
 
@@ -106,7 +108,6 @@ Existing local documents can be migrated to cloud storage by:
 ## Security Notes
 
 - Never commit `.env` file with real credentials
-- Use IAM roles instead of access keys when possible
 - Enable bucket encryption (SSE-S3 or SSE-KMS)
 - Enable bucket versioning for document recovery
 - Set up bucket policies for additional security

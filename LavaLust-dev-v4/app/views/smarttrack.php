@@ -8,6 +8,8 @@ $labels = [
     'dashboard' => 'Dashboard', 'users' => 'User accounts', 'trainees' => 'Trainees',
     'programs' => 'Programs', 'classes' => 'Classes', 'schedules' => 'Schedules',
     'enrollments' => 'Enrollments', 'attendance' => 'Attendance', 'documents' => 'Documents',
+    'certificates' => 'Certificates', 'eligibility' => 'Certificate Eligibility', 'assessments' => 'Training Assessments', 'certificate_config' => 'Certificate Settings',
+    'my_certificates' => 'My Certificates',
     'announcements' => 'Announcements', 'inquiries' => 'Inquiries', 'activity' => 'Activity log',
 ];
 ?>
@@ -21,7 +23,43 @@ $labels = [
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-<?php if (in_array($page, ['login', 'setup', 'register'], true)): ?>
+<?php if ($page === 'verify_certificate'): ?>
+    <main class="auth-shell">
+        <section class="auth-intro">
+            <a class="wordmark" href="<?= $e($app_url) ?>">LSI <span>SMARTTRACK</span></a>
+            <div class="intro-copy">
+                <h1>Certificate<br><em>Verification</em></h1>
+                <p>Verify the authenticity of LSI training certificates using the certificate number or QR code.</p>
+            </div>
+        </section>
+        <section class="auth-panel">
+            <div class="auth-form-wrap">
+                <p class="eyebrow">CERTIFICATE VERIFICATION</p>
+                <h2>Verify Certificate</h2>
+                <p class="muted">Enter the certificate number or QR code to verify its authenticity.</p>
+                <form method="get" action="<?= $e($app_url) ?>verify-certificate" class="form-stack">
+                    <label>Certificate Number<input name="certificate_number" placeholder="CERT-XXXX-XXXXXXXX" maxlength="50"></label>
+                    <label>OR QR Code<input name="qr" placeholder="QR token value" maxlength="64"></label>
+                    <button class="button primary" type="submit">Verify Certificate <span aria-hidden="true">&#8599;</span></button>
+                </form>
+                <?php if (isset($certificate) && $certificate): ?>
+                    <div class="certificate-result">
+                        <h3>Certificate Details</h3>
+                        <p><strong>Status:</strong> <span class="status <?= $certificate['status'] === 'issued' ? 'present' : 'absent' ?>"><?= $e(ucfirst($certificate['status'])) ?></span></p>
+                        <p><strong>Certificate Number:</strong> <code><?= $e($certificate['certificate_number']) ?></code></p>
+                        <p><strong>Trainee:</strong> <?= $e($certificate['trainee_name']) ?></p>
+                        <p><strong>Program:</strong> <?= $e($certificate['program_name']) ?></p>
+                        <p><strong>Class:</strong> <?= $e($certificate['class_name']) ?></p>
+                        <p><strong>Completion Date:</strong> <?= $e($certificate['completion_date']) ?></p>
+                        <p><strong>Issue Date:</strong> <?= $e($certificate['issue_date']) ?></p>
+                    </div>
+                <?php elseif (isset($certificate) && !$certificate): ?>
+                    <div class="notice error">Certificate not found or invalid.</div>
+                <?php endif; ?>
+            </div>
+        </section>
+    </main>
+<?php elseif (in_array($page, ['login', 'setup', 'register'], true)): ?>
     <main class="auth-shell">
         <section class="auth-intro">
             <a class="wordmark" href="<?= $e($app_url) ?>">LSI <span>SMARTTRACK</span></a>
@@ -65,10 +103,10 @@ $labels = [
                     <a class="setup-link" href="<?= $e($app_url) ?>register">Need an account? Register</a>
                     <?php if ($setup_required): ?><a class="setup-link" href="<?= $e($app_url) ?>setup">First run? Create the initial administrator</a><?php endif; ?>
                 <?php endif; ?>
-                
             </div>
         </section>
     </main>
+
 <?php else: ?>
     <div class="portal-shell">
         <header class="topbar">
@@ -83,7 +121,7 @@ $labels = [
         <div class="portal-body">
             <nav class="section-nav" aria-label="Main navigation">
                 <?php foreach ($navigation as $item): ?>
-                    <?php $href = $item === 'dashboard' ? 'dashboard' : 'manage/' . $item; ?>
+                    <?php $href = $item === 'dashboard' ? 'dashboard' : ($item === 'my_certificates' ? 'my-certificates' : 'manage/' . $item); ?>
                     <a class="<?= (($section ?? '') === $item || ($page === 'dashboard' && $item === 'dashboard')) ? 'active' : '' ?>" href="<?= $e($app_url . $href) ?>"><span class="nav-mark"></span><?= $e($labels[$item] ?? ucfirst($item)) ?></a>
                 <?php endforeach; ?>
             </nav>
@@ -92,7 +130,7 @@ $labels = [
                     <p class="eyebrow">CONTROL ROOM / <?= $e(date('l, F j, Y')) ?></p>
                     <h1>Good day, <?= $e(strtok($user['full_name'] ?? 'there', ' ')) ?>.</h1>
                     <p class="muted">A live view of training activity across your programs.</p>
-                    <?php if (!empty($notice)): ?><div class="notice success"><?= $e($notice) ?></div><?php endif; ?>
+            <?php if (!empty($notice)): ?><div class="notice success"><?= $e($notice) ?></div><?php endif; ?>
                     <div class="stat-grid">
                         <article class="stat"><span>ACTIVE TRAINEES</span><strong><?= $e($stats['trainees'] ?? 0) ?></strong><small>Enrolled and active</small></article>
                         <article class="stat"><span>ACTIVE PROGRAMS</span><strong><?= $e($stats['programs'] ?? 0) ?></strong><small>Training programs</small></article>
@@ -100,7 +138,7 @@ $labels = [
                         <article class="stat alert-stat"><span>FOLLOW-UP NEEDED</span><strong><?= $e($stats['follow_up'] ?? 0) ?></strong><small>Absences in the last 7 days</small></article>
                     </div>
 
-                    <?php if (isset($charts) && in_array($user['role'], ['administrator', 'staff', 'instructor'], true)): ?>
+            <?php if (isset($charts) && in_array($user['role'], ['administrator', 'staff', 'instructor'], true)): ?>
                     <div class="charts-grid">
                         <section class="panel chart-panel">
                             <div class="panel-heading"><div><p class="eyebrow">ANALYTICS</p><h2>Weekly Attendance Trend</h2></div></div>
@@ -132,7 +170,7 @@ $labels = [
                         </section>
                     </div>
 
-                    <?php if (!empty($charts['programs']) && in_array($user['role'], ['administrator', 'staff'], true)): ?>
+                <?php if (!empty($charts['programs']) && in_array($user['role'], ['administrator', 'staff'], true)): ?>
                     <section class="panel">
                         <div class="panel-heading"><div><p class="eyebrow">ANALYTICS</p><h2>Program-Level Statistics</h2></div></div>
                         <div class="table-scroll">
@@ -203,6 +241,7 @@ $labels = [
                             <?php if (empty($followups)): ?><p class="empty-state">No recent absences need follow-up.</p><?php else: ?><div class="table-scroll"><table><thead><tr><th>Trainee</th><th>Class</th><th>Date</th><th>Remarks</th></tr></thead><tbody><?php foreach ($followups as $absence): ?><tr><td><?= $e($absence['trainee_name']) ?></td><td><?= $e($absence['class_name'] ?? 'Unassigned') ?></td><td><?= $e($absence['attendance_date']) ?></td><td><?= $e($absence['remarks']) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
                         </section>
                     <?php endif; ?>
+
                     <?php if ($section === 'documents'): ?>
                         <?php if (isset($doc_stats) && in_array($user['role'], ['administrator', 'staff'], true)): ?>
                         <div class="doc-stats-grid">
@@ -214,6 +253,20 @@ $labels = [
                             <article class="doc-stat"><span>STAFF ONLY</span><strong><?= $e($doc_stats['staff'] ?? 0) ?></strong></article>
                         </div>
                         <?php endif; ?>
+                        <section class="panel filter-panel">
+                            <div class="panel-heading"><div><p class="eyebrow">FILTERS</p><h2>Search & Filter</h2></div><a class="button secondary" href="<?= $e($app_url) ?>manage/documents">Clear filters</a></div>
+                            <form class="filter-form" method="get" action="<?= $e($app_url) ?>manage/documents">
+                                <label>Search documents or trainees<input type="search" name="search" value="<?= $e($_GET['search'] ?? '') ?>" placeholder="Search by name..."></label>
+                                <label>Document type<select name="document_type"><option value="">All types</option><option value=".pdf" <?= ($_GET['document_type'] ?? '') === '.pdf' ? 'selected' : '' ?>>PDF</option><option value=".docx" <?= ($_GET['document_type'] ?? '') === '.docx' ? 'selected' : '' ?>>Word</option><option value=".jpg" <?= ($_GET['document_type'] ?? '') === '.jpg' ? 'selected' : '' ?>>JPG</option><option value=".png" <?= ($_GET['document_type'] ?? '') === '.png' ? 'selected' : '' ?>>PNG</option></select></label>
+                                <label>Class<select name="class_id"><option value="">All classes</option><?php foreach ($options['classes'] as $choice): ?><option value="<?= $e($choice['id']) ?>" <?= ($_GET['class_id'] ?? '') == $choice['id'] ? 'selected' : '' ?>><?= $e($choice['label']) ?></option><?php endforeach; ?></select></label>
+                                <label>Access level<select name="access_level"><option value="">All levels</option><option value="private" <?= ($_GET['access_level'] ?? '') === 'private' ? 'selected' : '' ?>>Private</option><option value="class" <?= ($_GET['access_level'] ?? '') === 'class' ? 'selected' : '' ?>>Class</option><option value="staff" <?= ($_GET['access_level'] ?? '') === 'staff' ? 'selected' : '' ?>>Staff</option></select></label>
+                                <label>Status<select name="status"><option value="">All statuses</option><option value="active" <?= ($_GET['status'] ?? '') === 'active' ? 'selected' : '' ?>>Active</option><option value="inactive" <?= ($_GET['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>Inactive</option><option value="archived" <?= ($_GET['status'] ?? '') === 'archived' ? 'selected' : '' ?>>Archived</option></select></label>
+                                <label>Upload date from<input type="date" name="date_from" value="<?= $e($_GET['date_from'] ?? '') ?>"></label>
+                                <label>Upload date to<input type="date" name="date_to" value="<?= $e($_GET['date_to'] ?? '') ?>"></label>
+                                <label>Sort by<select name="sort"><option value="newest" <?= ($_GET['sort'] ?? 'newest') === 'newest' ? 'selected' : '' ?>>Newest first</option><option value="oldest" <?= ($_GET['sort'] ?? 'newest') === 'oldest' ? 'selected' : '' ?>>Oldest first</option></select></label>
+                                <button class="button primary" type="submit">Apply filters</button>
+                            </form>
+                        </section>
                         <section class="panel workflow-panel"><div class="panel-heading"><div><p class="eyebrow">PRIVATE FILE STORAGE</p><h2>Upload a requirement</h2></div><small>PDF, JPG, PNG, or DOCX / 10 MB max</small></div>
                             <form class="upload-form" method="post" enctype="multipart/form-data" action="<?= $e($app_url) ?>documents/upload">
                                 <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
@@ -255,6 +308,184 @@ $labels = [
                         </section>
                         <?php endif; ?>
                     <?php endif; ?>
+
+                    <?php if ($section === 'certificates'): ?>
+                        <?php if (isset($certificate_stats) && in_array($user['role'], ['administrator', 'staff'], true)): ?>
+                        <div class="doc-stats-grid">
+                            <article class="doc-stat"><span>ELIGIBLE TRAINEES</span><strong><?= $e($certificate_stats['eligible'] ?? 0) ?></strong></article>
+                            <article class="doc-stat"><span>PENDING APPROVAL</span><strong><?= $e($certificate_stats['pending'] ?? 0) ?></strong></article>
+                            <article class="doc-stat"><span>ISSUED CERTIFICATES</span><strong><?= $e($certificate_stats['issued'] ?? 0) ?></strong></article>
+                            <article class="doc-stat"><span>REVOKED CERTIFICATES</span><strong><?= $e($certificate_stats['revoked'] ?? 0) ?></strong></article>
+                        </div>
+                        <?php endif; ?>
+                        <section class="panel filter-panel">
+                            <div class="panel-heading"><div><p class="eyebrow">CERTIFICATE MANAGEMENT</p><h2>Certificates and completion candidates</h2><p class="muted">Review completion requirements, approvals, issued certificates, and revocations.</p></div><a class="button secondary" href="<?= $e($app_url) ?>manage/certificates">Clear filters</a></div>
+                            <form class="filter-form" method="get" action="<?= $e($app_url) ?>manage/certificates">
+                                <label>Search records<input type="search" name="search" value="<?= $e($_GET['search'] ?? '') ?>" placeholder="Name, trainee number, program, class, or certificate..."></label>
+                                <label>Programs<select name="program_id"><option value="">All programs</option><?php foreach ($options['programs'] ?? [] as $choice): ?><option value="<?= $e($choice['id']) ?>" <?= ($_GET['program_id'] ?? '') == $choice['id'] ? 'selected' : '' ?>><?= $e($choice['label']) ?></option><?php endforeach; ?></select></label>
+                                <label>Status<select name="status"><option value="">All statuses</option><option value="pending" <?= ($_GET['status'] ?? '') === 'pending' ? 'selected' : '' ?>>Pending approval</option><option value="approved" <?= ($_GET['status'] ?? '') === 'approved' ? 'selected' : '' ?>>Approved for issue</option><option value="rejected" <?= ($_GET['status'] ?? '') === 'rejected' ? 'selected' : '' ?>>Rejected</option><option value="issued" <?= ($_GET['status'] ?? '') === 'issued' ? 'selected' : '' ?>>Issued</option><option value="revoked" <?= ($_GET['status'] ?? '') === 'revoked' ? 'selected' : '' ?>>Revoked</option><option value="ineligible" <?= ($_GET['status'] ?? '') === 'ineligible' ? 'selected' : '' ?>>Ineligible</option></select></label>
+                                <button class="button primary" type="submit">Apply filters</button>
+                            </form>
+                        </section>
+                    <?php endif; ?>
+
+                    <?php if ($section === 'eligibility'): ?>
+                        <section class="panel filter-panel">
+                            <div class="panel-heading"><div><p class="eyebrow">FILTERS</p><h2>Search Eligibility</h2></div><a class="button secondary" href="<?= $e($app_url) ?>manage/eligibility">Clear filters</a></div>
+                            <form class="filter-form" method="get" action="<?= $e($app_url) ?>manage/eligibility">
+                                <label>Search trainees<input type="search" name="search" value="<?= $e($_GET['search'] ?? '') ?>" placeholder="Search by name or trainee number..."></label>
+                                <label>Program<select name="program_id"><option value="">All programs</option><?php foreach ($options['programs'] ?? [] as $choice): ?><option value="<?= $e($choice['id']) ?>" <?= ($_GET['program_id'] ?? '') == $choice['id'] ? 'selected' : '' ?>><?= $e($choice['label']) ?></option><?php endforeach; ?></select></label>
+                                <label>Eligibility<select name="eligibility"><option value="">All</option><option value="1" <?= ($_GET['eligibility'] ?? '') === '1' ? 'selected' : '' ?>>Eligible</option><option value="0" <?= ($_GET['eligibility'] ?? '') === '0' ? 'selected' : '' ?>>Not Eligible</option></select></label>
+                                <button class="button primary" type="submit">Apply filters</button>
+                            </form>
+                        </section>
+                        <?php if (!empty($editing_eligibility)): ?>
+                            <section class="panel form-panel">
+                                <div class="panel-heading"><div><p class="eyebrow">ELIGIBILITY REVIEW</p><h2>Edit review for <?= $e($editing_eligibility['trainee_name']) ?></h2></div><a class="button secondary" href="<?= $e($app_url) ?>manage/eligibility">Cancel</a></div>
+                                <p class="muted"><?= $e($editing_eligibility['program_name']) ?> / <?= $e($editing_eligibility['class_name']) ?>. Eligibility itself is calculated from training records; this form only updates the staff review.</p>
+                                <form class="filter-form" method="post" action="<?= $e($app_url) ?>certificates/review">
+                                    <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+                                    <input type="hidden" name="eligibility_id" value="<?= $e($editing_eligibility['eligibility_id']) ?>">
+                                    <label>Review decision<select name="decision" data-review-decision required><?php if (!empty($editing_eligibility['is_eligible'])): ?><option value="approved" <?= ($editing_eligibility['approval_status'] ?? '') === 'approved' ? 'selected' : '' ?>>Approved</option><?php endif; ?><option value="rejected" <?= ($editing_eligibility['approval_status'] ?? '') === 'rejected' ? 'selected' : '' ?>>Rejected</option></select></label>
+                                    <label>Review reason<input name="reason" data-review-reason maxlength="1000" value="<?= $e($editing_eligibility['approval_reason'] ?? '') ?>" required></label>
+                                    <button class="button primary" type="submit">Save review</button>
+                                </form>
+                            </section>
+                        <?php endif; ?>
+                    <?php endif; ?>
+
+                    <?php if ($section === 'certificate_config'): ?>
+                        <section class="panel form-panel">
+                            <div class="panel-heading"><div><p class="eyebrow">CERTIFICATE</p><h2>Certificate</h2></div></div>
+                            <form method="post" action="<?= $e($app_url) ?>manage/certificate-config" class="form-stack" enctype="multipart/form-data">
+                                <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+                                <input type="hidden" name="current_logo_path" value="<?= $e($configs['logo_path']) ?>">
+                                <label>Institution name<input name="institution_name" value="<?= $e($configs['institution_name']) ?>" required></label>
+                                <label>Logo upload<input type="file" name="logo" accept=".png,.jpg,.jpeg,.svg"></label>
+                                <?php if (!empty($configs['logo_path'])): ?>
+                                    <div class="logo-preview">
+                                        <img src="<?= $e($app_url) . $e($configs['logo_path']) ?>" alt="Current logo" style="max-height: 100px;">
+                                        <a class="text-button" href="<?= $e($app_url) . $e($configs['logo_path']) ?>" target="_blank">View current logo</a>
+                                    </div>
+                                <?php endif; ?>
+                                <label>Certificate title<input name="certificate_title" value="<?= $e($configs['certificate_title']) ?>" required></label>
+                                <label>Certificate subtitle<input name="certificate_subtitle" value="<?= $e($configs['certificate_subtitle']) ?>" required></label>
+                                <label>Signatory name<input name="signatory_name" value="<?= $e($configs['signatory_name']) ?>" required></label>
+                                <label>Signatory designation<input name="signatory_designation" value="<?= $e($configs['signatory_designation']) ?>" required></label>
+                                <label>Template color<input type="color" name="template_color" value="<?= $e($configs['template_color']) ?>"></label>
+                                <label>Minimum attendance percentage<input type="number" name="min_attendance_percentage" value="<?= $e($configs['min_attendance_percentage']) ?>" min="0" max="100" required></label>
+                                <label>Require documents<input type="checkbox" name="require_documents" value="1" <?= $configs['require_documents'] ? 'checked' : '' ?>></label>
+                                <label>Require assessments<input type="checkbox" name="require_assessments" value="1" <?= $configs['require_assessments'] ? 'checked' : '' ?>></label>
+                                <label>Passed assessments required per class<input type="number" name="required_assessment_count" value="<?= $e($configs['required_assessment_count']) ?>" min="1" max="100" required></label>
+                                <button class="button primary" type="submit">Save template</button>
+                            </form>
+                        </section>
+                        <section class="panel">
+                            <div class="panel-heading"><div><p class="eyebrow">ELIGIBILITY</p><h2>Required document checklist</h2></div></div>
+                            <p class="muted">A trainee must have an active document whose name matches each requirement for their class.</p>
+                            <form method="post" action="<?= $e($app_url) ?>certificate-requirements/save" class="upload-form">
+                                <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+                                <label>Class<select name="class_id" required><option value="">Choose class</option><?php foreach ($certificate_classes as $class): ?><option value="<?= $e($class['id']) ?>"><?= $e($class['label']) ?></option><?php endforeach; ?></select></label>
+                                <label>Required document name<input name="required_document_name" maxlength="150" required placeholder="e.g. National ID"></label>
+                                <button class="button primary" type="submit">Add requirement</button>
+                            </form>
+                            <?php if (empty($document_requirements)): ?><p class="empty-state">No class document requirements configured yet.</p><?php else: ?>
+                                <div class="table-scroll"><table><thead><tr><th>Class</th><th>Required document</th><th>Action</th></tr></thead><tbody>
+                                    <?php foreach ($document_requirements as $requirement): ?><tr><td><?= $e($requirement['class_name']) ?></td><td><?= $e($requirement['required_document_name']) ?></td><td><form method="post" action="<?= $e($app_url) ?>certificate-requirements/<?= $e($requirement['requirement_id']) ?>/delete"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Remove</button></form></td></tr><?php endforeach; ?>
+                                </tbody></table></div>
+                            <?php endif; ?>
+                        </section>
+                    <?php endif; ?>
+
+                    <?php if ($section === 'assessments'): ?>
+                        <section class="panel form-panel">
+                            <div class="panel-heading"><div><p class="eyebrow">TRAINING ASSESSMENTS</p><h2><?= !empty($editing) ? 'Edit assessment result' : 'Record a result' ?></h2></div><?php if (!empty($editing)): ?><a class="button secondary" href="<?= $e($app_url) ?>manage/assessments">Cancel edit</a><?php endif; ?></div>
+                            <p class="muted">Authorized staff record the institution's Pass or Fail outcome. Re-entering the same trainee, class, and assessment name updates that result.</p>
+                            <form method="post" action="<?= $e($app_url) ?>assessments/save" class="upload-form">
+                                <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+                                <input type="hidden" name="assessment_id" value="<?= $e($editing['assessment_id'] ?? '') ?>">
+                                <label>Trainee<select name="trainee_id" required><option value="">Choose trainee</option><?php foreach ($options['trainees'] as $trainee): ?><option value="<?= $e($trainee['id']) ?>" <?= (string) ($editing['trainee_id'] ?? '') === (string) $trainee['id'] ? 'selected' : '' ?>><?= $e($trainee['label']) ?></option><?php endforeach; ?></select></label>
+                                <label>Class<select name="class_id" required><option value="">Choose class</option><?php foreach ($options['classes'] as $class): ?><option value="<?= $e($class['id']) ?>" <?= (string) ($editing['class_id'] ?? '') === (string) $class['id'] ? 'selected' : '' ?>><?= $e($class['label']) ?></option><?php endforeach; ?></select></label>
+                                <label>Assessment name<input name="assessment_name" value="<?= $e($editing['assessment_name'] ?? '') ?>" maxlength="150" required></label>
+                                <label>Outcome<select name="outcome" required><option value="">Choose outcome</option><option value="pass" <?= ($editing['outcome'] ?? '') === 'pass' ? 'selected' : '' ?>>Pass</option><option value="fail" <?= ($editing['outcome'] ?? '') === 'fail' ? 'selected' : '' ?>>Fail</option></select></label>
+                                <label>Assessment date<input type="date" name="assessment_date" value="<?= $e($editing['assessment_date'] ?? date('Y-m-d')) ?>" required></label>
+                                <label>Notes<input name="notes" value="<?= $e($editing['notes'] ?? '') ?>" maxlength="2000"></label>
+                                <button class="button primary" type="submit"><?= !empty($editing) ? 'Update assessment' : 'Save assessment' ?></button>
+                            </form>
+                        </section>
+                    <?php endif; ?>
+
+                    <?php if ($section === 'my_certificates'): ?>
+                        <section class="panel">
+                            <div class="panel-heading"><div><p class="eyebrow">MY CERTIFICATES</p><h2>Issued Certificates</h2></div></div>
+                            <?php if (empty($records)): ?><p class="empty-state">No certificates issued yet. Complete your training to become eligible.</p><?php else: ?>
+                                <div class="table-scroll">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Certificate Number</th>
+                                                <th>Program</th>
+                                                <th>Class</th>
+                                                <th>Issue Date</th>
+                                                <th>Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($records as $cert): ?>
+                                            <tr>
+                                                <td><code><?= $e($cert['certificate_number']) ?></code></td>
+                                                <td><?= $e($cert['program_name']) ?></td>
+                                                <td><?= $e($cert['class_name']) ?></td>
+                                                <td><?= $e($cert['issue_date']) ?></td>
+                                                <td><span class="status <?= $e($cert['status']) ?>"><?= $e(ucfirst($cert['status'])) ?></span></td>
+                                                <td class="row-actions">
+                                                    <?php if ($cert['status'] === 'issued'): ?>
+                                                        <a class="text-button" href="<?= $e($app_url) ?>certificates/<?= $e($cert['certificate_id']) ?>/download?preview=1" target="_blank" rel="noopener">Preview / Print</a>
+                                                        <a class="text-button" href="<?= $e($app_url) ?>certificates/<?= $e($cert['certificate_id']) ?>/download">Download</a>
+                                                        <a class="text-button" href="<?= $e($app_url) ?>verify-certificate?qr=<?= rawurlencode($cert['qr_code']) ?>">Verify</a>
+                                                    <?php endif; ?>
+                                                </td>
+                                            </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php endif; ?>
+                        </section>
+                        <section class="panel">
+                            <div class="panel-heading"><div><p class="eyebrow">ELIGIBILITY</p><h2>Certificate Eligibility</h2></div></div>
+                            <?php if (empty($eligibility)): ?><p class="empty-state">No eligibility records found.</p><?php else: ?>
+                                <div class="table-scroll">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Program</th>
+                                                <th>Class</th>
+                                                <th>Attendance</th>
+                                                <th>Documents</th>
+                                                <th>Status</th>
+                                                <th>Reasons</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($eligibility as $el): ?>
+                                            <tr>
+                                                <td><?= $e($el['program_name']) ?></td>
+                                                <td><?= $e($el['class_name']) ?></td>
+                                                <td><?= number_format($el['attendance_percentage'], 1) ?>%</td>
+                                                <td><?= $e($el['documents_approved']) ?>/<?= $e($el['documents_required']) ?></td>
+                                                <td><span class="status <?= $el['is_eligible'] ? 'present' : 'absent' ?>"><?= $el['is_eligible'] ? 'Eligible' : 'Not Eligible' ?></span></td>
+                                                <small><?= $e(ucfirst($el['approval_status'] ?? 'pending')) ?> approval</small></td>
+                                                <td><?= $e($el['ineligibility_reasons'] ?? '-') ?></td>
+                                            </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php endif; ?>
+                        </section>
+                    <?php endif; ?>
                     <div class="content-grid <?= empty($fields) ? 'single' : '' ?>">
                         <?php if (!empty($fields) && $can_manage && ($editing || $can_create)): ?>
                             <section class="panel form-panel"><div class="panel-heading"><div><p class="eyebrow"><?= $editing ? 'UPDATE RECORD' : 'NEW RECORD' ?></p><h2><?= $editing ? 'Edit details' : 'Add ' . strtolower(rtrim($title, 's')) ?></h2></div><?php if ($editing): ?><a class="text-button" href="<?= $e($app_url) ?>manage/<?= $e($section) ?>">Cancel</a><?php endif; ?></div>
@@ -272,14 +503,47 @@ $labels = [
                                 </form>
                             </section>
                         <?php endif; ?>
+                        <?php if (!in_array($section, ['certificate_config', 'my_certificates'], true)): ?>
                         <section class="panel records-panel"><div class="panel-heading"><div><p class="eyebrow">DATABASE RECORDS</p><h2><?= $e(count($records)) ?> records</h2></div><label class="table-search">Search records<input type="search" data-table-search placeholder="Search this list"></label></div>
-                            <?php if (empty($records)): ?><p class="empty-state">No records yet. Use the form to add the first one.</p><?php else: ?>
+                            <?php if (empty($records)): ?><p class="empty-state"><?= $section === 'documents' ? 'No documents match these filters.' : ($section === 'certificates' ? 'No issued certificates match these filters. Review Certificate Eligibility to check candidates.' : ($section === 'eligibility' ? 'No eligibility records match these filters. Recalculate eligibility for an enrolled trainee and class.' : 'No records yet. Use the form to add the first one.')) ?></p><?php else: ?>
                                 <div class="table-scroll"><table><thead><tr><?php foreach ($columns as $column): ?><th><?= $e(ucwords(str_replace('_', ' ', $column))) ?></th><?php endforeach; ?><?php if ($can_manage || $section === 'documents'): ?><th>Actions</th><?php endif; ?></tr></thead><tbody>
-                                    <?php foreach ($records as $record): ?><tr><?php foreach ($columns as $column): ?><td><?php if ($column === 'qr_code'): ?><div class="qr-cell"><code><?= $e($record[$column] ?? '') ?></code><div class="qr-code" data-qr="<?= $e($record[$column] ?? '') ?>"></div><button type="button" class="icon-button" data-print-qr title="Print QR ID" aria-label="Print QR ID">Print</button></div><?php elseif ($column === 'status'): ?><span class="status <?= strtolower($e($record[$column] ?? '')) ?>"><?= $e($record[$column] ?? '') ?></span><?php else: ?><?= nl2br($e($record[$column] ?? '')) ?><?php endif; ?></td><?php endforeach; ?>
-                                        <?php if ($can_manage || $section === 'documents'): ?><td class="row-actions"><?php if ($can_manage && !empty($record[$primary_key]) && !in_array($section, ['activity', 'documents'], true)): ?><a class="text-button" href="<?= $e($app_url) ?>manage/<?= $e($section) ?>?edit=<?= $e($record[$primary_key]) ?>">Edit</a><?php endif; ?><?php if ($section === 'documents'): ?><a class="text-button" href="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>">Download</a><?php if (in_array($user['role'], ['administrator', 'staff'], true)): ?><form method="post" action="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>/status" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="status" value="<?= $e($record['status'] === 'active' ? 'inactive' : 'active') ?>"><button class="text-button" type="submit"><?= $e($record['status'] === 'active' ? 'Deactivate' : 'Activate') ?></button></form><form method="post" action="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>/delete" data-confirm="Delete this document permanently?" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Delete</button></form><?php endif; ?><?php endif; ?><?php if ($can_manage && !empty($record[$primary_key]) && !in_array($section, ['activity', 'documents'], true)): ?><form method="post" action="<?= $e($app_url) ?>manage/<?= $e($section) ?>/delete/<?= $e($record[$primary_key]) ?>" data-confirm="Delete or deactivate this record?"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Delete</button></form><?php endif; ?></td><?php endif; ?></tr><?php endforeach; ?>
+                                    <?php foreach ($records as $record): ?><tr><?php foreach ($columns as $column): ?><td><?php if ($column === 'qr_code'): ?><div class="qr-cell"><code><?= $e($record[$column] ?? '') ?></code><div class="qr-code" data-qr="<?= $e($record[$column] ?? '') ?>"></div><button type="button" class="icon-button" data-print-qr title="Print QR ID" aria-label="Print QR ID">Print</button></div><?php elseif ($column === 'is_eligible'): ?><span class="status <?= !empty($record[$column]) ? 'present' : 'absent' ?>"><?= !empty($record[$column]) ? 'Eligible' : 'Not eligible' ?></span><?php elseif ($column === 'approval_status'): ?><span class="status <?= $e($record[$column] ?? 'pending') ?>"><?= $e(ucfirst($record[$column] ?? 'pending')) ?></span><?php elseif ($column === 'outcome'): ?><span class="status <?= ($record[$column] ?? '') === 'pass' ? 'present' : 'absent' ?>"><?= $e(ucfirst($record[$column] ?? '')) ?></span><?php elseif ($column === 'status'): ?><span class="status <?= strtolower($e($record[$column] ?? '')) ?>"><?= $e($record[$column] ?? '') ?></span><?php else: ?><?= nl2br($e($record[$column] ?? '')) ?><?php endif; ?></td><?php endforeach; ?>
+                                        <?php if ($can_manage || $section === 'documents' || $section === 'certificates' || $section === 'eligibility'): ?><td class="row-actions">
+                                            <?php if ($can_manage && !empty($record[$primary_key]) && !in_array($section, ['activity', 'documents', 'certificates', 'eligibility', 'assessments'], true)): ?><a class="text-button" href="<?= $e($app_url) ?>manage/<?= $e($section) ?>?edit=<?= $e($record[$primary_key]) ?>">Edit</a><?php endif; ?>
+                                            <?php if ($section === 'documents'): ?><a class="text-button" href="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>">Download</a><?php if (in_array($user['role'], ['administrator', 'staff'], true)): ?><form method="post" action="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>/status" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="status" value="<?= $e($record['status'] === 'active' ? 'inactive' : 'active') ?>"><button class="text-button" type="submit"><?= $e($record['status'] === 'active' ? 'Deactivate' : 'Activate') ?></button></form><form method="post" action="<?= $e($app_url) ?>documents/<?= $e($record['document_id']) ?>/delete" data-confirm="Delete this document permanently?" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Delete</button></form><?php endif; ?><?php endif; ?>
+                                            <?php if ($section === 'certificates'): ?>
+                                                <a class="text-button" href="<?= $e($app_url) ?>manage/eligibility?search=<?= $e(urlencode((string) ($record['trainee_number'] ?? ''))) ?>">Eligibility details</a>
+                                                <form method="post" action="<?= $e($app_url) ?>certificates/recalculate"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="trainee_id" value="<?= $e($record['trainee_id']) ?>"><input type="hidden" name="class_id" value="<?= $e($record['class_id']) ?>"><button class="text-button" type="submit">Recalculate</button></form>
+                                                <?php if (!empty($record['certificate_id'])): ?>
+                                                    <a class="text-button" href="<?= $e($app_url) ?>certificates/<?= $e($record['certificate_id']) ?>/history">History</a>
+                                                    <?php if (($record['status'] ?? '') === 'issued'): ?>
+                                                        <a class="text-button" href="<?= $e($app_url) ?>certificates/<?= $e($record['certificate_id']) ?>/download?preview=1" target="_blank" rel="noopener">Preview / Print</a>
+                                                        <a class="text-button" href="<?= $e($app_url) ?>certificates/<?= $e($record['certificate_id']) ?>/download">Download</a>
+                                                        <form method="post" action="<?= $e($app_url) ?>certificates/revoke"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="certificate_id" value="<?= $e($record['certificate_id']) ?>"><label>Revocation reason<input name="reason" maxlength="1000" required></label><button class="text-button danger-text" type="submit">Revoke</button></form>
+                                                    <?php endif; ?>
+                                                <?php elseif (!empty($record['is_eligible']) && ($record['approval_status'] ?? '') === 'approved'): ?>
+                                                    <form method="post" action="<?= $e($app_url) ?>certificates/issue" data-confirm="Issue certificate for this trainee?"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="trainee_id" value="<?= $e($record['trainee_id']) ?>"><input type="hidden" name="class_id" value="<?= $e($record['class_id']) ?>"><button class="button primary" type="submit">Issue Certificate</button></form>
+                                                <?php elseif (!empty($record['is_eligible'])): ?>
+                                                    <form method="post" action="<?= $e($app_url) ?>certificates/review"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="eligibility_id" value="<?= $e($record['eligibility_id']) ?>"><input type="hidden" name="decision" value="approved"><button class="text-button" type="submit">Approve</button></form>
+                                                    <form method="post" action="<?= $e($app_url) ?>certificates/review"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="eligibility_id" value="<?= $e($record['eligibility_id']) ?>"><input type="hidden" name="decision" value="rejected"><label>Reason<input name="reason" maxlength="1000" required></label><button class="text-button danger-text" type="submit">Reject</button></form>
+                                                <?php endif; ?>
+                                            <?php endif; ?>
+                                            <?php if ($section === 'assessments'): ?>
+                                                <a class="text-button" href="<?= $e($app_url) ?>manage/assessments?edit=<?= $e($record['assessment_id']) ?>">Edit</a>
+                                                <form method="post" action="<?= $e($app_url) ?>assessments/<?= $e($record['assessment_id']) ?>/delete" data-confirm="Delete this assessment record? This will recalculate certificate eligibility."><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Delete</button></form>
+                                            <?php endif; ?>
+                                            <?php if ($section === 'eligibility'): ?>
+                                                <form method="post" action="<?= $e($app_url) ?>certificates/recalculate"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="trainee_id" value="<?= $e($record['trainee_id']) ?>"><input type="hidden" name="class_id" value="<?= $e($record['class_id']) ?>"><button class="text-button" type="submit">Recalculate</button></form>
+                                                <a class="text-button" href="<?= $e($app_url) ?>manage/eligibility?edit=<?= $e($record['eligibility_id']) ?>">Edit review</a>
+                                                <?php if (!empty($record['is_eligible']) && ($record['approval_status'] ?? 'pending') !== 'approved'): ?><form method="post" action="<?= $e($app_url) ?>certificates/review"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="eligibility_id" value="<?= $e($record['eligibility_id']) ?>"><input type="hidden" name="decision" value="approved"><button class="text-button" type="submit">Approve</button></form><form method="post" action="<?= $e($app_url) ?>certificates/review"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="eligibility_id" value="<?= $e($record['eligibility_id']) ?>"><input type="hidden" name="decision" value="rejected"><label>Reason<input name="reason" maxlength="1000" required></label><button class="text-button danger-text" type="submit">Reject</button></form><?php elseif (!empty($record['is_eligible']) && empty($record['certificate_id'])): ?><form method="post" action="<?= $e($app_url) ?>certificates/issue" data-confirm="Issue certificate for this trainee?"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><input type="hidden" name="trainee_id" value="<?= $e($record['trainee_id']) ?>"><input type="hidden" name="class_id" value="<?= $e($record['class_id']) ?>"><button class="button primary" type="submit">Issue Certificate</button></form><?php endif; ?>
+                                                <?php if (empty($record['certificate_id'])): ?><form method="post" action="<?= $e($app_url) ?>certificates/eligibility/<?= $e($record['eligibility_id']) ?>/delete" data-confirm="Remove this trainee from the class? This deletes the enrollment and calculated eligibility record. Attendance, documents, and assessment history are retained."><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Delete enrollment</button></form><?php else: ?><span class="muted">Enrollment locked by <?= $e($record['certificate_status']) ?> certificate</span><?php endif; ?>
+                                            <?php endif; ?>
+                                            <?php if ($can_manage && !empty($record[$primary_key]) && !in_array($section, ['activity', 'documents', 'certificates', 'eligibility', 'assessments'], true)): ?><form method="post" action="<?= $e($app_url) ?>manage/<?= $e($section) ?>/delete/<?= $e($record[$primary_key]) ?>" data-confirm="Delete or deactivate this record?"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Delete</button></form><?php endif; ?>
+                                        </td><?php endif; ?></tr><?php endforeach; ?>
                                 </tbody></table></div>
                             <?php endif; ?>
                         </section>
+                        <?php endif; ?>
                     </div>
                 </main>
             <?php else: ?>
@@ -297,7 +561,7 @@ $labels = [
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
     <script src="https://unpkg.com/html5-qrcode" defer></script>
-    <script src="<?= $e($app_url) ?>assets/js/smarttrack.js" defer></script>
+    <script src="<?= $e($app_url) ?>assets/js/smarttrack.js?v=<?= time() ?>" defer></script>
     <?php if (isset($charts) && in_array($user['role'], ['administrator', 'staff', 'instructor'], true)): ?>
     <script>
     document.addEventListener('DOMContentLoaded', function() {

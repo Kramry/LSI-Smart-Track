@@ -1,5 +1,6 @@
 {
     "require": {
-        "aws/aws-sdk-php": "^3.401"
+        "aws/aws-sdk-php": "^3.401",
+        "tecnickcom/tcpdf": "^6.11"
     }
 }

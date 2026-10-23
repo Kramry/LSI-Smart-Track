@@ -184,7 +184,19 @@ class SmartTrack extends Controller
         }
         unset($field);
 
-        $records = $this->model->records($section, $this->user);
+        // Handle document filtering
+        if ($section === 'documents') {
+            $filters = [];
+            foreach (['search', 'document_type', 'class_id', 'access_level', 'status', 'date_from', 'date_to', 'sort'] as $filter) {
+                $value = $_GET[$filter] ?? '';
+                $filters[$filter] = is_scalar($value) ? trim((string) $value) : '';
+            }
+            $filters['sort'] = $filters['sort'] ?: 'newest';
+            $records = $this->model->filterDocuments($this->user, $filters);
+        } else {
+            $records = $this->model->records($section, $this->user);
+        }
+
         $editId = (int) ($_GET['edit'] ?? $this->session->flashdata('smarttrack_edit') ?? 0);
         $editing = $editId ? $this->model->findRecord($definition['table'], $definition['key'], $editId) : null;
         if ($editing && !$this->recordIsVisible($section, $editing, $records, $definition['key'])) {
@@ -218,6 +230,7 @@ class SmartTrack extends Controller
         if ($section === 'documents' && in_array($this->user['role'], ['administrator', 'staff'], true)) {
             $data['doc_stats'] = $this->model->documentStats($this->user);
             $data['recent_docs'] = $this->model->recentDocuments($this->user, 5);
+            error_log('Recent docs count: ' . count($data['recent_docs']));
         }
 
         $this->render('module', $data);
@@ -234,6 +247,7 @@ class SmartTrack extends Controller
             return;
         }
 
+        $existing = null;
         $recordId = (int) $this->input($definition['key']);
         if ($recordId) {
             if ($section === 'users' && $recordId === (int) $this->user['user_id']) {
@@ -370,6 +384,17 @@ class SmartTrack extends Controller
 
         try {
             $savedId = $this->model->saveRecord($definition['table'], $definition['key'], $data, $recordId ?: null);
+            if ($section === 'classes') {
+                $this->model->recalculateClassEligibility((int) $savedId);
+            } elseif (in_array($section, ['enrollments', 'attendance'], true)) {
+                if ($existing) {
+                    $this->recalculateEligibilityPair($existing['trainee_id'] ?? 0, $existing['class_id'] ?? 0);
+                }
+                $savedRecord = $this->model->findRecord($definition['table'], $definition['key'], (int) $savedId);
+                if ($savedRecord) {
+                    $this->recalculateEligibilityPair($savedRecord['trainee_id'] ?? 0, $savedRecord['class_id'] ?? 0);
+                }
+            }
             $this->model->logActivity((int) $this->user['user_id'], ($recordId ? 'Updated ' : 'Created ') . $section, 'Record #' . $savedId);
             $this->notice(ucfirst(rtrim($definition['title'], 's')) . ' saved.');
             redirect($this->url('manage/' . $section));
@@ -409,6 +434,9 @@ class SmartTrack extends Controller
             }
         }
         $this->model->deleteRecord($definition['table'], $definition['key'], (int) $id, $deactivate);
+        if (in_array($section, ['enrollments', 'attendance', 'documents'], true)) {
+            $this->recalculateEligibilityPair($existing['trainee_id'] ?? 0, $existing['class_id'] ?? 0);
+        }
         $this->model->logActivity((int) $this->user['user_id'], 'Deleted ' . $section, 'Record #' . (int) $id . ($deactivate ? ' deactivated' : ' removed'));
         $this->notice($deactivate ? 'Record deactivated.' : 'Record deleted.');
         redirect($this->url('manage/' . $section));
@@ -509,6 +537,7 @@ class SmartTrack extends Controller
         }
         $result = $this->model->scanAttendance($qrCode, $action, $classId, $scheduleId, (int) $this->user['user_id']);
         if (isset($result['success'])) {
+            $this->recalculateEligibilityPair($qrTrainee['trainee_id'], $classId);
             $this->model->logActivity((int) $this->user['user_id'], 'Recorded attendance', $result['success']);
         }
         $this->notice($result['success'] ?? $result['error']);
@@ -599,6 +628,10 @@ class SmartTrack extends Controller
         $this->call->library('CloudStorage');
         $cloudStorage = new CloudStorage();
         $useCloud = $cloudStorage->isEnabled();
+        $cloudRequested = getenv('CLOUD_STORAGE_ENABLED') === 'true';
+        $cloudWarning = $cloudRequested && !$useCloud
+            ? 'Cloud storage is enabled but its provider, AWS settings, or SDK are incomplete.'
+            : null;
 
         $filename = bin2hex(random_bytes(20)) . '.' . $allowed[$mime];
         $remotePath = 'documents/' . date('Y/m') . '/' . $filename;
@@ -606,9 +639,9 @@ class SmartTrack extends Controller
 
         if ($useCloud) {
             // Upload to cloud storage
-            $cloudUrl = $cloudStorage->upload($file['tmp_name'], $remotePath, $mime);
-            if (!$cloudUrl) {
-                $this->notice('Failed to upload to cloud storage. Using local storage instead.');
+            $cloudUploaded = $cloudStorage->upload($file['tmp_name'], $remotePath, $mime);
+            if (!$cloudUploaded) {
+                $cloudWarning = 'Cloud upload failed. The document was stored locally instead.';
                 $useCloud = false;
             } else {
                 $dbPath = 'cloud://' . $remotePath;
@@ -632,8 +665,11 @@ class SmartTrack extends Controller
         }
 
         $this->model->execute('INSERT INTO trainee_documents (trainee_id, class_id, uploaded_by, document_name, file_path, upload_date, status, access_level) VALUES (?, ?, ?, ?, ?, CURDATE(), ?, ?)', [$traineeId ?: null, $classId, (int) $this->user['user_id'], substr($label, 0, 150), $dbPath, 'active', $access]);
+        $this->recalculateEligibilityPair($traineeId, $classId);
         $this->model->logActivity((int) $this->user['user_id'], 'Uploaded document', substr($label, 0, 150) . ($useCloud ? ' (Cloud)' : ' (Local)'));
-        $this->notice('Document uploaded' . ($useCloud ? ' to cloud storage.' : '.'));
+        $this->notice($useCloud
+            ? 'Document uploaded to cloud storage.'
+            : 'Document uploaded locally.' . ($cloudWarning ? ' ' . $cloudWarning : ''));
         redirect($this->url('manage/documents'));
     }
 
@@ -711,7 +747,11 @@ class SmartTrack extends Controller
             $this->call->library('CloudStorage');
             $cloudStorage = new CloudStorage();
             $remotePath = substr($filePath, 8); // Remove 'cloud://' prefix
-            $cloudStorage->delete($remotePath);
+            if (!$cloudStorage->delete($remotePath)) {
+                $this->notice('The cloud document could not be deleted. No database records were removed.');
+                redirect($this->url('manage/documents'));
+                return;
+            }
         } else {
             // Delete from local storage
             $path = $this->privateDocumentPath($filePath);
@@ -721,6 +761,7 @@ class SmartTrack extends Controller
         }
 
         $this->model->execute('DELETE FROM trainee_documents WHERE document_id = ?', [(int) $id]);
+        $this->recalculateEligibilityPair($document['trainee_id'] ?? 0, $document['class_id'] ?? 0);
         $this->model->logActivity((int) $this->user['user_id'], 'Deleted document', $document['document_name'] . ($isCloud ? ' (Cloud)' : ' (Local)'));
         $this->notice('Document deleted.');
         redirect($this->url('manage/documents'));
@@ -747,9 +788,619 @@ class SmartTrack extends Controller
         }
 
         $this->model->execute('UPDATE trainee_documents SET status = ? WHERE document_id = ?', [$status, (int) $id]);
+        $this->recalculateEligibilityPair($document['trainee_id'] ?? 0, $document['class_id'] ?? 0);
         $this->model->logActivity((int) $this->user['user_id'], 'Updated document status', $document['document_name'] . ' -> ' . $status);
         $this->notice('Document status updated.');
         redirect($this->url('manage/documents'));
+    }
+
+    public function certificates()
+    {
+        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to manage certificates.');
+        }
+
+        $filters = [];
+        foreach (['search', 'status', 'program_id'] as $filter) {
+            $value = $_GET[$filter] ?? '';
+            $filters[$filter] = is_scalar($value) ? trim((string) $value) : '';
+        }
+
+        $this->model->refreshEligibilityRecords();
+        $stats = $this->model->certificateStats();
+        $records = $this->model->getCertificates($filters);
+        $programs = $this->model->options('programs', $this->user);
+
+        $this->render('module', [
+            'title' => 'Certificates',
+            'section' => 'certificates',
+            'records' => $records,
+            'certificate_stats' => $stats,
+            'options' => ['programs' => $programs],
+            'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'completion_status', 'attendance_percentage', 'documents_approved', 'documents_required', 'assessments_completed', 'assessments_required', 'is_eligible', 'ineligibility_reasons', 'approval_status', 'certificate_number', 'issue_date', 'status'],
+            'user' => $this->user,
+            'app_url' => $this->url(''),
+            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+        ]);
+    }
+
+    public function eligibility()
+    {
+        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to manage certificate eligibility.');
+        }
+
+        $this->model->refreshEligibilityRecords();
+        $filters = [];
+        foreach (['search', 'eligibility', 'program_id'] as $filter) {
+            $value = $_GET[$filter] ?? '';
+            $filters[$filter] = is_scalar($value) ? trim((string) $value) : '';
+        }
+
+        $records = $this->model->getEligibilityRecords($filters);
+        $editingEligibility = null;
+        if (array_key_exists('edit', $_GET)) {
+            $editId = is_scalar($_GET['edit']) ? (string) $_GET['edit'] : '';
+            if (!ctype_digit($editId) || !(int) $editId) {
+                show_404();
+                return;
+            }
+            foreach ($records as $record) {
+                if ((int) $record['eligibility_id'] === (int) $editId) {
+                    $editingEligibility = $record;
+                    break;
+                }
+            }
+            if (!$editingEligibility) {
+                show_404();
+                return;
+            }
+        }
+        $programs = $this->model->options('programs', $this->user);
+
+        $this->render('module', [
+            'title' => 'Certificate Eligibility',
+            'section' => 'eligibility',
+            'records' => $records,
+            'editing_eligibility' => $editingEligibility,
+            'options' => ['programs' => $programs],
+            'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'attendance_percentage', 'documents_approved', 'assessments_completed', 'is_eligible', 'approval_status', 'ineligibility_reasons'],
+            'user' => $this->user,
+            'app_url' => $this->url(''),
+            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+        ]);
+    }
+
+    public function assessments()
+    {
+        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to manage assessments.');
+        }
+
+        $editing = null;
+        if (array_key_exists('edit', $_GET)) {
+            $editId = is_scalar($_GET['edit']) ? (string) $_GET['edit'] : '';
+            if (!ctype_digit($editId) || !(int) $editId || !($editing = $this->model->assessmentById((int) $editId))) {
+                show_404();
+                return;
+            }
+        }
+        $this->render('module', [
+            'title' => 'Training Assessments',
+            'section' => 'assessments',
+            'records' => $this->model->assessmentRecords(),
+            'editing' => $editing,
+            'primary_key' => 'assessment_id',
+            'options' => [
+                'trainees' => $this->model->options('trainees', $this->user),
+                'classes' => $this->model->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+            ],
+            'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'],
+        ]);
+    }
+
+    public function saveAssessment()
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to record assessment results.');
+        }
+
+        $traineeId = (int) $this->input('trainee_id');
+        $classId = (int) $this->input('class_id');
+        $name = trim((string) $this->input('assessment_name'));
+        $outcome = strtolower(trim((string) $this->input('outcome')));
+        $assessmentDate = trim((string) $this->input('assessment_date'));
+        $notes = trim((string) $this->input('notes'));
+        $assessmentId = trim((string) $this->input('assessment_id'));
+        $editing = null;
+        if ($assessmentId !== '') {
+            if (!ctype_digit($assessmentId) || !(int) $assessmentId || !($editing = $this->model->assessmentById((int) $assessmentId))) {
+                $this->notice('The assessment record could not be found.');
+                redirect($this->url('manage/assessments'));
+                return;
+            }
+        }
+        $enrollment = $this->model->row('SELECT enrollment_id FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [$traineeId, $classId]);
+        $date = DateTime::createFromFormat('!Y-m-d', $assessmentDate);
+
+        if (!$traineeId || !$classId || !$enrollment || $name === '' || strlen($name) > 150
+            || !in_array($outcome, ['pass', 'fail'], true)
+            || !$date || $date->format('Y-m-d') !== $assessmentDate
+            || strlen($notes) > 2000) {
+            $this->notice('Select an enrolled trainee and class, enter an assessment name and date, and choose Pass or Fail.');
+            redirect($this->url('manage/assessments'));
+            return;
+        }
+
+        $duplicate = $editing
+            ? $this->model->row('SELECT assessment_id FROM training_assessments WHERE trainee_id = ? AND class_id = ? AND assessment_name = ? AND assessment_id <> ?', [
+                $traineeId,
+                $classId,
+                $name,
+                (int) $editing['assessment_id'],
+            ])
+            : null;
+        if ($duplicate) {
+            $this->notice('That trainee already has an assessment with this name in the selected class.');
+            redirect($this->url('manage/assessments' . ($editing ? '?edit=' . (int) $editing['assessment_id'] : '')));
+            return;
+        }
+
+        $savedAssessmentId = $this->model->saveAssessment([
+            'assessment_id' => $editing ? (int) $editing['assessment_id'] : null,
+            'trainee_id' => $traineeId,
+            'class_id' => $classId,
+            'assessment_name' => $name,
+            'outcome' => $outcome,
+            'assessed_by' => (int) $this->user['user_id'],
+            'assessment_date' => $assessmentDate,
+            'notes' => $notes,
+        ]);
+        if ($editing && ((int) $editing['trainee_id'] !== $traineeId || (int) $editing['class_id'] !== $classId)) {
+            $this->recalculateEligibilityPair($editing['trainee_id'], $editing['class_id']);
+        }
+        $this->model->calculateEligibility($traineeId, $classId);
+        $this->model->logActivity((int) $this->user['user_id'], $editing ? 'Updated training assessment' : 'Recorded training assessment', $name . ' (' . strtoupper($outcome) . '), record #' . $savedAssessmentId);
+        $this->notice($editing ? 'Assessment result updated.' : 'Assessment result saved.');
+        redirect($this->url('manage/assessments'));
+    }
+
+    public function deleteAssessment($id)
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to delete assessment results.');
+        }
+        if (!ctype_digit((string) $id) || !(int) $id) {
+            show_404();
+            return;
+        }
+
+        $assessment = $this->model->assessmentById((int) $id);
+        if (!$assessment || !$this->model->deleteAssessment((int) $id)) {
+            $this->notice('Assessment record not found or could not be deleted.');
+            redirect($this->url('manage/assessments'));
+            return;
+        }
+
+        $this->recalculateEligibilityPair($assessment['trainee_id'], $assessment['class_id']);
+        $this->model->logActivity((int) $this->user['user_id'], 'Deleted training assessment', $assessment['assessment_name'] . ', record #' . (int) $id);
+        $this->notice('Assessment record deleted.');
+        redirect($this->url('manage/assessments'));
+    }
+
+    public function reviewEligibility()
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to review certificate eligibility.');
+        }
+
+        $eligibilityId = (int) $this->input('eligibility_id');
+        $decision = (string) $this->input('decision');
+        $reason = trim((string) $this->input('reason'));
+        if (!$eligibilityId || !in_array($decision, ['approved', 'rejected'], true) || ($decision === 'rejected' && $reason === '')) {
+            $this->notice('Choose an approval decision and provide a reason when rejecting.');
+            redirect($this->url('manage/eligibility'));
+            return;
+        }
+
+        if (!$this->model->updateEligibilityApproval($eligibilityId, $decision, (int) $this->user['user_id'], $reason ?: null)) {
+            $this->notice('Only eligible trainees can be approved. Recalculate eligibility and review the requirements first.');
+            redirect($this->url('manage/eligibility?edit=' . $eligibilityId));
+            return;
+        }
+
+        $this->model->logEligibilityAction((int) $this->user['user_id'], $eligibilityId, $decision, $reason);
+        $this->model->logActivity((int) $this->user['user_id'], 'Reviewed certificate eligibility', 'Eligibility #' . $eligibilityId . ' ' . $decision);
+        $this->notice('Eligibility review saved.');
+        redirect($this->url('manage/eligibility'));
+    }
+
+    public function deleteEligibility($id)
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to remove class enrollments.');
+        }
+        if (!ctype_digit((string) $id) || !(int) $id) {
+            show_404();
+            return;
+        }
+
+        $result = $this->model->deleteEligibilityEnrollment((int) $id, (int) $this->user['user_id']);
+        if (!$result['success']) {
+            $this->notice($result['message']);
+            redirect($this->url('manage/eligibility'));
+            return;
+        }
+
+        $this->model->logActivity((int) $this->user['user_id'], 'Removed class enrollment from certificate eligibility', 'Eligibility #' . (int) $id . ': ' . $result['message']);
+        $this->notice($result['message']);
+        redirect($this->url('manage/eligibility'));
+    }
+
+    public function saveDocumentRequirement()
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || $this->user['role'] !== 'administrator') {
+            return $this->deny('Only administrators can configure required documents.');
+        }
+
+        $classId = (int) $this->input('class_id');
+        $documentName = trim((string) $this->input('required_document_name'));
+        $class = $this->model->row('SELECT class_id FROM training_classes WHERE class_id = ?', [$classId]);
+        if (!$class || $documentName === '' || strlen($documentName) > 150) {
+            $this->notice('Choose a class and enter a document name up to 150 characters.');
+            redirect($this->url('manage/certificate-config'));
+            return;
+        }
+
+        try {
+            $this->model->addDocumentRequirement($classId, $documentName, (int) $this->user['user_id']);
+        } catch (Throwable $error) {
+            $this->notice('That required document is already listed for this class.');
+            redirect($this->url('manage/certificate-config'));
+            return;
+        }
+        $this->model->recalculateClassEligibility($classId);
+        $this->model->logActivity((int) $this->user['user_id'], 'Added certificate document requirement', $documentName);
+        $this->notice('Required document added.');
+        redirect($this->url('manage/certificate-config'));
+    }
+
+    public function deleteDocumentRequirement($id)
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || $this->user['role'] !== 'administrator') {
+            return $this->deny('Only administrators can configure required documents.');
+        }
+        $requirement = ctype_digit((string) $id)
+            ? $this->model->row('SELECT class_id FROM certificate_document_requirements WHERE requirement_id = ?', [(int) $id])
+            : null;
+        if (!$requirement || !$this->model->deleteDocumentRequirement((int) $id)) {
+            $this->notice('Required document not found.');
+        } else {
+            $this->model->recalculateClassEligibility((int) $requirement['class_id']);
+            $this->model->logActivity((int) $this->user['user_id'], 'Removed certificate document requirement', 'Requirement #' . (int) $id);
+            $this->notice('Required document removed.');
+        }
+        redirect($this->url('manage/certificate-config'));
+    }
+
+    public function recalculateEligibility()
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to recalculate eligibility.');
+        }
+
+        $traineeId = (int) $this->input('trainee_id');
+        $classId = (int) $this->input('class_id');
+
+        if (!$traineeId || !$classId) {
+            $this->notice('Invalid trainee or class.');
+            redirect($this->url('manage/eligibility'));
+            return;
+        }
+
+        $result = $this->model->calculateEligibility($traineeId, $classId);
+        $this->model->logActivity((int) $this->user['user_id'], 'Recalculated eligibility', "Trainee ID: $traineeId, Class ID: $classId");
+
+        if ($result['eligible']) {
+            $this->notice('Trainee is eligible for certificate.');
+        } else {
+            $this->notice('Trainee is not eligible: ' . implode(', ', $result['reasons']));
+        }
+
+        redirect($this->url('manage/eligibility'));
+    }
+
+    public function issueCertificate()
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to issue certificates.');
+        }
+
+        $traineeId = (int) $this->input('trainee_id');
+        $classId = (int) $this->input('class_id');
+
+        if (!$traineeId || !$classId) {
+            $this->notice('Invalid trainee or class.');
+            redirect($this->url('manage/eligibility'));
+            return;
+        }
+
+        $certificate = $this->model->issueCertificate($traineeId, $classId, (int) $this->user['user_id']);
+
+        if ($certificate) {
+            $this->generateCertificatePDF($certificate);
+            $this->model->logActivity((int) $this->user['user_id'], 'Issued certificate', "Certificate: {$certificate['certificate_number']}");
+            $this->model->logCertificateAction((int) $this->user['user_id'], (int) $certificate['certificate_id'], 'issue', "Certificate issued for trainee ID: $traineeId, class ID: $classId");
+            $this->notice('Certificate issued successfully.');
+        } else {
+            $this->notice('Failed to issue certificate. Trainee may not be eligible.');
+        }
+
+        redirect($this->url('manage/certificates'));
+    }
+
+    public function certificateHistory($id)
+    {
+        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to view certificate history.');
+        }
+        if (!ctype_digit((string) $id)) {
+            show_404();
+            return;
+        }
+
+        $certificate = $this->model->row('SELECT certificate_number FROM certificates WHERE certificate_id = ?', [(int) $id]);
+        if (!$certificate) {
+            show_404();
+            return;
+        }
+
+        $this->render('module', [
+            'title' => 'Certificate History',
+            'section' => 'certificate_history',
+            'certificate_number' => $certificate['certificate_number'],
+            'records' => $this->model->certificateAuditRecords((int) $id),
+            'columns' => ['action', 'actor_name', 'details', 'ip_address', 'created_at'],
+        ]);
+    }
+
+    private function generateCertificatePDF($certificate)
+    {
+        $this->call->library('CertificateGenerator');
+        $generator = new CertificateGenerator([
+            'institution_name' => $this->model->getConfig('institution_name', 'LSI Training Center'),
+            'logo_path' => $this->model->getConfig('logo_path', ''),
+            'signatory_name' => $this->model->getConfig('signatory_name', 'Training Director'),
+            'signatory_designation' => $this->model->getConfig('signatory_designation', 'Director'),
+            'certificate_title' => $this->model->getConfig('certificate_title', 'Certificate of Completion'),
+            'certificate_subtitle' => $this->model->getConfig('certificate_subtitle', 'OF COMPLETION'),
+            'template_color' => $this->model->getConfig('template_color', '#dd4814'),
+        ]);
+
+        $trainee = $this->model->row('SELECT CONCAT(t.first_name, " ", t.last_name) AS trainee_name FROM trainees t WHERE t.trainee_id = ?', [(int) $certificate['trainee_id']]);
+        $program = $this->model->row('SELECT p.program_name, c.class_name FROM training_programs p JOIN training_classes c ON c.program_id = p.program_id WHERE c.class_id = ?', [(int) $certificate['class_id']]);
+
+        $pdfData = $generator->generate([
+            'trainee_name' => $trainee['trainee_name'] ?? 'Unknown',
+            'program_name' => $program['program_name'] ?? 'Unknown Program',
+            'class_name' => $program['class_name'] ?? '',
+            'completion_date' => $certificate['completion_date'],
+            'issue_date' => $certificate['issue_date'],
+            'certificate_number' => $certificate['certificate_number'],
+            'qr_code' => $this->certificateVerificationUrl($certificate['qr_code']),
+        ]);
+
+        $filename = 'certificate_' . $certificate['certificate_number'] . '.pdf';
+        $filePath = ROOT_DIR . 'runtime/uploads/certificates/' . $filename;
+
+        if (!is_dir(ROOT_DIR . 'runtime/uploads/certificates')) {
+            mkdir(ROOT_DIR . 'runtime/uploads/certificates', 0755, true);
+        }
+
+        file_put_contents($filePath, $pdfData);
+
+        $relativePath = 'runtime/uploads/certificates/' . $filename;
+        $this->model->execute('UPDATE certificates SET file_path = ? WHERE certificate_id = ?', [$relativePath, (int) $certificate['certificate_id']]);
+    }
+
+    public function revokeCertificate()
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to revoke certificates.');
+        }
+
+        $certificateId = (int) $this->input('certificate_id');
+        $reason = trim((string) $this->input('reason'));
+
+        if (!$certificateId || empty($reason)) {
+            $this->notice('Certificate ID and reason are required.');
+            redirect($this->url('manage/certificates'));
+            return;
+        }
+
+        $this->model->revokeCertificate($certificateId, (int) $this->user['user_id'], $reason);
+        $this->model->logActivity((int) $this->user['user_id'], 'Revoked certificate', "Certificate ID: $certificateId, Reason: $reason");
+        $this->model->logCertificateAction((int) $this->user['user_id'], (int) $certificateId, 'revoke', "Reason: $reason");
+        $this->notice('Certificate revoked successfully.');
+        redirect($this->url('manage/certificates'));
+    }
+
+    public function certificateConfig()
+    {
+        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator'], true)) {
+            return $this->deny('Only administrators can configure certificates.');
+        }
+
+        if ($this->validCsrf()) {
+            // Handle logo upload
+            $logoPath = $this->input('current_logo_path');
+            if (isset($_FILES['logo']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
+                $uploadDir = ROOT_DIR . 'runtime/uploads/certificates/';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0755, true);
+                }
+                $ext = pathinfo($_FILES['logo']['name'], PATHINFO_EXTENSION);
+                $filename = 'logo_' . time() . '.' . $ext;
+                if (move_uploaded_file($_FILES['logo']['tmp_name'], $uploadDir . $filename)) {
+                    $logoPath = 'runtime/uploads/certificates/' . $filename;
+                }
+            }
+
+            $configs = [
+                'institution_name' => $this->input('institution_name'),
+                'logo_path' => $logoPath,
+                'signatory_name' => $this->input('signatory_name'),
+                'signatory_designation' => $this->input('signatory_designation'),
+                'min_attendance_percentage' => $this->input('min_attendance_percentage'),
+                'require_documents' => $this->input('require_documents') ? '1' : '0',
+                'require_assessments' => $this->input('require_assessments') ? '1' : '0',
+                'required_assessment_count' => $this->input('required_assessment_count'),
+                'certificate_title' => $this->input('certificate_title'),
+                'certificate_subtitle' => $this->input('certificate_subtitle'),
+                'template_color' => $this->input('template_color'),
+            ];
+            $minimumAttendance = filter_var($configs['min_attendance_percentage'], FILTER_VALIDATE_FLOAT);
+            $requiredAssessmentCount = filter_var($configs['required_assessment_count'], FILTER_VALIDATE_INT);
+            if ($minimumAttendance === false || $minimumAttendance < 0 || $minimumAttendance > 100
+                || $requiredAssessmentCount === false || $requiredAssessmentCount < 1 || $requiredAssessmentCount > 100) {
+                $this->notice('Set attendance between 0 and 100 percent and required assessments between 1 and 100.');
+                redirect($this->url('manage/certificate-config'));
+                return;
+            }
+
+            foreach ($configs as $key => $value) {
+                $this->model->updateConfig($key, $value);
+            }
+            $this->model->refreshEligibilityRecords();
+
+            $this->model->logActivity((int) $this->user['user_id'], 'Updated certificate template');
+            $this->notice('Certificate template updated.');
+            redirect($this->url('manage/certificate-config'));
+        }
+
+        $configs = [
+            'institution_name' => $this->model->getConfig('institution_name', 'LSI Training Center'),
+            'logo_path' => $this->model->getConfig('logo_path', ''),
+            'signatory_name' => $this->model->getConfig('signatory_name', 'Training Director'),
+            'signatory_designation' => $this->model->getConfig('signatory_designation', 'Director'),
+            'min_attendance_percentage' => $this->model->getConfig('min_attendance_percentage', 75),
+            'require_documents' => $this->model->getConfig('require_documents', 1),
+            'require_assessments' => $this->model->getConfig('require_assessments', 0),
+            'required_assessment_count' => $this->model->getConfig('required_assessment_count', 1),
+            'certificate_title' => $this->model->getConfig('certificate_title', 'Certificate of Completion'),
+            'certificate_subtitle' => $this->model->getConfig('certificate_subtitle', 'OF COMPLETION'),
+            'template_color' => $this->model->getConfig('template_color', '#dd4814'),
+        ];
+
+        $this->render('module', [
+            'title' => 'Certificate Template',
+            'section' => 'certificate_config',
+            'configs' => $configs,
+            'document_requirements' => $this->model->documentRequirements(),
+            'certificate_classes' => $this->model->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+            'user' => $this->user,
+            'app_url' => $this->url(''),
+            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+        ]);
+    }
+
+    public function myCertificates()
+    {
+        if (!$this->requireUser() || $this->user['role'] !== 'trainee') {
+            return $this->deny('Only trainees can access their certificates.');
+        }
+
+        $trainee = $this->model->row('SELECT trainee_id FROM trainees WHERE user_id = ?', [(int) $this->user['user_id']]);
+        if (!$trainee) {
+            return $this->deny('Trainee record not found.');
+        }
+
+        $records = $this->model->rows('SELECT c.*, p.program_name, cl.class_name FROM certificates c JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.trainee_id = ? ORDER BY c.issue_date DESC', [(int) $trainee['trainee_id']]);
+
+        $eligibility = $this->model->rows('SELECT e.*, p.program_name, cl.class_name FROM certificate_eligibility e JOIN training_programs p ON p.program_id = e.program_id JOIN training_classes cl ON cl.class_id = e.class_id WHERE e.trainee_id = ? ORDER BY e.updated_at DESC', [(int) $trainee['trainee_id']]);
+
+        $this->render('module', [
+            'title' => 'My Certificates',
+            'section' => 'my_certificates',
+            'records' => $records,
+            'eligibility' => $eligibility,
+            'user' => $this->user,
+            'app_url' => $this->url(''),
+            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+        ]);
+    }
+
+    public function downloadCertificate($id)
+    {
+        if (!$this->requireUser()) {
+            return;
+        }
+
+        $certificate = $this->model->row('SELECT c.*, t.user_id FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id WHERE c.certificate_id = ?', [(int) $id]);
+        if (!$certificate) {
+            show_404();
+            return;
+        }
+
+        // Security check: trainees can only download their own certificates
+        if ($this->user['role'] === 'trainee' && (int) $certificate['user_id'] !== (int) $this->user['user_id']) {
+            return $this->deny('You are not allowed to download this certificate.');
+        }
+
+        // Staff/admin can download any certificate
+        if (!in_array($this->user['role'], ['administrator', 'staff', 'trainee'], true)) {
+            return $this->deny('You are not allowed to download certificates.');
+        }
+
+        if ($certificate['status'] !== 'issued') {
+            $this->notice('This certificate has been revoked.');
+            redirect($this->url('dashboard'));
+            return;
+        }
+
+        if (empty($certificate['file_path'])) {
+            $this->notice('Certificate file not available.');
+            redirect($this->url('dashboard'));
+            return;
+        }
+
+        $filePath = $this->privateCertificatePath($certificate['file_path']);
+        if (!$filePath) {
+            $this->notice('Certificate file not found.');
+            redirect($this->url('dashboard'));
+            return;
+        }
+
+        $this->model->logCertificateAction((int) $this->user['user_id'], (int) $certificate['certificate_id'], 'download', 'Certificate downloaded by ' . $this->user['role']);
+
+        header('Content-Type: application/pdf');
+        $disposition = isset($_GET['preview']) && $_GET['preview'] === '1' ? 'inline' : 'attachment';
+        header('Content-Disposition: ' . $disposition . '; filename="certificate_' . $certificate['certificate_number'] . '.pdf"');
+        header('Content-Length: ' . filesize($filePath));
+        readfile($filePath);
+        exit;
+    }
+
+    public function verifyCertificate()
+    {
+        $qrCode = isset($_GET['qr']) && is_scalar($_GET['qr']) ? trim((string) $_GET['qr']) : '';
+        $certificateNumber = isset($_GET['certificate_number']) && is_scalar($_GET['certificate_number'])
+            ? trim((string) $_GET['certificate_number'])
+            : '';
+
+        $certificate = null;
+        if ($qrCode) {
+            $certificate = $this->model->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, cl.class_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.qr_code = ?', [$qrCode]);
+        } elseif ($certificateNumber) {
+            $certificate = $this->model->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, cl.class_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.certificate_number = ?', [$certificateNumber]);
+        }
+
+        $this->render('verify_certificate', [
+            'title' => 'Certificate Verification',
+            'page' => 'verify_certificate',
+            'certificate' => $certificate,
+            'app_url' => $this->url(''),
+        ]);
     }
 
     private function privateDocumentPath($relativePath)
@@ -758,6 +1409,32 @@ class SmartTrack extends Controller
         $path = realpath(ROOT_DIR . ltrim((string) $relativePath, '/\\'));
         if (!$privateRoot || !$path || strpos($path, $privateRoot . DIRECTORY_SEPARATOR) !== 0 || !is_file($path)) {
             return null;
+        }
+        return $path;
+    }
+
+    private function privateCertificatePath($relativePath)
+    {
+        $certificateRoot = realpath(ROOT_DIR . 'runtime/uploads/certificates');
+        $path = realpath(ROOT_DIR . ltrim((string) $relativePath, '/\\'));
+        if (!$certificateRoot || !$path || strpos($path, $certificateRoot . DIRECTORY_SEPARATOR) !== 0 || !is_file($path)) {
+            return null;
+        }
+        return $path;
+    }
+
+    private function certificateVerificationUrl($token)
+    {
+        $path = $this->url('verify-certificate?qr=' . rawurlencode((string) $token));
+        $baseUrl = rtrim((string) config_item('base_url'), '/');
+        if ($baseUrl !== '') {
+            return $baseUrl . '/' . ltrim($path, '/');
+        }
+
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        if ($host !== '') {
+            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            return $scheme . '://' . $host . $path;
         }
         return $path;
     }
@@ -782,6 +1459,8 @@ class SmartTrack extends Controller
             'enrollments' => ['title' => 'Class enrollments', 'table' => 'class_enrollments', 'key' => 'enrollment_id', 'columns' => ['class_name', 'trainee_name', 'enrolled_at']],
             'attendance' => ['title' => 'Attendance', 'table' => 'attendance_records', 'key' => 'attendance_id', 'columns' => ['trainee_name', 'class_name', 'attendance_date', 'time_in', 'time_out', 'status', 'remarks']],
             'documents' => ['title' => 'Documents', 'table' => 'trainee_documents', 'key' => 'document_id', 'columns' => ['trainee_name', 'document_name', 'upload_date', 'status', 'access_level']],
+            'certificates' => ['title' => 'Certificates', 'table' => 'certificates', 'key' => 'certificate_id', 'columns' => ['trainee_name', 'program_name', 'class_name', 'certificate_number', 'issue_date', 'status']],
+            'eligibility' => ['title' => 'Certificate Eligibility', 'table' => 'certificate_eligibility', 'key' => 'eligibility_id', 'columns' => ['trainee_name', 'program_name', 'class_name', 'attendance_percentage', 'is_eligible', 'ineligibility_reasons']],
             'announcements' => ['title' => 'Announcements', 'table' => 'announcements', 'key' => 'announcement_id', 'columns' => ['title', 'status', 'author', 'created_at']],
             'inquiries' => ['title' => 'Inquiries', 'table' => 'inquiries', 'key' => 'inquiry_id', 'columns' => ['trainee_name', 'subject', 'message', 'reply', 'status', 'created_at']],
             'activity' => ['title' => 'Activity log', 'table' => 'activity_logs', 'key' => 'log_id', 'columns' => ['user_name', 'action', 'details', 'created_at']],
@@ -872,8 +1551,8 @@ class SmartTrack extends Controller
     private function canAccess($section)
     {
         $roles = [
-            'administrator' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries', 'activity'],
-            'staff' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries', 'activity'],
+            'administrator' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
+            'staff' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'announcements', 'inquiries', 'activity'],
             'instructor' => ['trainees', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries'],
             'trainee' => ['attendance', 'documents', 'announcements', 'inquiries'],
         ];
@@ -917,6 +1596,18 @@ class SmartTrack extends Controller
 
     private function render($page, array $data = [])
     {
+        if ($page === 'module') {
+            $section = $data['section'] ?? '';
+            $definition = $this->resourceDefinition($section);
+            $data['can_manage'] = $data['can_manage'] ?? $this->canManage($section);
+            $data['can_create'] = $data['can_create'] ?? false;
+            $data['primary_key'] = $data['primary_key'] ?? ($definition['key'] ?? '');
+            $data['fields'] = $data['fields'] ?? [];
+            $data['editing'] = $data['editing'] ?? null;
+            $data['records'] = $data['records'] ?? [];
+            $data['columns'] = $data['columns'] ?? [];
+            $data['options'] = $data['options'] ?? [];
+        }
         $data['page'] = $page;
         $data['user'] = $this->user;
         $data['csrf'] = $this->session->userdata('smarttrack_csrf');
@@ -924,19 +1615,30 @@ class SmartTrack extends Controller
         $data['app_url'] = $this->url('');
         $data['notice'] = $this->session->flashdata('smarttrack_notice');
         $data['flash_error'] = $this->session->flashdata('smarttrack_error');
+
         $navigation = [
-            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries', 'activity'],
-            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries', 'activity'],
+            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
+            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'announcements', 'inquiries', 'activity'],
             'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries'],
-            'trainee' => ['dashboard', 'attendance', 'documents', 'announcements', 'inquiries'],
+            'trainee' => ['dashboard', 'attendance', 'documents', 'my_certificates', 'announcements', 'inquiries'],
         ];
         $data['navigation'] = $this->user ? ($navigation[$this->user['role']] ?? []) : [];
+
         $this->call->view('smarttrack', $data);
     }
 
     private function input($key)
     {
         return $_POST[$key] ?? '';
+    }
+
+    private function recalculateEligibilityPair($traineeId, $classId)
+    {
+        $traineeId = (int) $traineeId;
+        $classId = (int) $classId;
+        if ($traineeId > 0 && $classId > 0) {
+            $this->model->calculateEligibility($traineeId, $classId);
+        }
     }
 
     private function validCsrf()
