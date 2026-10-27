@@ -73,6 +73,13 @@ class Api
     protected $users_table = 'users';
 
     /**
+     * Users Table Primary Key Column
+     *
+     * @var string
+     */
+    protected $users_table_id = 'id';
+
+    /**
      * Verify User On Each Request
      *
      * When TRUE, require_jwt() checks that the user exists and takes
@@ -171,6 +178,7 @@ class Api
         // Load config
         $this->refresh_token_table      = config_item('refresh_token_table') ?? $this->refresh_token_table;
         $this->users_table              = config_item('users_table') ?? $this->users_table;
+        $this->users_table_id           = config_item('users_table_id') ?? $this->users_table_id;
         $this->verify_user              = (bool) (config_item('jwt_verify_user') ?? $this->verify_user);
         $this->payload_token_expiration = (int) (config_item('payload_token_expiration') ?? $this->payload_token_expiration);
         $this->refresh_token_expiration = (int) (config_item('refresh_token_expiration') ?? $this->refresh_token_expiration);
@@ -511,6 +519,82 @@ class Api
         return preg_match('/Bearer\s(\S+)/i', $header, $matches) ? $matches[1] : null;
     }
 
+    public function generate_jwt($subject, $role = 'user', $custom_data = [])
+    {
+        $payload = [
+            'sub' => $subject,
+            'type' => 'access',
+            'role' => $role,
+            'scopes' => $this->scopes_for_role($role),
+        ];
+
+        if (is_array($custom_data)) {
+            $payload['custom_data'] = $custom_data;
+            $payload['role'] = $custom_data['role'] ?? $role;
+            $payload['user_id'] = $custom_data['user_id'] ?? $subject;
+        }
+
+        return $this->encode_jwt($payload);
+    }
+
+    public function generate_refresh_token($subject)
+    {
+        $payload = [
+            'sub' => $subject,
+            'type' => 'refresh',
+            'jti' => bin2hex(random_bytes(16)),
+        ];
+
+        return $this->encode_jwt($payload, $this->refresh_token_expiration);
+    }
+
+    public function refresh_jwt($refresh_token)
+    {
+        $payload = $this->validate_jwt($refresh_token, 'refresh');
+        if (!$payload) {
+            return null;
+        }
+
+        $hashed = hash_hmac('sha256', $refresh_token, $this->refresh_token_key);
+        $stmt = $this->_lava->db->raw(
+            "SELECT * FROM {$this->refresh_token_table} WHERE token = ? AND expires_at > NOW() LIMIT 1",
+            [$hashed]
+        );
+        $found = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$found) {
+            return null;
+        }
+
+        $user_stmt = $this->_lava->db->raw(
+            "SELECT {$this->users_table_id}, role FROM {$this->users_table} WHERE {$this->users_table_id} = ? LIMIT 1",
+            [$payload['sub']]
+        );
+        $user = $user_stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user) {
+            return null;
+        }
+
+        $this->revoke_refresh_token($refresh_token);
+
+        return $this->issue_tokens([
+            'id' => $user[$this->users_table_id],
+            'role' => $user['role'],
+            'scopes' => $this->scopes_for_role($user['role']),
+        ]);
+    }
+
+    public function get_jwt_data()
+    {
+        $token = $this->get_bearer_token();
+        if (!$token) {
+            return null;
+        }
+
+        return $this->validate_jwt($token, 'access');
+    }
+
     /**
      * scopes_for_role
      *
@@ -551,7 +635,7 @@ class Api
 
         if ($this->verify_user) {
             $stmt = $this->_lava->db->raw(
-                "SELECT id, role FROM {$this->users_table} WHERE id = ? LIMIT 1",
+                "SELECT {$this->users_table_id}, role FROM {$this->users_table} WHERE {$this->users_table_id} = ? LIMIT 1",
                 [$payload['sub']]
             );
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -648,7 +732,7 @@ class Api
         }
 
         $user_stmt = $this->_lava->db->raw(
-            "SELECT id, role FROM {$this->users_table} WHERE id = ? LIMIT 1",
+            "SELECT {$this->users_table_id}, role FROM {$this->users_table} WHERE {$this->users_table_id} = ? LIMIT 1",
             [$payload['sub']]
         );
         $user = $user_stmt->fetch(PDO::FETCH_ASSOC);

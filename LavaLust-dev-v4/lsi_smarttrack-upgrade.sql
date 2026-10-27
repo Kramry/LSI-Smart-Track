@@ -1,5 +1,24 @@
 -- Safe upgrade for an existing SmartTrack database that already has training_programs.
 -- Creates the missing application tables and leaves existing legacy tables/data untouched.
+-- Compatible with both MySQL 5.7+/8.x and MariaDB, and safe to re-run.
+
+SET NAMES utf8mb4;
+
+-- JWT Refresh Token Table for API authentication
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  token_hash VARCHAR(255) NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_user_id (user_id),
+  INDEX idx_token_hash (token_hash),
+  INDEX idx_expires_at (expires_at),
+  CONSTRAINT refresh_tokens_user_fk FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Portable helper: "ADD COLUMN IF NOT EXISTS" only exists in MariaDB, so we emulate it
+-- through information_schema. Usage: SET @tbl=..., @col=..., @def=...; then run the 4 lines.
 
 CREATE TABLE IF NOT EXISTS `users` (
   `user_id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -167,13 +186,23 @@ CREATE TABLE IF NOT EXISTS `activity_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Add missing columns to existing tables if they don't exist
-ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `email` varchar(100) DEFAULT NULL AFTER `username`;
+SET @tbl = 'users', @col = 'email', @def = 'varchar(100) DEFAULT NULL AFTER `username`';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-ALTER TABLE `trainees` ADD COLUMN IF NOT EXISTS `date_of_birth` date DEFAULT NULL AFTER `sex`;
-ALTER TABLE `trainees` ADD COLUMN IF NOT EXISTS `address` varchar(255) DEFAULT NULL AFTER `date_of_birth`;
-ALTER TABLE `trainees` ADD COLUMN IF NOT EXISTS `email` varchar(100) DEFAULT NULL AFTER `address`;
+SET @tbl = 'trainees', @col = 'date_of_birth', @def = 'date DEFAULT NULL AFTER `sex`';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'trainees', @col = 'address', @def = 'varchar(255) DEFAULT NULL AFTER `date_of_birth`';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'trainees', @col = 'email', @def = 'varchar(100) DEFAULT NULL AFTER `address`';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-ALTER TABLE `training_programs` ADD COLUMN IF NOT EXISTS `program_code` varchar(50) DEFAULT NULL AFTER `program_id`;
+SET @tbl = 'training_programs', @col = 'program_code', @def = 'varchar(50) DEFAULT NULL AFTER `program_id`';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- Certificate management tables
 CREATE TABLE IF NOT EXISTS `certificates` (
@@ -230,13 +259,22 @@ CREATE TABLE IF NOT EXISTS `certificate_eligibility` (
   KEY `idx_smarttrack_eligibility_class` (`class_id`),
   CONSTRAINT `smarttrack_eligibility_trainee_fk` FOREIGN KEY (`trainee_id`) REFERENCES `trainees` (`trainee_id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `smarttrack_eligibility_class_fk` FOREIGN KEY (`class_id`) REFERENCES `training_classes` (`class_id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `smarttrack_eligibility_reviewer_fk` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+  CONSTRAINT `smarttrack_eligibility_reviewer_fk` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_eligibility_approver_fk` FOREIGN KEY (`approved_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-ALTER TABLE `certificate_eligibility` ADD COLUMN IF NOT EXISTS `approval_status` varchar(20) NOT NULL DEFAULT 'pending';
-ALTER TABLE `certificate_eligibility` ADD COLUMN IF NOT EXISTS `approval_reason` text DEFAULT NULL;
-ALTER TABLE `certificate_eligibility` ADD COLUMN IF NOT EXISTS `approved_by` int unsigned DEFAULT NULL;
-ALTER TABLE `certificate_eligibility` ADD COLUMN IF NOT EXISTS `approved_at` timestamp NULL DEFAULT NULL;
+SET @tbl = 'certificate_eligibility', @col = 'approval_status', @def = 'varchar(20) NOT NULL DEFAULT ''pending''';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_eligibility', @col = 'approval_reason', @def = 'text DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_eligibility', @col = 'approved_by', @def = 'int unsigned DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_eligibility', @col = 'approved_at', @def = 'timestamp NULL DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS `training_assessments` (
   `assessment_id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -286,7 +324,9 @@ CREATE TABLE IF NOT EXISTS `certificate_audit_logs` (
   CONSTRAINT `smarttrack_certificate_audit_eligibility_fk` FOREIGN KEY (`eligibility_id`) REFERENCES `certificate_eligibility` (`eligibility_id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-ALTER TABLE `certificate_audit_logs` ADD COLUMN IF NOT EXISTS `eligibility_id` int unsigned DEFAULT NULL;
+SET @tbl = 'certificate_audit_logs', @col = 'eligibility_id', @def = 'int unsigned DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS `certificate_config` (
   `config_id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -298,7 +338,7 @@ CREATE TABLE IF NOT EXISTS `certificate_config` (
   UNIQUE KEY `uq_smarttrack_config_key` (`config_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Default certificate configuration
+-- Default certificate configuration (existing values are preserved)
 INSERT INTO `certificate_config` (`config_key`, `config_value`, `description`) VALUES
 ('institution_name', 'LSI Training Center', 'Name of the institution'),
 ('logo_path', '', 'Path to institution logo'),
@@ -308,4 +348,4 @@ INSERT INTO `certificate_config` (`config_key`, `config_value`, `description`) V
 ('require_documents', '1', 'Whether documents are required for certificate'),
 ('require_assessments', '0', 'Whether assessments are required for certificate'),
 ('required_assessment_count', '1', 'Number of passed assessments required per class')
-ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+ON DUPLICATE KEY UPDATE `config_key` = `config_key`; -- keep any values already customised

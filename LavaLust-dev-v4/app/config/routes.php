@@ -44,42 +44,87 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 */
 /** @var object $router **/
 
-$router->get('/', 'SmartTrack::index');
-$router->get('/login', 'SmartTrack::showLogin');
-$router->get('/setup', 'SmartTrack::setup');
-$router->get('/register', 'SmartTrack::register');
-$router->post('/login', 'SmartTrack::login');
-$router->post('/setup', 'SmartTrack::setup');
-$router->post('/register', 'SmartTrack::register');
-$router->post('/logout', 'SmartTrack::logout');
-$router->get('/dashboard', 'SmartTrack::dashboard');
-$router->get('/manage/certificates', 'SmartTrack::certificates');
-$router->get('/manage/eligibility', 'SmartTrack::eligibility');
-$router->get('/manage/assessments', 'SmartTrack::assessments');
-$router->get('/manage/certificate-config', 'SmartTrack::certificateConfig');
-$router->post('/manage/certificate-config', 'SmartTrack::certificateConfig');
-$router->post('/certificate-requirements/save', 'SmartTrack::saveDocumentRequirement');
-$router->post('/certificate-requirements/{id}/delete', 'SmartTrack::deleteDocumentRequirement');
-$router->get('/manage/{section}', 'SmartTrack::module');
-$router->post('/manage/{section}/save', 'SmartTrack::save');
-$router->post('/manage/{section}/delete/{id}', 'SmartTrack::delete');
-$router->get('/profile', 'SmartTrack::profile');
-$router->post('/profile/save', 'SmartTrack::saveProfile');
-$router->post('/profile/password', 'SmartTrack::savePassword');
-$router->post('/attendance/scan', 'SmartTrack::scanAttendance');
-$router->get('/reports/export/{period}', 'SmartTrack::exportReport');
-$router->post('/documents/upload', 'SmartTrack::uploadDocument');
-$router->get('/documents/{id}', 'SmartTrack::downloadDocument');
-$router->post('/documents/{id}/delete', 'SmartTrack::deleteDocument');
-$router->post('/documents/{id}/status', 'SmartTrack::updateDocumentStatus');
-$router->post('/certificates/recalculate', 'SmartTrack::recalculateEligibility');
-$router->post('/certificates/review', 'SmartTrack::reviewEligibility');
-$router->post('/certificates/eligibility/{id}/delete', 'SmartTrack::deleteEligibility');
-$router->post('/assessments/save', 'SmartTrack::saveAssessment');
-$router->post('/assessments/{id}/delete', 'SmartTrack::deleteAssessment');
-$router->post('/certificates/issue', 'SmartTrack::issueCertificate');
-$router->post('/certificates/revoke', 'SmartTrack::revokeCertificate');
-$router->get('/certificates/{id}/history', 'SmartTrack::certificateHistory');
-$router->get('/my-certificates', 'SmartTrack::myCertificates');
-$router->get('/certificates/{id}/download', 'SmartTrack::downloadCertificate');
-$router->get('/verify-certificate', 'SmartTrack::verifyCertificate');
+# AUTHENTICATION
+$router->get('/', 'Auth::index');
+$router->get('/login', 'Auth::showLogin');
+$router->get('/setup', 'Auth::setup');
+$router->get('/register', 'Auth::register');
+$router->post('/login', 'Auth::login');
+$router->post('/setup', 'Auth::setup');
+$router->post('/register', 'Auth::register');
+$router->post('/logout', 'Auth::logout');
+
+# DASHBOARD & MODULES
+$router->get('/dashboard', 'Dashboard::dashboard');
+$router->get('/manage/{section}', 'Dashboard::module');
+$router->post('/manage/{section}/save', 'Dashboard::save');
+$router->post('/manage/{section}/delete/{id}', 'Dashboard::delete');
+
+# PROFILE
+$router->get('/profile', 'Profile::profile');
+$router->post('/profile/save', 'Profile::saveProfile');
+$router->post('/profile/password', 'Profile::savePassword');
+
+# ATTENDANCE
+$router->post('/attendance/scan', 'Attendance::scanAttendance');
+$router->get('/reports/export/{period}', 'Attendance::exportReport');
+
+# DOCUMENTS
+$router->post('/documents/upload', 'Documents::uploadDocument');
+$router->get('/documents/{id}', 'Documents::downloadDocument');
+$router->post('/documents/{id}/delete', 'Documents::deleteDocument');
+$router->post('/documents/{id}/status', 'Documents::updateDocumentStatus');
+
+# CERTIFICATE CONFIG
+$router->post('/certificate-requirements/save', 'Documents::saveDocumentRequirement');
+$router->post('/certificate-requirements/{id}/delete', 'Documents::deleteDocumentRequirement');
+
+# ASSESSMENTS
+$router->get('/manage/assessments', 'Assessments::assessments');
+$router->post('/assessments/save', 'Assessments::saveAssessment');
+$router->post('/assessments/{id}/delete', 'Assessments::deleteAssessment');
+
+# CERTIFICATES
+$router->get('/manage/certificates', 'Certificates::certificates');
+$router->get('/manage/eligibility', 'Certificates::eligibility');
+$router->get('/manage/certificate-config', 'Certificates::certificateConfig');
+$router->post('/manage/certificate-config', 'Certificates::certificateConfig');
+$router->post('/certificates/recalculate', 'Certificates::recalculateEligibility');
+$router->post('/certificates/review', 'Certificates::reviewEligibility');
+$router->post('/certificates/eligibility/{id}/delete', 'Certificates::deleteEligibility');
+$router->post('/certificates/issue', 'Certificates::issueCertificate');
+$router->post('/certificates/revoke', 'Certificates::revokeCertificate');
+$router->get('/certificates/{id}/history', 'Certificates::certificateHistory');
+$router->get('/my-certificates', 'Certificates::myCertificates');
+$router->get('/certificates/{id}/download', 'Certificates::downloadCertificate');
+$router->get('/verify-certificate', 'Certificates::verifyCertificate');
+
+# API ENDPOINTS
+$router->get('/api/session', 'SmartTrack_api::apiSession');
+$router->post('/api/login', 'SmartTrack_api::apiLogin');
+$router->post('/api/refresh', 'SmartTrack_api::apiRefresh');
+$router->post('/api/logout', 'SmartTrack_api::apiLogout');
+$router->get('/api/dashboard', 'SmartTrack_api::apiDashboard');
+$router->get('/api/modules/{section}', 'SmartTrack_api::apiModule');
+$router->get('/api/trainees', 'SmartTrack_api::getTrainees');
+$router->post('/api/modules/{section}/save', 'SmartTrack_api::apiSaveModule');
+$router->post('/api/modules/{section}/delete/{id}', 'SmartTrack_api::apiDeleteModule');
+$router->post('/api/profile/save', 'SmartTrack_api::apiSaveProfile');
+$router->post('/api/profile/password', 'SmartTrack_api::apiSavePassword');
+$router->post('/api/documents/upload', 'SmartTrack_api::apiUploadDocument');
+$router->get('/api/documents/{id}', 'SmartTrack_api::apiDownloadDocument');
+$router->post('/api/documents/{id}/status', 'SmartTrack_api::apiUpdateDocumentStatus');
+$router->post('/api/documents/{id}/delete', 'SmartTrack_api::apiDeleteDocument');
+$router->post('/api/assessments/save', 'SmartTrack_api::apiSaveAssessment');
+$router->post('/api/assessments/{id}/delete', 'SmartTrack_api::apiDeleteAssessment');
+$router->post('/api/attendance/scan', 'SmartTrack_api::apiScanAttendance');
+$router->get('/api/reports/export/{period}', 'SmartTrack_api::apiExportReport');
+$router->post('/api/certificates/review', 'SmartTrack_api::apiReviewEligibility');
+$router->post('/api/certificates/recalculate', 'SmartTrack_api::apiRecalculateEligibility');
+$router->post('/api/certificates/eligibility/{id}/delete', 'SmartTrack_api::apiDeleteEligibility');
+$router->post('/api/certificates/issue', 'SmartTrack_api::apiIssueCertificate');
+$router->post('/api/certificates/revoke', 'SmartTrack_api::apiRevokeCertificate');
+$router->get('/api/certificates/{id}/download', 'SmartTrack_api::downloadCertificate');
+$router->post('/api/certificate-config', 'SmartTrack_api::apiSaveCertificateConfig');
+$router->post('/api/certificate-requirements/save', 'SmartTrack_api::apiSaveDocumentRequirement');
+$router->post('/api/certificate-requirements/{id}/delete', 'SmartTrack_api::apiDeleteDocumentRequirement');
