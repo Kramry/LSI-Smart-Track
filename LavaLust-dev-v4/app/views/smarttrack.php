@@ -816,7 +816,7 @@ $labels = [
     "") ===
 "approved"
     ? "selected"
-    : "" ?>>Approved</option><?php endif; ?><option value="rejected" <?= ($editing_eligibility[
+    : "" ?>>Approved</option><?php else: ?><option value="approved" disabled>Approved (eligibility requirements not met)</option><?php endif; ?><option value="rejected" <?= ($editing_eligibility[
     "approval_status"
 ] ??
     "") ===
@@ -828,6 +828,11 @@ $labels = [
                                             "approval_reason"
                                         ] ?? "",
                                     ) ?>" required></label>
+                                    <?php if (empty($editing_eligibility["is_eligible"])): ?>
+                                        <p class="muted">Approval is unavailable until eligibility requirements are met. Current blockers: <?= $e(
+                                            $editing_eligibility["ineligibility_reasons"] ?: "Review the eligibility requirements.",
+                                        ) ?></p>
+                                    <?php endif; ?>
                                     <button class="button primary" type="submit">Save review</button>
                                 </form>
                             </section>
@@ -1278,7 +1283,9 @@ $labels = [
             : "No records yet. Use the form to add the first one.")) ?></p><?php else: ?>
                                 <div class="table-scroll"><table><thead><tr><?php
                                 foreach ($columns as $column): ?><th><?= $e(
-    ucwords(str_replace("_", " ", $column)),
+    $column === "documents_approved"
+        ? "Required Documents Matched"
+        : ucwords(str_replace("_", " ", $column)),
 ) ?></th><?php endforeach;
                                 if (
                                     $can_manage ||
@@ -1301,7 +1308,11 @@ $labels = [
                                     ): ?><tr><?php foreach (
     $columns
     as $column
-): ?><td><?php if ($column === "qr_code"): ?><div class="qr-cell"><code><?= $e(
+): ?><td><?php if ($column === "documents_approved"): ?><?= $e(
+    $record["documents_approved"] ?? 0,
+) ?>/<?= $e($record["documents_required"] ?? 0) ?><?php elseif (
+    $column === "qr_code"
+): ?><div class="qr-cell"><code><?= $e(
     $record[$column] ?? "",
 ) ?></code><div class="qr-code" data-qr="<?= $e(
     $record[$column] ?? "",
