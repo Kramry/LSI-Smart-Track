@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id INT UNSIGNED NOT NULL,
   token_hash VARCHAR(255) NOT NULL,
+  jti VARCHAR(64) NOT NULL,
   expires_at TIMESTAMP NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_user_id (user_id),
@@ -349,3 +350,98 @@ INSERT INTO `certificate_config` (`config_key`, `config_value`, `description`) V
 ('require_assessments', '0', 'Whether assessments are required for certificate'),
 ('required_assessment_count', '1', 'Number of passed assessments required per class')
 ON DUPLICATE KEY UPDATE `config_key` = `config_key`; -- keep any values already customised
+
+-- Versioned certificate templates. Template files are stored under runtime/uploads/private.
+CREATE TABLE IF NOT EXISTS `certificate_templates` (
+  `template_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `version` int unsigned NOT NULL,
+  `mode` enum('upload','generate') NOT NULL,
+  `file_path` varchar(255) DEFAULT NULL,
+  `file_mime` varchar(100) DEFAULT NULL,
+  `field_layout` json NOT NULL,
+  `settings` json NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 0,
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`template_id`),
+  UNIQUE KEY `uq_certificate_template_version` (`version`),
+  KEY `idx_certificate_template_active` (`is_active`),
+  CONSTRAINT `smarttrack_certificate_template_creator_fk`
+    FOREIGN KEY (`created_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @tbl = 'certificates', @col = 'template_id', @def = 'int unsigned DEFAULT NULL AFTER `qr_code`';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- E-signatures. Certificates.status already exists; widen it for pending_signature.
+ALTER TABLE `certificates` MODIFY `status` varchar(32) NOT NULL DEFAULT 'issued';
+
+CREATE TABLE IF NOT EXISTS `certificate_signatories` (
+  `signatory_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int unsigned NOT NULL,
+  `name` varchar(150) NOT NULL,
+  `position` varchar(150) NOT NULL,
+  `signature_path` varchar(255) NOT NULL,
+  `field_x` decimal(5,2) NOT NULL DEFAULT 24.00,
+  `field_y` decimal(5,2) NOT NULL DEFAULT 86.00,
+  `font_size` smallint unsigned NOT NULL DEFAULT 12,
+  `alignment` char(1) NOT NULL DEFAULT 'C',
+  `is_required` tinyint(1) NOT NULL DEFAULT 1,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`signatory_id`),
+  UNIQUE KEY `uq_certificate_signatory_user` (`user_id`),
+  KEY `idx_certificate_signatory_active` (`is_active`),
+  CONSTRAINT `smarttrack_certificate_signatory_user_fk`
+    FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_certificate_signatory_creator_fk`
+    FOREIGN KEY (`created_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `certificate_signatures` (
+  `signature_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `certificate_id` int unsigned NOT NULL,
+  `signatory_id` int unsigned NOT NULL,
+  `user_id` int unsigned NOT NULL,
+  `status` enum('pending','signed','rejected') NOT NULL DEFAULT 'pending',
+  `signature_path` varchar(255) DEFAULT NULL,
+  `signatory_name` varchar(150) NOT NULL,
+  `position` varchar(150) NOT NULL,
+  `field_x` decimal(5,2) NOT NULL,
+  `field_y` decimal(5,2) NOT NULL,
+  `font_size` smallint unsigned NOT NULL,
+  `alignment` char(1) NOT NULL,
+  `is_required` tinyint(1) NOT NULL DEFAULT 1,
+  `signed_at` datetime DEFAULT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `certificate_hash` char(64) DEFAULT NULL,
+  `remarks` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`signature_id`),
+  UNIQUE KEY `uq_certificate_signature_slot` (`certificate_id`, `signatory_id`),
+  KEY `idx_certificate_signature_queue` (`user_id`, `status`),
+  CONSTRAINT `smarttrack_certificate_signature_certificate_fk`
+    FOREIGN KEY (`certificate_id`) REFERENCES `certificates` (`certificate_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_certificate_signature_signatory_fk`
+    FOREIGN KEY (`signatory_id`) REFERENCES `certificate_signatories` (`signatory_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_certificate_signature_user_fk`
+    FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `certificate_notifications` (
+  `notification_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int unsigned NOT NULL,
+  `certificate_id` int unsigned NOT NULL,
+  `message` varchar(255) NOT NULL,
+  `read_at` datetime DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`notification_id`),
+  KEY `idx_certificate_notification_user` (`user_id`, `read_at`),
+  CONSTRAINT `smarttrack_certificate_notification_user_fk`
+    FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_certificate_notification_certificate_fk`
+    FOREIGN KEY (`certificate_id`) REFERENCES `certificates` (`certificate_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

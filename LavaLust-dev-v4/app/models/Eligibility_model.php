@@ -124,11 +124,11 @@ class Eligibility_model extends Base_model
         foreach ($submittedDocuments as $document) {
             $submittedNames[mb_strtolower(trim($document['document_name']))] = true;
         }
-        $approvedDocuments = 0;
+        $matchedRequiredDocuments = 0;
         $missingDocuments = [];
         foreach ($requirements as $requirement) {
             if (isset($submittedNames[mb_strtolower(trim($requirement['required_document_name']))])) {
-                $approvedDocuments++;
+                $matchedRequiredDocuments++;
             } else {
                 $missingDocuments[] = $requirement['required_document_name'];
             }
@@ -138,7 +138,7 @@ class Eligibility_model extends Base_model
             if (!$requirements) {
                 $reasons[] = 'No required-document checklist is configured for this class';
             } elseif ($missingDocuments) {
-                $reasons[] = 'Missing approved documents: ' . implode(', ', $missingDocuments);
+                $reasons[] = 'Missing required documents: ' . implode(', ', $missingDocuments);
             }
         }
 
@@ -165,7 +165,7 @@ class Eligibility_model extends Base_model
             || (float) $check['attendance_percentage'] !== round($attendancePercentage, 2)
             || (int) $check['documents_submitted'] !== $documentsSubmitted
             || (int) $check['documents_required'] !== $documentsRequired
-            || (int) $check['documents_approved'] !== $approvedDocuments
+            || (int) $check['documents_approved'] !== $matchedRequiredDocuments
             || (int) $check['assessments_completed'] !== $assessmentsPassed
             || (int) $check['assessments_required'] !== ($requireAssessments ? $requiredAssessments : 0)
             || (int) $check['is_eligible'] !== (int) $isEligible
@@ -177,7 +177,7 @@ class Eligibility_model extends Base_model
                 round($attendancePercentage, 2),
                 $documentsSubmitted,
                 $documentsRequired,
-                $approvedDocuments,
+                $matchedRequiredDocuments,
                 $assessmentsPassed,
                 $requireAssessments ? $requiredAssessments : 0,
                 $isEligible ? 1 : 0,
@@ -196,7 +196,7 @@ class Eligibility_model extends Base_model
                 round($attendancePercentage, 2),
                 $documentsSubmitted,
                 $documentsRequired,
-                $approvedDocuments,
+                $matchedRequiredDocuments,
                 $assessmentsPassed,
                 $requireAssessments ? $requiredAssessments : 0,
                 $isEligible ? 1 : 0,
@@ -210,7 +210,7 @@ class Eligibility_model extends Base_model
             'attendance_percentage' => $attendancePercentage,
             'documents_submitted' => $documentsSubmitted,
             'documents_required' => $documentsRequired,
-            'documents_approved' => $approvedDocuments,
+            'documents_approved' => $matchedRequiredDocuments,
             'assessments_passed' => $assessmentsPassed,
             'assessments_required' => $requireAssessments ? $requiredAssessments : 0,
         ];

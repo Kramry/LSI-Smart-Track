@@ -3,7 +3,20 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 class Base extends Controller
 {
+    /** @var Record_model */
     protected $model;
+    /** @var Certificate_model */
+    protected $certificateModel;
+    /** @var Assessment_model */
+    protected $assessmentModel;
+    /** @var Config_model */
+    protected $configModel;
+    /** @var Document_model */
+    protected $documentModel;
+    /** @var Eligibility_model */
+    protected $eligibilityModel;
+    /** @var Record_model */
+    protected $recordModel;
     protected $user;
     protected $apiRequest = false;
     protected $db;
@@ -12,6 +25,9 @@ class Base extends Controller
 
     public function before_action()
     {
+        $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+        $this->apiRequest = (bool) preg_match('~(?:^|/)api(?:/|$)~', $requestPath);
+
         require_once APP_DIR . 'models/Base_model.php';
         require_once APP_DIR . 'models/User_model.php';
         require_once APP_DIR . 'models/Record_model.php';
@@ -72,8 +88,8 @@ class Base extends Controller
         $data['flash_error'] = $this->session->flashdata('error');
 
         $navigation = [
-            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'announcements', 'inquiries', 'activity'],
+            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
+            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
             'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries'],
             'trainee' => ['dashboard', 'attendance', 'documents', 'my_certificates', 'announcements', 'inquiries'],
         ];
@@ -134,7 +150,7 @@ class Base extends Controller
     {
         $roles = [
             'administrator' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'staff' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'announcements', 'inquiries', 'activity'],
+            'staff' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
             'instructor' => ['trainees', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries'],
             'trainee' => ['attendance', 'documents', 'announcements', 'inquiries'],
         ];
@@ -189,7 +205,7 @@ class Base extends Controller
     {
         $navigation = [
             'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity', 'profile'],
-            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'announcements', 'inquiries', 'activity', 'profile'],
+            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity', 'profile'],
             'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries', 'profile'],
             'trainee' => ['dashboard', 'attendance', 'documents', 'my_certificates', 'announcements', 'inquiries', 'profile'],
         ];

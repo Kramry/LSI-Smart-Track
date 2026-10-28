@@ -5,6 +5,21 @@ require_once APP_DIR . 'models/Base_model.php';
 
 class Assessment_model extends Base_model
 {
+        public function __construct()
+    {
+        parent::__construct(lava_instance()->db);
+    }
+
+    public function all()
+    {
+        return $this->rows("SELECT * FROM training_assessments ORDER BY date_assessed DESC");
+    }
+
+    public function insert($data)
+    {
+        return $this->db->table('training_assessments')->insert($data);
+    }
+    
     public function assessmentRecords()
     {
         return $this->rows('SELECT a.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, t.qr_code AS trainee_number, c.class_name, p.program_name, u.full_name AS assessor_name FROM training_assessments a JOIN trainees t ON t.trainee_id = a.trainee_id JOIN training_classes c ON c.class_id = a.class_id JOIN training_programs p ON p.program_id = c.program_id JOIN users u ON u.user_id = a.assessed_by ORDER BY a.assessment_date DESC, a.assessment_id DESC');

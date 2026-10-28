@@ -56,9 +56,6 @@ $router->post('/logout', 'Auth::logout');
 
 # DASHBOARD & MODULES
 $router->get('/dashboard', 'Dashboard::dashboard');
-$router->get('/manage/{section}', 'Dashboard::module');
-$router->post('/manage/{section}/save', 'Dashboard::save');
-$router->post('/manage/{section}/delete/{id}', 'Dashboard::delete');
 
 # PROFILE
 $router->get('/profile', 'Profile::profile');
@@ -81,23 +78,40 @@ $router->post('/certificate-requirements/{id}/delete', 'Documents::deleteDocumen
 
 # ASSESSMENTS
 $router->get('/manage/assessments', 'Assessments::assessments');
-$router->post('/assessments/save', 'Assessments::saveAssessment');
-$router->post('/assessments/{id}/delete', 'Assessments::deleteAssessment');
+$router->post('/manage/assessments/save', 'Assessments::saveAssessment');
+$router->post('/manage/assessments/delete/{id}', 'Assessments::deleteAssessment');
 
 # CERTIFICATES
 $router->get('/manage/certificates', 'Certificates::certificates');
 $router->get('/manage/eligibility', 'Certificates::eligibility');
 $router->get('/manage/certificate-config', 'Certificates::certificateConfig');
 $router->post('/manage/certificate-config', 'Certificates::certificateConfig');
+$router->post('/certificates/template-preview', 'Certificates::certificateTemplatePreview');
+$router->post('/manage/certificate-config/{id}/activate', 'Certificates::activateCertificateTemplate');
+$router->get('/certificate-templates/{id}/preview', 'Certificates::previewCertificateTemplate');
+$router->get('/certificate-templates/{id}/logo', 'Certificates::previewCertificateTemplateLogo');
 $router->post('/certificates/recalculate', 'Certificates::recalculateEligibility');
 $router->post('/certificates/review', 'Certificates::reviewEligibility');
 $router->post('/certificates/eligibility/{id}/delete', 'Certificates::deleteEligibility');
 $router->post('/certificates/issue', 'Certificates::issueCertificate');
 $router->post('/certificates/revoke', 'Certificates::revokeCertificate');
+$router->get('/manage/certificates-to-sign', 'Certificates::certificatesToSign');
+$router->get('/certificates/{id}/sign-preview', 'Certificates::previewCertificateForSigning');
+$router->post('/certificates/{id}/sign', 'Certificates::signCertificate');
+$router->post('/certificates/{id}/reject-signature', 'Certificates::rejectCertificateSignature');
+$router->post('/certificates/{id}/resubmit-signature', 'Certificates::resubmitCertificateForSignature');
+$router->post('/certificates/{id}/finalize', 'Certificates::finalizeSignedCertificate');
+$router->post('/manage/certificate-config/signatories/save', 'Certificates::saveCertificateSignatory');
+$router->post('/manage/certificate-config/signatories/{id}/deactivate', 'Certificates::deactivateCertificateSignatory');
 $router->get('/certificates/{id}/history', 'Certificates::certificateHistory');
 $router->get('/my-certificates', 'Certificates::myCertificates');
 $router->get('/certificates/{id}/download', 'Certificates::downloadCertificate');
 $router->get('/verify-certificate', 'Certificates::verifyCertificate');
+
+# DASHBOARD MODULE FALLBACKS
+$router->get('/manage/{section}', 'Dashboard::module');
+$router->post('/manage/{section}/save', 'Dashboard::save');
+$router->post('/manage/{section}/delete/{id}', 'Dashboard::delete');
 
 # API ENDPOINTS
 $router->get('/api/session', 'SmartTrack_api::apiSession');

@@ -9,7 +9,7 @@ class SmartTrack_api extends Base
         $this->jsonResponse([
             'authenticated' => (bool) $this->user,
             'user' => $this->user,
-            'csrf' => $this->session->userdata('smarttrack_csrf'),
+            'csrf' => $this->session->userdata('csrf'),
             'navigation' => $this->navigationForUser(),
         ]);
     }
@@ -34,14 +34,24 @@ class SmartTrack_api extends Base
             'role' => $account['role'],
         ];
 
-        $token = $this->api->generate_jwt($account['user_id'], $user['role'], $user);
-        $refreshToken = $this->api->generate_refresh_token($account['user_id']);
+        $tokens = $this->api->issue_tokens([
+            'id' => $account['user_id'],
+            'role' => $user['role'],
+            'custom_data' => $user,
+        ]);
+
+        session_regenerate_id(true);
+        $csrf = bin2hex(random_bytes(32));
+        $this->session->set_userdata('user', $user);
+        $this->session->set_userdata('csrf', $csrf);
+        $this->user = $user;
 
         $this->api->respond([
             'authenticated' => true,
             'user' => $user,
-            'access_token' => $token,
-            'refresh_token' => $refreshToken,
+            'csrf' => $csrf,
+            'access_token' => $tokens['access_token'],
+            'refresh_token' => $tokens['refresh_token'],
             'navigation' => $this->navigationForUser(),
         ]);
     }
@@ -49,10 +59,10 @@ class SmartTrack_api extends Base
     public function apiLogout()
     {
         $this->api->require_method('POST');
-        $this->api->require_jwt();
+        $tokenData = $this->api->require_jwt();
 
-        $tokenData = $this->api->get_jwt_data();
-        $this->api->revoke_refresh_token($tokenData['sub']);
+        $this->api->revoke_user_refresh_tokens($tokenData['sub']);
+        $this->session->sess_destroy();
 
         $this->api->respond(['authenticated' => false]);
     }
@@ -89,13 +99,13 @@ class SmartTrack_api extends Base
         $user = $tokenData['custom_data'] ?? [];
 
         $data = [
-            'stats' => $this->model->dashboardStats($user),
-            'attendance' => $this->model->recentAttendance($user),
-            'announcements' => $this->model->announcements(),
+            'stats' => $this->dashboardModel->dashboardStats($user),
+            'attendance' => $this->dashboardModel->recentAttendance($user),
+            'announcements' => $this->dashboardModel->announcements(),
         ];
 
         if (in_array($user['role'], ['administrator', 'staff', 'instructor'], true)) {
-            $data['charts'] = $this->model->dashboardChartData($user);
+            $data['charts'] = $this->dashboardModel->dashboardChartData($user);
         }
 
         $this->api->respond($data);
@@ -139,19 +149,19 @@ class SmartTrack_api extends Base
             $key = $definition['key'];
             $canManage = $this->canManage($section)
                 && in_array($section, ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'announcements', 'inquiries'], true);
-            $records = $this->model->records($section, $user);
+            $records = $this->recordModel->records($section, $user);
             $fields = $canManage ? $this->fieldsFor($section) : [];
         } elseif ($section === 'certificates' && in_array($user['role'], ['administrator', 'staff'], true)) {
-            $this->model->refreshEligibilityRecords();
-            $records = $this->model->getCertificates([]);
+            $this->eligibilityModel->refreshEligibilityRecords();
+            $records = $this->certificateModel->getCertificates([]);
             $columns = ['trainee_name', 'program_name', 'class_name', 'certificate_number', 'issue_date', 'status'];
             $key = 'certificate_id';
         } elseif ($section === 'eligibility' && in_array($user['role'], ['administrator', 'staff'], true)) {
-            $records = $this->model->getEligibilityRecords([]);
+            $records = $this->eligibilityModel->getEligibilityRecords([]);
             $columns = ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'attendance_percentage', 'documents_approved', 'assessments_completed', 'is_eligible', 'approval_status', 'ineligibility_reasons'];
             $key = 'eligibility_id';
         } elseif ($section === 'assessments' && in_array($user['role'], ['administrator', 'staff'], true)) {
-            $records = $this->model->assessmentRecords();
+            $records = $this->assessmentModel->assessmentRecords();
             $columns = ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'];
             $key = 'assessment_id';
             $fields = [
@@ -163,9 +173,9 @@ class SmartTrack_api extends Base
                 ['name' => 'notes', 'label' => 'Notes', 'type' => 'textarea'],
             ];
         } elseif ($section === 'my_certificates' && $user['role'] === 'trainee') {
-            $trainee = $this->model->row('SELECT trainee_id FROM trainees WHERE user_id = ?', [(int) $user['user_id']]);
+            $trainee = $this->certificateModel->row('SELECT trainee_id FROM trainees WHERE user_id = ?', [(int) $user['user_id']]);
             if ($trainee) {
-                $records = $this->model->rows('SELECT c.*, p.program_name, cl.class_name FROM certificates c JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.trainee_id = ? ORDER BY c.issue_date DESC', [(int) $trainee['trainee_id']]);
+                $records = $this->certificateModel->rows('SELECT c.*, p.program_name, cl.class_name FROM certificates c JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.trainee_id = ? ORDER BY c.issue_date DESC', [(int) $trainee['trainee_id']]);
             }
             $columns = ['certificate_number', 'program_name', 'class_name', 'issue_date', 'status'];
             $key = 'certificate_id';
@@ -176,14 +186,31 @@ class SmartTrack_api extends Base
                 'min_attendance_percentage', 'require_documents', 'require_assessments',
                 'required_assessment_count', 'certificate_title', 'certificate_subtitle', 'template_color',
             ] as $configKey) {
-                $configs[$configKey] = $this->model->getConfig($configKey, '');
+                $configs[$configKey] = $this->configModel->getConfig($configKey, '');
             }
+            $activeTemplate = $this->certificateModel->activeCertificateTemplate();
             $this->api->respond([
                 'title' => 'Certificate Settings',
                 'section' => 'certificate_config',
                 'configs' => $configs,
-                'document_requirements' => $this->model->documentRequirements(),
-                'certificate_classes' => $this->model->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+                'active_template' => $activeTemplate ? [
+                    'template_id' => (int) $activeTemplate['template_id'],
+                    'version' => (int) $activeTemplate['version'],
+                    'mode' => $activeTemplate['mode'],
+                    'settings' => array_diff_key($activeTemplate['settings'], ['logo_path' => true]),
+                    'field_layout' => $activeTemplate['field_layout'],
+                ] : null,
+                'template_versions' => array_map(static function ($template) {
+                    return [
+                        'template_id' => (int) $template['template_id'],
+                        'version' => (int) $template['version'],
+                        'mode' => $template['mode'],
+                        'is_active' => (int) $template['is_active'] === 1,
+                        'created_at' => $template['created_at'],
+                    ];
+                }, $this->certificateModel->certificateTemplateHistory()),
+                'document_requirements' => $this->documentModel->documentRequirements(),
+                'certificate_classes' => $this->certificateModel->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
                 'can_configure_certificates' => true,
                 'can_manage' => false,
                 'records' => [],
@@ -240,22 +267,22 @@ class SmartTrack_api extends Base
             'can_configure_certificates' => $section === 'certificate_config' && $user['role'] === 'administrator',
             'can_scan_attendance' => $section === 'attendance' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true),
             'attendance_options' => $section === 'attendance' ? [
-                'classes' => $this->model->options('classes', $user),
+                'classes' => $this->recordModel->options('classes', $user),
                 'schedules' => $user['role'] === 'instructor'
-                    ? $this->model->rows('SELECT s.schedule_id AS id, s.class_id, CONCAT(s.schedule_date, " - ", s.start_time) AS label FROM training_schedules s JOIN training_classes c ON c.class_id = s.class_id WHERE s.schedule_date = CURDATE() AND c.instructor_id = ? ORDER BY s.start_time', [(int) $user['user_id']])
-                    : $this->model->rows('SELECT schedule_id AS id, class_id, CONCAT(schedule_date, " - ", start_time) AS label FROM training_schedules WHERE schedule_date = CURDATE() ORDER BY start_time'),
+                    ? $this->recordModel->rows("SELECT s.schedule_id AS id, s.class_id, s.schedule_date, (s.schedule_date = CURDATE()) AS is_today, CONCAT(DATE_FORMAT(s.schedule_date, '%b %e'), ' - ', TIME_FORMAT(s.start_time, '%h:%i %p')) AS label FROM training_schedules s JOIN training_classes c ON c.class_id = s.class_id WHERE s.schedule_date >= CURDATE() AND c.instructor_id = ? ORDER BY s.schedule_date, s.start_time", [(int) $user['user_id']])
+                    : $this->recordModel->rows("SELECT schedule_id AS id, class_id, schedule_date, (schedule_date = CURDATE()) AS is_today, CONCAT(DATE_FORMAT(schedule_date, '%b %e'), ' - ', TIME_FORMAT(start_time, '%h:%i %p')) AS label FROM training_schedules WHERE schedule_date >= CURDATE() ORDER BY schedule_date, start_time"),
             ] : [],
             'attendance_followups' => $section === 'attendance' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true)
-                ? $this->model->absenceFollowUps($user)
+                ? $this->dashboardModel->absenceFollowUps($user)
                 : [],
             'document_options' => $section === 'documents' ? [
-                'trainees' => $this->model->options('trainees', $user),
-                'classes' => $this->model->options('classes', $user),
+                'trainees' => $this->recordModel->options('trainees', $user),
+                'classes' => $this->recordModel->options('classes', $user),
             ] : [],
-            'certificate_stats' => $section === 'certificates' ? $this->model->certificateStats() : null,
+            'certificate_stats' => $section === 'certificates' ? $this->certificateModel->certificateStats() : null,
             'assessment_options' => $section === 'assessments' ? [
-                'trainees' => $this->model->options('trainees', $user),
-                'classes' => $this->model->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+                'trainees' => $this->recordModel->options('trainees', $user),
+                'classes' => $this->recordModel->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
             ] : [],
         ]);
     }
