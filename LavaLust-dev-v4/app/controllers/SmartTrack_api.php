@@ -151,7 +151,7 @@ class SmartTrack_api extends Base
             $columns = ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'attendance_percentage', 'documents_approved', 'assessments_completed', 'is_eligible', 'approval_status', 'ineligibility_reasons'];
             $key = 'eligibility_id';
         } elseif ($section === 'assessments' && in_array($user['role'], ['administrator', 'staff'], true)) {
-            $records = $this->model->assessmentRecords();
+            $records = $this->assessmentModel->assessmentRecords();
             $columns = ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'];
             $key = 'assessment_id';
             $fields = [

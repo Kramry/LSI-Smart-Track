@@ -212,7 +212,10 @@ $labels = [
                             ? "dashboard"
                             : ($item === "my_certificates"
                                 ? "my-certificates"
-                                : "manage/" . $item); ?>
+                                : "manage/" .
+                                    ($item === "certificate_config"
+                                        ? "certificate-config"
+                                        : $item)); ?>
                     <a class="<?= ($section ?? "") === $item ||
                     ($page === "dashboard" && $item === "dashboard")
                         ? "active"

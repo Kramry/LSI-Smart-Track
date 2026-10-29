@@ -14,7 +14,7 @@ class Assessments extends Base
         $editing = null;
         if (array_key_exists('edit', $_GET)) {
             $editId = is_scalar($_GET['edit']) ? (string) $_GET['edit'] : '';
-            if (!ctype_digit($editId) || !(int) $editId || !($editing = $this->model->assessmentById((int) $editId))) {
+            if (!ctype_digit($editId) || !(int) $editId || !($editing = $this->assessmentModel->assessmentById((int) $editId))) {
                 show_404();
                 return;
             }
@@ -22,12 +22,12 @@ class Assessments extends Base
         $this->render('module', [
             'title' => 'Training Assessments',
             'section' => 'assessments',
-            'records' => $this->model->assessmentRecords(),
+            'records' => $this->assessmentModel->assessmentRecords(),
             'editing' => $editing,
             'primary_key' => 'assessment_id',
             'options' => [
-                'trainees' => $this->model->options('trainees', $this->user),
-                'classes' => $this->model->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+                'trainees' => $this->recordModel->options('trainees', $this->user),
+                'classes' => $this->recordModel->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
             ],
             'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'],
         ]);
@@ -48,11 +48,11 @@ class Assessments extends Base
         $assessmentId = trim((string) $this->input('assessment_id'));
         $editing = null;
         if ($assessmentId !== '') {
-            if (!ctype_digit($assessmentId) || !(int) $assessmentId || !($editing = $this->model->assessmentById((int) $assessmentId))) {
+            if (!ctype_digit($assessmentId) || !(int) $assessmentId || !($editing = $this->assessmentModel->assessmentById((int) $assessmentId))) {
                 return $this->actionError('The assessment record could not be found.', 'manage/assessments', 404);
             }
         }
-        $enrollment = $this->model->row('SELECT enrollment_id FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [$traineeId, $classId]);
+        $enrollment = $this->recordModel->row('SELECT enrollment_id FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [$traineeId, $classId]);
         $date = DateTime::createFromFormat('!Y-m-d', $assessmentDate);
 
         if (!$traineeId || !$classId || !$enrollment || $name === '' || strlen($name) > 150
@@ -63,7 +63,7 @@ class Assessments extends Base
         }
 
         $duplicate = $editing
-            ? $this->model->row('SELECT assessment_id FROM training_assessments WHERE trainee_id = ? AND class_id = ? AND assessment_name = ? AND assessment_id <> ?', [
+            ? $this->recordModel->row('SELECT assessment_id FROM training_assessments WHERE trainee_id = ? AND class_id = ? AND assessment_name = ? AND assessment_id <> ?', [
                 $traineeId,
                 $classId,
                 $name,
@@ -74,7 +74,7 @@ class Assessments extends Base
             return $this->actionError('That trainee already has an assessment with this name in the selected class.', 'manage/assessments');
         }
 
-        $savedAssessmentId = $this->model->saveAssessment([
+        $savedAssessmentId = $this->assessmentModel->saveAssessment([
             'assessment_id' => $editing ? (int) $editing['assessment_id'] : null,
             'trainee_id' => $traineeId,
             'class_id' => $classId,
@@ -87,8 +87,8 @@ class Assessments extends Base
         if ($editing && ((int) $editing['trainee_id'] !== $traineeId || (int) $editing['class_id'] !== $classId)) {
             $this->recalculateEligibilityPair($editing['trainee_id'], $editing['class_id']);
         }
-        $this->model->calculateEligibility($traineeId, $classId);
-        $this->model->logActivity((int) $this->user['user_id'], $editing ? 'Updated training assessment' : 'Recorded training assessment', $name . ' (' . strtoupper($outcome) . '), record #' . $savedAssessmentId);
+        $this->eligibilityModel->calculateEligibility($traineeId, $classId);
+        $this->recordModel->logActivity((int) $this->user['user_id'], $editing ? 'Updated training assessment' : 'Recorded training assessment', $name . ' (' . strtoupper($outcome) . '), record #' . $savedAssessmentId);
         if ($this->apiRequest) {
             $this->jsonResponse(['message' => $editing ? 'Assessment result updated.' : 'Assessment result saved.']);
         }
@@ -106,13 +106,13 @@ class Assessments extends Base
             return;
         }
 
-        $assessment = $this->model->assessmentById((int) $id);
-        if (!$assessment || !$this->model->deleteAssessment((int) $id)) {
+        $assessment = $this->assessmentModel->assessmentById((int) $id);
+        if (!$assessment || !$this->assessmentModel->deleteAssessment((int) $id)) {
             return $this->actionError('Assessment record not found or could not be deleted.', 'manage/assessments', 404);
         }
 
         $this->recalculateEligibilityPair($assessment['trainee_id'], $assessment['class_id']);
-        $this->model->logActivity((int) $this->user['user_id'], 'Deleted training assessment', $assessment['assessment_name'] . ', record #' . (int) $id);
+        $this->recordModel->logActivity((int) $this->user['user_id'], 'Deleted training assessment', $assessment['assessment_name'] . ', record #' . (int) $id);
         if ($this->apiRequest) {
             $this->jsonResponse(['message' => 'Assessment record deleted.']);
         }

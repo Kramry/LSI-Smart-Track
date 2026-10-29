@@ -56,6 +56,11 @@ $router->post('/logout', 'Auth::logout');
 
 # DASHBOARD & MODULES
 $router->get('/dashboard', 'Dashboard::dashboard');
+$router->get('/manage/assessments', 'Assessments::assessments');
+$router->get('/manage/certificates', 'Certificates::certificates');
+$router->get('/manage/eligibility', 'Certificates::eligibility');
+$router->get('/manage/certificate-config', 'Certificates::certificateConfig');
+$router->get('/manage/certificate_config', 'Certificates::certificateConfig');
 $router->get('/manage/{section}', 'Dashboard::module');
 $router->post('/manage/{section}/save', 'Dashboard::save');
 $router->post('/manage/{section}/delete/{id}', 'Dashboard::delete');
@@ -80,14 +85,10 @@ $router->post('/certificate-requirements/save', 'Documents::saveDocumentRequirem
 $router->post('/certificate-requirements/{id}/delete', 'Documents::deleteDocumentRequirement');
 
 # ASSESSMENTS
-$router->get('/manage/assessments', 'Assessments::assessments');
 $router->post('/assessments/save', 'Assessments::saveAssessment');
 $router->post('/assessments/{id}/delete', 'Assessments::deleteAssessment');
 
 # CERTIFICATES
-$router->get('/manage/certificates', 'Certificates::certificates');
-$router->get('/manage/eligibility', 'Certificates::eligibility');
-$router->get('/manage/certificate-config', 'Certificates::certificateConfig');
 $router->post('/manage/certificate-config', 'Certificates::certificateConfig');
 $router->post('/certificates/recalculate', 'Certificates::recalculateEligibility');
 $router->post('/certificates/review', 'Certificates::reviewEligibility');
