@@ -116,6 +116,7 @@ class CertificateGenerator
         $this->pdf->SetXY(190, 170);
         $this->pdf->MultiCell(82, 5, 'Certificate No. ' . $this->plain($data['certificate_number'] ?? ''), 0, 'R');
         $this->drawQrCode($data['verification_url'] ?? '', 256, 150, 24);
+        $this->drawSignatures($data['signatories'] ?? []);
     }
 
     private function drawConfiguredFields(array $data, array $settings)
@@ -151,6 +152,41 @@ class CertificateGenerator
             $this->pdf->SetFont($this->font($settings['font'] ?? 'helvetica'), '', $fontSize);
             $this->pdf->SetXY($left, max(0, min($pageHeight - 12, $y)));
             $this->pdf->MultiCell($width, 8, $this->plain((string) $values[$field]), 0, strtoupper(substr($align, 0, 1)), false, 1);
+        }
+        $this->drawSignatures($data['signatories'] ?? []);
+    }
+
+    private function drawSignatures(array $signatories)
+    {
+        $pageWidth = $this->pdf->getPageWidth();
+        $pageHeight = $this->pdf->getPageHeight();
+        $font = $this->font($this->template['settings']['font'] ?? 'helvetica');
+        foreach ($signatories as $signatory) {
+            $path = $signatory['signature_file_path'] ?? '';
+            if ($path === '' || !is_file($path)) {
+                throw new RuntimeException('A signed certificate is missing a signatory image.');
+            }
+            $centerX = max(28, min($pageWidth - 28, (float) ($signatory['x_position'] ?? 50) * $pageWidth / 100));
+            $topY = max(8, min($pageHeight - 38, (float) ($signatory['y_position'] ?? 80) * $pageHeight / 100));
+            $signatureWidth = 42;
+            $signatureHeight = 18;
+            $this->pdf->Image($path, $centerX - ($signatureWidth / 2), $topY, $signatureWidth, $signatureHeight, 'PNG', '', '', true, 300);
+            $this->pdf->SetTextColor(45, 50, 60);
+            $this->pdf->SetFont($font, 'B', 9);
+            $this->pdf->SetXY($centerX - 35, $topY + 18);
+            $this->pdf->MultiCell(70, 5, $this->plain($signatory['signatory_name'] ?? ''), 0, 'C');
+            $this->pdf->SetFont($font, '', 8);
+            $this->pdf->SetX($centerX - 35);
+            $this->pdf->MultiCell(70, 4, $this->plain($signatory['signatory_position'] ?? ''), 0, 'C');
+            $this->pdf->SetFont($font, '', 6);
+            $signedAt = strtotime((string) ($signatory['signed_at'] ?? ''));
+            if ($signedAt) {
+                $this->pdf->SetX($centerX - 35);
+                $this->pdf->MultiCell(70, 4, 'Digitally signed on ' . date('M j, Y H:i', $signedAt), 0, 'C');
+            } elseif (($signatory['signed_at'] ?? '') === 'PREVIEW') {
+                $this->pdf->SetX($centerX - 35);
+                $this->pdf->MultiCell(70, 4, 'Signature preview - not signed', 0, 'C');
+            }
         }
     }
 

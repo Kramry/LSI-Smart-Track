@@ -110,6 +110,8 @@ tbody tr:hover { background: #fbfcf8; }
 .status.draft, .status.open { color: #785918; background: #fff3d6; }
 .status.pending { color: #785918; background: #fff3d6; }
 .status.rejected { color: #8d3f2d; background: #ffede5; }
+.signature-pad { display: grid; gap: 8px; max-width: 620px; padding: 12px; border: 1px solid #dfe5dc; border-radius: 8px; background: var(--white); }
+.signature-pad canvas { display: block; width: 100%; height: auto; border: 1px dashed #9aa79d; border-radius: 5px; background: #fff; touch-action: none; }
 .announcement-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 26px; }
 .announcement-list article { border-top: 1px solid #edf0eb; padding: 15px 0 5px; }
 .announcement-list time { color: var(--muted); font-size: 10px; }

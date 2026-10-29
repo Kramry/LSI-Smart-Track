@@ -261,6 +261,58 @@ $settings = array_merge([
         uploaded.append(markers);
         update();
     });
+    document.querySelectorAll('[data-signature-pad]').forEach((pad) => {
+        const canvas = pad.querySelector('canvas');
+        const context = canvas.getContext('2d');
+        const hidden = pad.querySelector('[name="signature_data"]');
+        const imageInput = pad.closest('form')?.querySelector('[name="signature_image"]');
+        let drawing = false;
+        let hasInk = false;
+        context.lineWidth = 3;
+        context.lineCap = 'round';
+        context.lineJoin = 'round';
+        context.strokeStyle = '#111111';
+        const point = (event) => {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (event.clientX - rect.left) * canvas.width / rect.width,
+                y: (event.clientY - rect.top) * canvas.height / rect.height,
+            };
+        };
+        canvas.addEventListener('pointerdown', (event) => {
+            drawing = true;
+            hasInk = true;
+            canvas.setPointerCapture(event.pointerId);
+            const position = point(event);
+            context.beginPath();
+            context.moveTo(position.x, position.y);
+            imageInput.value = '';
+        });
+        canvas.addEventListener('pointermove', (event) => {
+            if (!drawing) return;
+            const position = point(event);
+            context.lineTo(position.x, position.y);
+            context.stroke();
+        });
+        const stopDrawing = () => { drawing = false; };
+        canvas.addEventListener('pointerup', stopDrawing);
+        canvas.addEventListener('pointercancel', stopDrawing);
+        pad.querySelector('[data-signature-clear]').addEventListener('click', () => {
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            hidden.value = '';
+            hasInk = false;
+        });
+        pad.closest('form').addEventListener('submit', () => {
+            hidden.value = hasInk ? canvas.toDataURL('image/png') : '';
+        });
+        imageInput?.addEventListener('change', () => {
+            if (imageInput.files.length) {
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                hidden.value = '';
+                hasInk = false;
+            }
+        });
+    });
     update();
 })();
 </script>

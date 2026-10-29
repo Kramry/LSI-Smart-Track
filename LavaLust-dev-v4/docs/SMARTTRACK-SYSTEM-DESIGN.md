@@ -88,6 +88,13 @@ Administrators and staff can load a saved version into the editor; saving
 creates a new version. Only inactive versions without issued-certificate
 references can be deleted.
 
+Certificate eligibility approval queues a certificate as `pending_signature`
+for every active configured signatory. Signatures, timestamps, IP addresses,
+and SHA-256 certificate-data hashes are stored in `certificate_signatures`;
+signature images stay under the protected
+`runtime/uploads/certificates/signatures` directory and are only read by the
+PDF generator.
+
 ```mermaid
 erDiagram
     USERS ||--o{ TRAINEES : account_for
@@ -129,7 +136,8 @@ erDiagram
 1. Configure `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` in `.env`.
 2. For a fresh database, import `lsi_smarttrack-database.sql`. For an existing database that already has `training_programs`, import `lsi_smarttrack-upgrade.sql`; it creates the missing SmartTrack tables and preserves existing tables.
 3. Point the web server to the project `public` directory and open the application. First run prompts for the initial administrator; no default credentials are shipped.
-4. Add programs, accounts, trainees, classes, schedules, and enrollments from the portal.
+4. Configure certificate signatories in Certificate Settings before approving eligibility for signing.
+5. Add programs, accounts, trainees, classes, schedules, and enrollments from the portal.
 
 ## Deployment
 

@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS `certificates` (
   `certificate_number` varchar(50) NOT NULL,
   `completion_date` date NOT NULL,
   `issue_date` date NOT NULL,
-  `status` varchar(20) NOT NULL DEFAULT 'issued',
+  `status` varchar(30) NOT NULL DEFAULT 'draft',
   `file_path` varchar(255) DEFAULT NULL,
   `qr_code` varchar(100) NOT NULL,
   `revoked_at` date DEFAULT NULL,
@@ -244,6 +244,107 @@ CREATE TABLE IF NOT EXISTS `certificates` (
   CONSTRAINT `smarttrack_certificates_program_fk` FOREIGN KEY (`program_id`) REFERENCES `training_programs` (`program_id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `smarttrack_certificates_revoker_fk` FOREIGN KEY (`revoked_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @tbl = 'certificates', @col = 'status', @def = 'varchar(30) NOT NULL DEFAULT ''draft''';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+CREATE TABLE IF NOT EXISTS `certificate_signatories` (
+  `signatory_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int unsigned NOT NULL,
+  `name` varchar(150) NOT NULL,
+  `position` varchar(150) NOT NULL,
+  `signature_path` varchar(255) NOT NULL,
+  `x_position` decimal(5,2) NOT NULL DEFAULT 50.00,
+  `y_position` decimal(5,2) NOT NULL DEFAULT 80.00,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`signatory_id`),
+  UNIQUE KEY `uq_smarttrack_signatory_user` (`user_id`),
+  CONSTRAINT `smarttrack_signatory_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_signatory_creator_fk` FOREIGN KEY (`created_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `certificate_signatures` (
+  `signature_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `certificate_id` int unsigned NOT NULL,
+  `signatory_id` int unsigned NOT NULL,
+  `signatory_user_id` int unsigned NOT NULL,
+  `signatory_name` varchar(150) NOT NULL,
+  `signatory_position` varchar(150) NOT NULL,
+  `signature_path` varchar(255) NOT NULL,
+  `x_position` decimal(5,2) NOT NULL,
+  `y_position` decimal(5,2) NOT NULL,
+  `decision` varchar(20) NOT NULL DEFAULT 'pending',
+  `remarks` text DEFAULT NULL,
+  `signed_at` timestamp NULL DEFAULT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `certificate_data_hash` char(64) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`signature_id`),
+  KEY `idx_smarttrack_signature_certificate` (`certificate_id`),
+  KEY `idx_smarttrack_signature_user` (`signatory_user_id`),
+  KEY `idx_smarttrack_signature_slot` (`certificate_id`, `signatory_id`, `signature_id`),
+  CONSTRAINT `smarttrack_signature_certificate_fk` FOREIGN KEY (`certificate_id`) REFERENCES `certificates` (`certificate_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_signature_signatory_fk` FOREIGN KEY (`signatory_id`) REFERENCES `certificate_signatories` (`signatory_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_signature_user_fk` FOREIGN KEY (`signatory_user_id`) REFERENCES `users` (`user_id`) ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Existing installations may already have a certificate_signatures table.
+-- Add the account link separately because CREATE TABLE IF NOT EXISTS does not
+-- update an existing table definition.
+SET @tbl = 'certificate_signatures', @col = 'signatory_user_id', @def = 'int unsigned DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @tbl = 'certificate_signatures', @col = 'decision', @def = 'varchar(20) NOT NULL DEFAULT ''pending''';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'signatory_name', @def = 'varchar(150) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'signatory_position', @def = 'varchar(150) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'signature_path', @def = 'varchar(255) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'x_position', @def = 'decimal(5,2) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'y_position', @def = 'decimal(5,2) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'remarks', @def = 'text DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'signed_at', @def = 'timestamp NULL DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'ip_address', @def = 'varchar(45) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'certificate_data_hash', @def = 'char(64) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'created_at', @def = 'timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+UPDATE `certificate_signatures` cs
+JOIN `certificate_signatories` s ON s.`signatory_id` = cs.`signatory_id`
+SET cs.`signatory_user_id` = s.`user_id`
+WHERE cs.`signatory_user_id` IS NULL;
+
+UPDATE `certificate_signatures` cs
+JOIN `certificate_signatories` s ON s.`signatory_id` = cs.`signatory_id`
+SET cs.`signatory_name` = COALESCE(NULLIF(cs.`signatory_name`, ''), s.`name`),
+    cs.`signatory_position` = COALESCE(NULLIF(cs.`signatory_position`, ''), s.`position`),
+    cs.`signature_path` = COALESCE(NULLIF(cs.`signature_path`, ''), s.`signature_path`),
+    cs.`x_position` = COALESCE(cs.`x_position`, s.`x_position`),
+    cs.`y_position` = COALESCE(cs.`y_position`, s.`y_position`);
 
 CREATE TABLE IF NOT EXISTS `certificate_eligibility` (
   `eligibility_id` int unsigned NOT NULL AUTO_INCREMENT,

@@ -17,6 +17,7 @@ $labels = [
     'attendance' => 'Attendance',
     'documents' => 'Documents',
     'certificates' => 'Certificates',
+    'certificates_to_sign' => 'Certificates to sign',
     'eligibility' => 'Certificate Eligibility',
     'assessments' => 'Training Assessments',
     'certificate_config' => 'Certificate Settings',
@@ -89,6 +90,17 @@ $labels = [
                         <p><strong>Issue Date:</strong> <?= $e(
                             $certificate["issue_date"],
                         ) ?></p>
+                        <?php if (!empty($certificate_signatures)): ?>
+                            <h4>Electronic signatures</h4>
+                            <?php foreach ($certificate_signatures as $signature): ?>
+                                <p><strong><?= $e($signature["signatory_name"]) ?></strong> — <?= $e($signature["signatory_position"]) ?><br>
+                                Signed <?= $e($signature["signed_at"]) ?> · Hash:
+                                <span class="status <?= $signature["hash_valid"] ? "present" : "absent" ?>"><?= $signature["hash_valid"] ? "Valid" : "Tampered" ?></span></p>
+                            <?php endforeach; ?>
+                            <p><strong>Certificate data integrity:</strong> <span class="status <?= count(array_filter($certificate_signatures, static function ($signature) { return empty($signature["hash_valid"]); })) === 0 ? "present" : "absent" ?>"><?= count(array_filter($certificate_signatures, static function ($signature) { return empty($signature["hash_valid"]); })) === 0 ? "Valid" : "Tampered" ?></span></p>
+                        <?php else: ?>
+                            <p><strong>Electronic signatures:</strong> None recorded.</p>
+                        <?php endif; ?>
                     </div>
                 <?php elseif (isset($certificate) && !$certificate): ?>
                     <div class="notice error">Certificate not found or invalid.</div>
@@ -212,10 +224,12 @@ $labels = [
                             ? "dashboard"
                             : ($item === "my_certificates"
                                 ? "my-certificates"
-                                : "manage/" .
-                                    ($item === "certificate_config"
-                                        ? "certificate-config"
-                                        : $item)); ?>
+                                : ($item === "certificates_to_sign"
+                                    ? "certificates/to-sign"
+                                    : "manage/" .
+                                        ($item === "certificate_config"
+                                            ? "certificate-config"
+                                            : $item))); ?>
                     <a class="<?= ($section ?? "") === $item ||
                     ($page === "dashboard" && $item === "dashboard")
                         ? "active"
@@ -704,6 +718,45 @@ $labels = [
                         <?php endif; ?>
                     <?php endif; ?>
 
+                    <?php if ($section === "certificates_to_sign"): ?>
+                        <?php if (!empty($certificate_signing)): ?>
+                            <section class="panel">
+                                <div class="panel-heading"><div><p class="eyebrow">CERTIFICATE REVIEW</p><h2><?= $e($certificate_signing["certificate_number"]) ?></h2></div><a class="button secondary" href="<?= $e($app_url) ?>certificates/to-sign">Back to queue</a></div>
+                                <p><strong>Trainee:</strong> <?= $e($certificate_signing["trainee_name"]) ?></p>
+                                <p><strong>Program / class:</strong> <?= $e($certificate_signing["program_name"]) ?> / <?= $e($certificate_signing["class_name"]) ?></p>
+                                <p><strong>Completion date:</strong> <?= $e($certificate_signing["completion_date"]) ?></p>
+                                <p><strong>Your signing identity:</strong> <?= $e($certificate_signing["signatory_name"]) ?>, <?= $e($certificate_signing["signatory_position"]) ?></p>
+                                <p><a class="button secondary" href="<?= $e($app_url) ?>certificates/<?= $e($certificate_signing["certificate_id"]) ?>/sign-preview" target="_blank" rel="noopener">Preview certificate</a></p>
+                                <form class="filter-form" method="post" action="<?= $e($app_url) ?>certificates/<?= $e($certificate_signing["certificate_id"]) ?>/sign">
+                                    <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+                                    <label>Re-enter your password<input type="password" name="password" autocomplete="current-password" required></label>
+                                    <button class="button primary" type="submit">Sign certificate</button>
+                                </form>
+                                <form class="filter-form" method="post" action="<?= $e($app_url) ?>certificates/<?= $e($certificate_signing["certificate_id"]) ?>/reject-signature" data-confirm="Return this certificate to staff for review?">
+                                    <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+                                    <label>Return to staff with remarks<textarea name="remarks" rows="3" maxlength="1000" required></textarea></label>
+                                    <button class="button secondary danger-text" type="submit">Reject and return to staff</button>
+                                </form>
+                            </section>
+                        <?php else: ?>
+                            <section class="panel records-panel">
+                                <div class="panel-heading"><div><p class="eyebrow">SIGNATURE WORKFLOW</p><h2>Certificates to sign</h2></div><span class="status pending"><?= count($records) ?> pending</span></div>
+                                <?php if (empty($records)): ?><p class="empty-state">There are no certificates awaiting your signature.</p><?php else: ?>
+                                    <div class="table-scroll"><table><thead><tr><th>Certificate</th><th>Trainee</th><th>Program</th><th>Class</th><th>Completion date</th><th>Action</th></tr></thead><tbody>
+                                        <?php foreach ($records as $certificate): ?><tr>
+                                            <td><code><?= $e($certificate["certificate_number"]) ?></code></td>
+                                            <td><?= $e($certificate["trainee_name"]) ?></td>
+                                            <td><?= $e($certificate["program_name"]) ?></td>
+                                            <td><?= $e($certificate["class_name"]) ?></td>
+                                            <td><?= $e($certificate["completion_date"]) ?></td>
+                                            <td><a class="text-button" href="<?= $e($app_url) ?>certificates/to-sign/<?= $e($certificate["certificate_id"]) ?>">Review and sign</a></td>
+                                        </tr><?php endforeach; ?>
+                                    </tbody></table></div>
+                                <?php endif; ?>
+                            </section>
+                        <?php endif; ?>
+                    <?php endif; ?>
+
                     <?php if ($section === "certificates"): ?>
                         <?php if (
                             isset($certificate_stats) &&
@@ -717,8 +770,11 @@ $labels = [
                             <article class="doc-stat"><span>ELIGIBLE TRAINEES</span><strong><?= $e(
                                 $certificate_stats["eligible"] ?? 0,
                             ) ?></strong></article>
-                            <article class="doc-stat"><span>PENDING APPROVAL</span><strong><?= $e(
+                            <article class="doc-stat"><span>PENDING ELIGIBILITY APPROVAL</span><strong><?= $e(
                                 $certificate_stats["pending"] ?? 0,
+                            ) ?></strong></article>
+                            <article class="doc-stat"><span>PENDING SIGNATURE</span><strong><?= $e(
+                                $certificate_stats["signing"] ?? 0,
                             ) ?></strong></article>
                             <article class="doc-stat"><span>ISSUED CERTIFICATES</span><strong><?= $e(
                                 $certificate_stats["issued"] ?? 0,
@@ -760,13 +816,19 @@ $labels = [
     "") ===
 "approved"
     ? "selected"
-    : "" ?>>Approved for issue</option><option value="rejected" <?= ($_GET[
+    : "" ?>>Approved for signing</option><option value="rejected" <?= ($_GET[
     "status"
 ] ??
     "") ===
 "rejected"
     ? "selected"
-    : "" ?>>Rejected</option><option value="issued" <?= ($_GET["status"] ??
+    : "" ?>>Rejected</option><option value="draft" <?= ($_GET["status"] ?? "") ===
+"draft"
+    ? "selected"
+    : "" ?>>Returned to staff</option><option value="pending_signature" <?= ($_GET["status"] ?? "") ===
+"pending_signature"
+    ? "selected"
+    : "" ?>>Pending signature</option><option value="issued" <?= ($_GET["status"] ??
     "") ===
 "issued"
     ? "selected"
@@ -916,6 +978,43 @@ $labels = [
                                 </tbody></table></div>
                             <?php endif; ?>
                         </section>
+                        <?php if ($user["role"] === "administrator"): ?>
+                            <section class="panel">
+                                <div class="panel-heading"><div><p class="eyebrow">E-SIGNING</p><h2>Certificate signatories</h2></div></div>
+                                <p class="muted">Assign active administrator or staff accounts. Their protected PNG signatures are added to each certificate they sign.</p>
+                                <form method="post" action="<?= $e($app_url) ?>certificate-signatories/save" class="upload-form" enctype="multipart/form-data">
+                                    <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+                                    <input type="hidden" name="signatory_id" value="<?= $e($editing_signatory["signatory_id"] ?? "") ?>">
+                                    <label>System account<select name="user_id" required><option value="">Choose account</option><?php foreach ($signatory_accounts as $account): ?><option value="<?= $e($account["id"]) ?>" <?= (int) ($editing_signatory["user_id"] ?? 0) === (int) $account["id"] ? "selected" : "" ?>><?= $e($account["label"]) ?></option><?php endforeach; ?></select></label>
+                                    <label>Printed name<input name="name" maxlength="150" value="<?= $e($editing_signatory["name"] ?? "") ?>" required></label>
+                                    <label>Position<input name="position" maxlength="150" value="<?= $e($editing_signatory["position"] ?? "") ?>" required></label>
+                                    <label>Signature PNG (transparent background, max 1 MB)<input type="file" name="signature_image" accept="image/png,.png"></label>
+                                    <?php if (!empty($editing_signatory)): ?><p class="muted">A protected signature is already configured. Upload or draw only to replace it.</p><?php endif; ?>
+                                    <div class="signature-pad" data-signature-pad>
+                                        <span>Draw signature</span>
+                                        <canvas width="600" height="160" aria-label="Draw signature"></canvas>
+                                        <input type="hidden" name="signature_data" value="">
+                                        <button class="button secondary" type="button" data-signature-clear>Clear signature</button>
+                                    </div>
+                                    <label>Signature horizontal position (%)<input type="number" name="x_position" min="0" max="100" step="0.1" value="<?= $e($editing_signatory["x_position"] ?? 50) ?>" required></label>
+                                    <label>Signature vertical position (%)<input type="number" name="y_position" min="0" max="100" step="0.1" value="<?= $e($editing_signatory["y_position"] ?? 80) ?>" required></label>
+                                    <button class="button primary" type="submit"><?= !empty($editing_signatory) ? "Save signatory" : "Add signatory" ?></button>
+                                    <?php if (!empty($editing_signatory)): ?><a class="button secondary" href="<?= $e($app_url) ?>manage/certificate-config">Cancel editing</a><?php endif; ?>
+                                </form>
+                                <?php if (empty($certificate_signatories)): ?><p class="empty-state">No signatories are configured. Eligibility approval cannot send certificates for signing until at least one signatory is added.</p><?php else: ?>
+                                    <div class="table-scroll"><table><thead><tr><th>Account</th><th>Printed name</th><th>Position</th><th>Signature position</th><th>Status</th><th>Action</th></tr></thead><tbody>
+                                        <?php foreach ($certificate_signatories as $signatory): ?><tr>
+                                            <td><?= $e($signatory["account_name"]) ?></td>
+                                            <td><?= $e($signatory["name"]) ?></td>
+                                            <td><?= $e($signatory["position"]) ?></td>
+                                            <td><?= $e($signatory["x_position"]) ?>%, <?= $e($signatory["y_position"]) ?>%</td>
+                                            <td><span class="status <?= $signatory["is_active"] ? "present" : "inactive" ?>"><?= $signatory["is_active"] ? "Active" : "Inactive" ?></span></td>
+                                            <td><a class="text-button" href="<?= $e($app_url) ?>manage/certificate-config?signatory_id=<?= $e($signatory["signatory_id"]) ?>">Edit</a><?php if ($signatory["is_active"]): ?><form method="post" action="<?= $e($app_url) ?>certificate-signatories/<?= $e($signatory["signatory_id"]) ?>/delete" data-confirm="Deactivate this signatory? Existing assigned certificates remain available to them." style="display:inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Deactivate</button></form><?php endif; ?></td>
+                                        </tr><?php endforeach; ?>
+                                    </tbody></table></div>
+                                <?php endif; ?>
+                            </section>
+                        <?php endif; ?>
                     <?php endif; ?>
 
                     <?php if ($section === "assessments"): ?>
@@ -993,7 +1092,7 @@ $labels = [
 
                     <?php if ($section === "my_certificates"): ?>
                         <section class="panel">
-                            <div class="panel-heading"><div><p class="eyebrow">MY CERTIFICATES</p><h2>Issued Certificates</h2></div></div>
+                            <div class="panel-heading"><div><p class="eyebrow">MY CERTIFICATES</p><h2>Certificates</h2></div></div>
                             <?php if (
                                 empty($records)
                             ): ?><p class="empty-state">No certificates issued yet. Complete your training to become eligible.</p><?php else: ?>
@@ -1227,7 +1326,7 @@ $labels = [
                         <?php if (
                             !in_array(
                                 $section,
-                                ["certificate_config", "my_certificates"],
+                                ["certificate_config", "my_certificates", "certificates_to_sign"],
                                 true,
                             )
                         ): ?>
@@ -1427,6 +1526,12 @@ $labels = [
 ) ?>"><input type="hidden" name="certificate_id" value="<?= $e(
     $record["certificate_id"],
 ) ?>"><label>Revocation reason<input name="reason" maxlength="1000" required></label><button class="text-button danger-text" type="submit">Revoke</button></form>
+                                                    <?php elseif (($record["status"] ?? "") === "pending_signature"): ?>
+                                                        <span class="status pending">Awaiting signatures</span>
+                                                        <a class="text-button" href="<?= $e($app_url) ?>certificates/to-sign">Open signing queue</a>
+                                                    <?php elseif (($record["status"] ?? "") === "draft"): ?>
+                                                        <?php if (!empty($record["signature_rejection_remarks"])): ?><p class="muted">Returned by signatory: <?= $e($record["signature_rejection_remarks"]) ?></p><?php endif; ?>
+                                                        <form method="post" action="<?= $e($app_url) ?>certificates/<?= $e($record["certificate_id"]) ?>/resubmit-signature"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button" type="submit">Resubmit for signatures</button></form>
                                                     <?php endif; ?>
                                                 <?php elseif (
                                                     !empty(
@@ -1446,7 +1551,7 @@ $labels = [
     $record["trainee_id"],
 ) ?>"><input type="hidden" name="class_id" value="<?= $e(
     $record["class_id"],
-) ?>"><button class="button primary" type="submit">Issue Certificate</button></form>
+) ?>"><button class="button primary" type="submit">Send for signature</button></form>
                                                 <?php elseif (
                                                     !empty(
                                                         $record["is_eligible"]

@@ -238,13 +238,14 @@ class Eligibility_model extends Base_model
         if (!$eligibility || ($decision === 'approved' && !(int) $eligibility['is_eligible'])) {
             return false;
         }
-        return $this->execute('UPDATE certificate_eligibility SET approval_status = ?, approval_reason = ?, approved_by = ?, approved_at = CURRENT_TIMESTAMP, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE eligibility_id = ?', [
+        $this->execute('UPDATE certificate_eligibility SET approval_status = ?, approval_reason = ?, approved_by = ?, approved_at = CURRENT_TIMESTAMP, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE eligibility_id = ?', [
             $decision,
             $reason,
             (int) $actorId,
             (int) $actorId,
             (int) $eligibilityId,
-        ]) > 0;
+        ]);
+        return true;
     }
 
     public function logEligibilityAction($actorId, $eligibilityId, $action, $details = null)

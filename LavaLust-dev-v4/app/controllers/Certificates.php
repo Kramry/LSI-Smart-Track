@@ -95,16 +95,35 @@ class Certificates extends Base
             return $this->actionError('Choose an approval decision and provide a reason when rejecting.', 'manage/eligibility');
         }
 
+        if ($decision === 'approved' && !$this->certificateModel->hasActiveSignatories()) {
+            return $this->actionError('Configure at least one active certificate signatory before approving eligibility.', 'manage/certificate-config');
+        }
+
+        $eligibility = $this->recordModel->row('SELECT trainee_id, class_id FROM certificate_eligibility WHERE eligibility_id = ?', [$eligibilityId]);
+        if (!$eligibility) {
+            return $this->actionError('Eligibility record not found.', 'manage/eligibility', 404);
+        }
         if (!$this->eligibilityModel->updateEligibilityApproval($eligibilityId, $decision, (int) $this->user['user_id'], $reason ?: null)) {
             return $this->actionError('Only eligible trainees can be approved. Recalculate eligibility and review the requirements first.', 'manage/eligibility');
+        }
+
+        $certificate = null;
+        if ($decision === 'approved') {
+            $certificate = $this->certificateModel->createPendingCertificate((int) $eligibility['trainee_id'], (int) $eligibility['class_id'], (int) $this->user['user_id']);
+            if (!$certificate) {
+                $existingCertificate = $this->recordModel->row('SELECT status FROM certificates WHERE trainee_id = ? AND class_id = ?', [(int) $eligibility['trainee_id'], (int) $eligibility['class_id']]);
+                if (!$existingCertificate || $existingCertificate['status'] !== 'pending_signature') {
+                    return $this->actionError('Eligibility was approved, but the certificate could not be queued for signing. Check the class completion date, signatory setup, and existing certificate status.', 'manage/eligibility');
+                }
+            }
         }
 
         $this->eligibilityModel->logEligibilityAction((int) $this->user['user_id'], $eligibilityId, $decision, $reason);
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Reviewed certificate eligibility', 'Eligibility #' . $eligibilityId . ' ' . $decision);
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => 'Eligibility review saved.']);
+            $this->jsonResponse(['message' => $decision === 'approved' ? 'Eligibility approved; certificate queued for signatures.' : 'Eligibility review saved.']);
         }
-        $this->notice('Eligibility review saved.');
+        $this->notice($decision === 'approved' ? 'Eligibility approved; certificate queued for signatures.' : 'Eligibility review saved.');
         redirect($this->url('manage/eligibility'));
     }
 
@@ -176,23 +195,164 @@ class Certificates extends Base
             return $this->actionError('Invalid trainee or class.', 'manage/eligibility');
         }
 
-        $certificate = $this->certificateModel->issueCertificate($traineeId, $classId, (int) $this->user['user_id']);
+        $certificate = $this->certificateModel->createPendingCertificate($traineeId, $classId, (int) $this->user['user_id']);
 
         if ($certificate) {
-            $this->generateCertificatePDF($certificate);
-            $this->recordModel->logActivity((int) $this->user['user_id'], 'Issued certificate', "Certificate: {$certificate['certificate_number']}");
-            $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $certificate['certificate_id'], 'issue', "Certificate issued for trainee ID: $traineeId, class ID: $classId");
+            $this->recordModel->logActivity((int) $this->user['user_id'], 'Queued certificate for signature', "Certificate: {$certificate['certificate_number']}");
+            $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $certificate['certificate_id'], 'pending_signature', "Certificate queued for signature for trainee ID: $traineeId, class ID: $classId");
             if ($this->apiRequest) {
-                $this->jsonResponse(['message' => 'Certificate issued successfully.', 'certificate' => $certificate]);
+                $this->jsonResponse(['message' => 'Certificate queued for signature.', 'certificate' => $certificate]);
             }
-            $this->notice('Certificate issued successfully.');
+            $this->notice('Certificate queued for signature.');
         } else {
             if ($this->apiRequest) {
-                $this->jsonResponse(['message' => 'Failed to issue certificate. Trainee may not be eligible.'], 422);
+                $this->jsonResponse(['message' => 'Failed to queue certificate for signing. The trainee may not be eligible or no active signatory is configured.'], 422);
             }
-            $this->notice('Failed to issue certificate. Trainee may not be eligible.');
+            $this->notice('Failed to queue certificate for signing. The trainee may not be eligible or no active signatory is configured.');
         }
 
+        redirect($this->url('manage/certificates'));
+    }
+
+    public function certificatesToSign($id = null)
+    {
+        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to sign certificates.');
+        }
+
+        if ($id !== null) {
+            if (!ctype_digit((string) $id) || !(int) $id) {
+                show_404();
+                return;
+            }
+            $certificate = $this->certificateModel->certificateForSigning((int) $id, (int) $this->user['user_id']);
+            if (!$certificate) {
+                return $this->deny('This certificate is not assigned to your signing account.');
+            }
+            return $this->render('module', [
+                'title' => 'Review Certificate',
+                'section' => 'certificates_to_sign',
+                'certificate_signing' => $certificate,
+                'records' => [],
+                'columns' => [],
+                'user' => $this->user,
+                'app_url' => $this->url(''),
+                'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+            ]);
+        }
+
+        $records = $this->certificateModel->signatureQueue((int) $this->user['user_id']);
+        return $this->render('module', [
+            'title' => 'Certificates to sign',
+            'section' => 'certificates_to_sign',
+            'records' => $records,
+            'columns' => ['certificate_number', 'trainee_name', 'program_name', 'class_name', 'completion_date'],
+            'user' => $this->user,
+            'app_url' => $this->url(''),
+            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+        ]);
+    }
+
+    public function previewCertificateForSigning($id)
+    {
+        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to preview this certificate.');
+        }
+        if (!ctype_digit((string) $id) || !(int) $id) {
+            show_404();
+            return;
+        }
+        $certificate = $this->certificateModel->certificateForSigning((int) $id, (int) $this->user['user_id']);
+        if (!$certificate) {
+            return $this->deny('This certificate is not assigned to your signing account.');
+        }
+        $pdf = $this->generateCertificatePDF($certificate, false, $certificate);
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="certificate-preview_' . $certificate['certificate_number'] . '.pdf"');
+        header('Content-Length: ' . strlen($pdf));
+        echo $pdf;
+        exit;
+    }
+
+    public function signCertificate($id)
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to sign certificates.');
+        }
+        if (!ctype_digit((string) $id) || !(int) $id) {
+            show_404();
+            return;
+        }
+        $certificate = $this->certificateModel->certificateForSigning((int) $id, (int) $this->user['user_id']);
+        $password = (string) $this->input('password');
+        $account = $this->recordModel->row('SELECT password, status FROM users WHERE user_id = ?', [(int) $this->user['user_id']]);
+        if (!$certificate || !$account || $account['status'] !== 'active' || !password_verify($password, $account['password'])) {
+            return $this->actionError('The certificate is not assigned to your account or the password is incorrect.', 'certificates/to-sign');
+        }
+
+        $result = $this->certificateModel->signCertificate((int) $id, (int) $this->user['user_id']);
+        if (!$result['success']) {
+            return $this->actionError($result['message'], 'certificates/to-sign');
+        }
+        $number = $certificate['certificate_number'];
+        $this->recordModel->logActivity((int) $this->user['user_id'], 'Signed certificate', $number);
+        $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $id, 'sign', 'Certificate signature recorded; SHA-256 ' . $this->certificateModel->certificateDataHash($certificate));
+        if ($result['issued']) {
+            $this->generateCertificatePDF($result['certificate']);
+            $this->recordModel->logActivity((int) $this->user['user_id'], 'Issued fully signed certificate', $number);
+            $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $id, 'issue', 'All required signatories completed signing.');
+        }
+        if ($this->apiRequest) {
+            $this->jsonResponse(['message' => $result['issued'] ? 'All signatures are complete; the certificate has been issued.' : 'Your signature has been recorded.']);
+        }
+        $this->notice($result['issued'] ? 'All signatures are complete; the certificate has been issued.' : 'Your signature has been recorded.');
+        redirect($this->url('certificates/to-sign'));
+    }
+
+    public function rejectCertificateSignature($id)
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to return certificates for review.');
+        }
+        if (!ctype_digit((string) $id) || !(int) $id) {
+            show_404();
+            return;
+        }
+        $certificate = $this->certificateModel->certificateForSigning((int) $id, (int) $this->user['user_id']);
+        $remarks = trim((string) $this->input('remarks'));
+        if (!$certificate || $remarks === '' || mb_strlen($remarks) > 1000) {
+            return $this->actionError('This certificate must be assigned to you, and rejection remarks are required (up to 1000 characters).', 'certificates/to-sign');
+        }
+        if (!$this->certificateModel->rejectCertificateSignature((int) $id, (int) $this->user['user_id'], $remarks)) {
+            return $this->actionError('The certificate could not be returned for staff review.', 'certificates/to-sign');
+        }
+        $this->recordModel->logActivity((int) $this->user['user_id'], 'Rejected certificate signature', $certificate['certificate_number'] . ': ' . $remarks);
+        $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $id, 'signature_rejected', $remarks);
+        if ($this->apiRequest) {
+            $this->jsonResponse(['message' => 'Certificate returned to staff for review.']);
+        }
+        $this->notice('Certificate returned to staff for review.');
+        redirect($this->url('certificates/to-sign'));
+    }
+
+    public function resubmitCertificateForSigning($id)
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return $this->deny('You are not allowed to resubmit certificates.');
+        }
+        if (!ctype_digit((string) $id) || !(int) $id) {
+            show_404();
+            return;
+        }
+        if (!$this->certificateModel->resubmitCertificateForSigning((int) $id, (int) $this->user['user_id'])) {
+            return $this->actionError('The certificate could not be resubmitted. Ensure it is in draft status and active signatories are configured.', 'manage/certificates');
+        }
+        $this->recordModel->logActivity((int) $this->user['user_id'], 'Resubmitted certificate for signatures', 'Certificate #' . (int) $id);
+        $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $id, 'pending_signature', 'Certificate resubmitted for signature.');
+        if ($this->apiRequest) {
+            $this->jsonResponse(['message' => 'Certificate resubmitted for signature.']);
+        }
+        $this->notice('Certificate resubmitted for signature.');
         redirect($this->url('manage/certificates'));
     }
 
@@ -221,7 +381,7 @@ class Certificates extends Base
         ]);
     }
 
-    private function generateCertificatePDF($certificate)
+    private function generateCertificatePDF($certificate, $persist = true, $previewSignature = null)
     {
         $this->call->library('CertificateGenerator');
         $template = json_decode((string) ($certificate['template_snapshot'] ?? ''), true);
@@ -246,6 +406,32 @@ class Certificates extends Base
         if (!$record) {
             throw new RuntimeException('The trainee or program record for this certificate could not be found.');
         }
+        $signatories = $this->certificateModel->certificateSignatures(array_merge($certificate, $record));
+        foreach ($signatories as &$signatory) {
+            if (empty($signatory['hash_valid'])) {
+                throw new RuntimeException('The signed certificate data no longer matches its stored signature hash.');
+            }
+            $signaturePath = $this->privateCertificatePath($signatory['signature_path']);
+            if (!$signaturePath) {
+                throw new RuntimeException('A protected signatory image for this certificate is missing.');
+            }
+            $signatory['signature_file_path'] = $signaturePath;
+        }
+        unset($signatory);
+        if ($previewSignature) {
+            $signaturePath = $this->privateCertificatePath($previewSignature['signature_path']);
+            if (!$signaturePath) {
+                throw new RuntimeException('Your protected signatory image is missing.');
+            }
+            $signatories[] = [
+                'signatory_name' => $previewSignature['signatory_name'],
+                'signatory_position' => $previewSignature['signatory_position'],
+                'signature_file_path' => $signaturePath,
+                'x_position' => $previewSignature['x_position'],
+                'y_position' => $previewSignature['y_position'],
+                'signed_at' => 'PREVIEW',
+            ];
+        }
         $generator = new CertificateGenerator($template);
         $pdfData = $generator->generate([
             'trainee_name' => $record['trainee_name'],
@@ -256,7 +442,12 @@ class Certificates extends Base
             'certificate_number' => $certificate['certificate_number'],
             'verification_url' => $this->certificateVerificationUrl($certificate['qr_code']),
             'template_file_path' => $filePath,
+            'signatories' => $signatories,
         ]);
+
+        if (!$persist) {
+            return $pdfData;
+        }
 
         $certificateDirectory = ROOT_DIR . 'runtime/uploads/certificates';
         if (!is_dir($certificateDirectory) && !mkdir($certificateDirectory, 0750, true) && !is_dir($certificateDirectory)) {
@@ -285,7 +476,9 @@ class Certificates extends Base
             return $this->actionError('Certificate ID and reason are required.', 'manage/certificates');
         }
 
-        $this->certificateModel->revokeCertificate($certificateId, (int) $this->user['user_id'], $reason);
+        if (!$this->certificateModel->revokeCertificate($certificateId, (int) $this->user['user_id'], $reason)) {
+            return $this->actionError('Only an issued certificate can be revoked.', 'manage/certificates');
+        }
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Revoked certificate', "Certificate ID: $certificateId, Reason: $reason");
         $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $certificateId, 'revoke', "Reason: $reason");
         if ($this->apiRequest) {
@@ -317,6 +510,25 @@ class Certificates extends Base
             }
         }
         $template = $template ?: $this->certificateModel->getLatestTemplate() ?: $this->certificateModel->legacyTemplate();
+        $signatories = $this->certificateModel->signatories();
+        $editingSignatory = null;
+        if (array_key_exists('signatory_id', $_GET)) {
+            $signatoryId = is_scalar($_GET['signatory_id']) ? (string) $_GET['signatory_id'] : '';
+            if (!ctype_digit($signatoryId) || !(int) $signatoryId) {
+                show_404();
+                return;
+            }
+            foreach ($signatories as $signatory) {
+                if ((int) $signatory['signatory_id'] === (int) $signatoryId) {
+                    $editingSignatory = $signatory;
+                    break;
+                }
+            }
+            if (!$editingSignatory) {
+                show_404();
+                return;
+            }
+        }
         $configs = [
             'min_attendance_percentage' => $this->configModel->getConfig('min_attendance_percentage', 75),
             'require_documents' => $this->configModel->getConfig('require_documents', 1),
@@ -332,10 +544,147 @@ class Certificates extends Base
             'certificate_template_versions' => $this->certificateModel->getTemplateVersions(),
             'document_requirements' => $this->documentModel->documentRequirements(),
             'certificate_classes' => $this->recordModel->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+            'certificate_signatories' => $signatories,
+            'editing_signatory' => $editingSignatory,
+            'signatory_accounts' => $this->certificateModel->signatoryAccounts(),
             'user' => $this->user,
             'app_url' => $this->url(''),
             'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
         ]);
+    }
+
+    public function saveCertificateSignatory()
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || $this->user['role'] !== 'administrator') {
+            return $this->deny('Only administrators can configure certificate signatories.');
+        }
+        $signatoryId = (int) $this->input('signatory_id');
+        $userId = (int) $this->input('user_id');
+        $name = trim((string) $this->input('name'));
+        $position = trim((string) $this->input('position'));
+        $x = filter_var($this->input('x_position'), FILTER_VALIDATE_FLOAT);
+        $y = filter_var($this->input('y_position'), FILTER_VALIDATE_FLOAT);
+        $account = $this->recordModel->row("SELECT user_id FROM users WHERE user_id = ? AND status = 'active' AND role IN ('administrator', 'staff')", [$userId]);
+        if (!$account || $name === '' || $position === '' || mb_strlen($name) > 150 || mb_strlen($position) > 150
+            || $x === false || $x < 0 || $x > 100 || $y === false || $y < 0 || $y > 100) {
+            return $this->actionError('Choose an active administrator or staff account, enter a name and position, and set valid signature positions.', 'manage/certificate-config');
+        }
+
+        $existing = $signatoryId
+            ? $this->recordModel->row('SELECT * FROM certificate_signatories WHERE signatory_id = ?', [$signatoryId])
+            : null;
+        if ($signatoryId && !$existing) {
+            return $this->actionError('Signatory not found.', 'manage/certificate-config', 404);
+        }
+        $duplicate = $this->recordModel->row('SELECT signatory_id FROM certificate_signatories WHERE user_id = ? AND signatory_id <> ?', [$userId, $signatoryId]);
+        if ($duplicate) {
+            return $this->actionError('That account is already assigned as a signatory.', 'manage/certificate-config');
+        }
+
+        $storedImage = $this->storeSignatureImage();
+        if ($storedImage['error']) {
+            return $this->actionError($storedImage['error'], 'manage/certificate-config');
+        }
+        $signaturePath = $storedImage['path'] ?: ($existing['signature_path'] ?? '');
+        if ($signaturePath === '') {
+            return $this->actionError('Upload a PNG signature or draw one in the signature pad.', 'manage/certificate-config');
+        }
+        try {
+            $savedId = $this->certificateModel->saveSignatory([
+                'user_id' => $userId,
+                'name' => $name,
+                'position' => $position,
+                'signature_path' => $signaturePath,
+                'x_position' => $x,
+                'y_position' => $y,
+            ], (int) $this->user['user_id'], $signatoryId ?: null);
+        } catch (Throwable $error) {
+            error_log('Unable to save certificate signatory: ' . $error->getMessage());
+            if ($storedImage['path']) {
+                $path = $this->privateCertificatePath($storedImage['path']);
+                if ($path) {
+                    unlink($path);
+                }
+            }
+            return $this->actionError('The signatory could not be saved. Check that the account is not already assigned.', 'manage/certificate-config');
+        }
+        $this->recordModel->logActivity((int) $this->user['user_id'], 'Saved certificate signatory', $name . ' (' . $position . ')');
+        if ($this->apiRequest) {
+            $this->jsonResponse(['message' => 'Certificate signatory saved.', 'signatory_id' => $savedId]);
+        }
+        $this->notice('Certificate signatory saved.');
+        redirect($this->url('manage/certificate-config'));
+    }
+
+    public function deleteCertificateSignatory($id)
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || $this->user['role'] !== 'administrator') {
+            return $this->deny('Only administrators can configure certificate signatories.');
+        }
+        if (!ctype_digit((string) $id) || !(int) $id) {
+            show_404();
+            return;
+        }
+        $signatory = $this->recordModel->row('SELECT name, position FROM certificate_signatories WHERE signatory_id = ?', [(int) $id]);
+        if (!$signatory || !$this->certificateModel->deleteSignatory((int) $id)) {
+            return $this->actionError('Signatory not found.', 'manage/certificate-config', 404);
+        }
+        $this->recordModel->logActivity((int) $this->user['user_id'], 'Deactivated certificate signatory', $signatory['name'] . ' (' . $signatory['position'] . ')');
+        if ($this->apiRequest) {
+            $this->jsonResponse(['message' => 'Certificate signatory deactivated.']);
+        }
+        $this->notice('Certificate signatory deactivated.');
+        redirect($this->url('manage/certificate-config'));
+    }
+
+    private function storeSignatureImage()
+    {
+        $file = $_FILES['signature_image'] ?? null;
+        $data = trim((string) $this->input('signature_data'));
+        if ($file && ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE && $data !== '') {
+            return ['path' => null, 'error' => 'Upload a PNG file or draw a signature, not both.'];
+        }
+        if ($file && ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+            if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])
+                || !is_file($file['tmp_name']) || filesize($file['tmp_name']) < 1 || filesize($file['tmp_name']) > 1024 * 1024
+                || strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION)) !== 'png'
+                || (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']) !== 'image/png') {
+                return ['path' => null, 'error' => 'Signature images must be PNG files no larger than 1 MB.'];
+            }
+            $bytes = file_get_contents($file['tmp_name']);
+        } elseif ($data !== '') {
+            if (!preg_match('#^data:image/png;base64,([A-Za-z0-9+/=]+)$#', $data, $matches)) {
+                return ['path' => null, 'error' => 'The drawn signature must be a valid PNG image.'];
+            }
+            $bytes = base64_decode($matches[1], true);
+            if ($bytes === false || strlen($bytes) < 1 || strlen($bytes) > 1024 * 1024) {
+                return ['path' => null, 'error' => 'Drawn signatures must be PNG images no larger than 1 MB.'];
+            }
+            $mime = (new finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
+            if ($mime !== 'image/png') {
+                return ['path' => null, 'error' => 'The drawn signature is not a valid PNG image.'];
+            }
+        } else {
+            return ['path' => null, 'error' => null];
+        }
+
+        $image = getimagesizefromstring($bytes);
+        if (!$image || ($image['mime'] ?? '') !== 'image/png' || $image[0] > 4000 || $image[1] > 2000 || $image[0] * $image[1] > 4000000) {
+            return ['path' => null, 'error' => 'The signature PNG is invalid or has excessive dimensions.'];
+        }
+        $directory = ROOT_DIR . 'runtime/uploads/certificates/signatures';
+        if (!is_dir($directory) && !mkdir($directory, 0750, true) && !is_dir($directory)) {
+            return ['path' => null, 'error' => 'The protected signature directory could not be created.'];
+        }
+        $filename = bin2hex(random_bytes(20)) . '.png';
+        $destination = $directory . DIRECTORY_SEPARATOR . $filename;
+        $saved = $file && ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK
+            ? move_uploaded_file($file['tmp_name'], $destination)
+            : file_put_contents($destination, $bytes, LOCK_EX) !== false;
+        if (!$saved) {
+            return ['path' => null, 'error' => 'The signature image could not be saved.'];
+        }
+        return ['path' => 'runtime/uploads/certificates/signatures/' . $filename, 'error' => null];
     }
 
     private function saveCertificateTemplate()
@@ -674,7 +1023,7 @@ class Certificates extends Base
         }
 
         if ($certificate['status'] !== 'issued') {
-            $this->notice('This certificate has been revoked.');
+            $this->notice($certificate['status'] === 'revoked' ? 'This certificate has been revoked.' : 'This certificate is not available for download until all signatories have signed.');
             redirect($this->url('dashboard'));
             return;
         }
@@ -711,11 +1060,13 @@ class Certificates extends Base
         } elseif ($certificateNumber) {
             $certificate = $this->recordModel->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, cl.class_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.certificate_number = ?', [$certificateNumber]);
         }
+        $signatures = $certificate ? $this->certificateModel->certificateSignatures($certificate) : [];
 
         $this->render('verify_certificate', [
             'title' => 'Certificate Verification',
             'page' => 'verify_certificate',
             'certificate' => $certificate,
+            'certificate_signatures' => $signatures,
             'app_url' => $this->url(''),
         ]);
     }
