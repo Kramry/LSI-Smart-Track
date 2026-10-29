@@ -224,14 +224,18 @@ $labels = [
                     <?php $href =
                         $item === "dashboard"
                             ? "dashboard"
-                            : ($item === "my_certificates"
+                            : ($item === "payments"
+                                ? "manage/payments"
+                                : ($item === "my_payments"
+                                    ? "my-payments"
+                                    : ($item === "my_certificates"
                                 ? "my-certificates"
                                 : ($item === "certificates_to_sign"
                                     ? "certificates/to-sign"
                                     : "manage/" .
                                         ($item === "certificate_config"
                                             ? "certificate-config"
-                                            : $item))); ?>
+                                            : $item))))); ?>
                     <a class="<?= ($section ?? "") === $item ||
                     ($page === "dashboard" && $item === "dashboard")
                         ? "active"
