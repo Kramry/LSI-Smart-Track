@@ -17,6 +17,7 @@ $labels = [
     'attendance' => 'Attendance',
     'documents' => 'Documents',
     'payments' => 'Payments',
+    'analytics' => 'Analytics',
     'my_payments' => 'My payments',
     'certificates' => 'Certificates',
     'certificates_to_sign' => 'Certificates to sign',

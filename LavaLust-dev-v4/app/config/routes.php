@@ -56,6 +56,7 @@ $router->post('/logout', 'Auth::logout');
 
 # DASHBOARD & MODULES
 $router->get('/dashboard', 'Dashboard::dashboard');
+$router->get('/manage/analytics', 'Analytics::index');
 $router->get('/manage/assessments', 'Assessments::assessments');
 $router->get('/manage/payments', 'Payment::payments');
 $router->get('/payments', 'Payment::payments');
@@ -133,6 +134,7 @@ $router->post('/api/login', 'SmartTrack_api::apiLogin');
 $router->post('/api/refresh', 'SmartTrack_api::apiRefresh');
 $router->post('/api/logout', 'SmartTrack_api::apiLogout');
 $router->get('/api/dashboard', 'SmartTrack_api::apiDashboard');
+$router->get('/api/analytics', 'Analytics::data');
 $router->get('/api/modules/{section}', 'SmartTrack_api::apiModule');
 $router->get('/api/trainees', 'SmartTrack_api::getTrainees');
 $router->post('/api/modules/{section}/save', 'SmartTrack_api::apiSaveModule');

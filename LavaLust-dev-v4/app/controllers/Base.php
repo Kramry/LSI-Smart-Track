@@ -74,9 +74,9 @@ class Base extends Controller
         $data['flash_error'] = $this->session->flashdata('error');
 
         $navigation = [
-            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries'],
+            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
+            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
+            'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'announcements', 'inquiries'],
             'trainee' => ['dashboard', 'attendance', 'documents', 'my_payments', 'my_certificates', 'announcements', 'inquiries'],
         ];
         $data['navigation'] = $this->user ? ($navigation[$this->user['role']] ?? []) : [];
@@ -135,9 +135,9 @@ class Base extends Controller
     protected function canAccess($section)
     {
         $roles = [
-            'administrator' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'staff' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'instructor' => ['trainees', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries'],
+            'administrator' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
+            'staff' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
+            'instructor' => ['trainees', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'announcements', 'inquiries'],
             'trainee' => ['attendance', 'documents', 'my_payments', 'announcements', 'inquiries'],
         ];
         return in_array($section, $roles[$this->user['role']] ?? [], true);
@@ -190,9 +190,9 @@ class Base extends Controller
     protected function navigationForUser()
     {
         $navigation = [
-            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity', 'profile'],
-            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity', 'profile'],
-            'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'announcements', 'inquiries', 'profile'],
+            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity', 'profile'],
+            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity', 'profile'],
+            'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'announcements', 'inquiries', 'profile'],
             'trainee' => ['dashboard', 'attendance', 'documents', 'my_payments', 'my_certificates', 'announcements', 'inquiries', 'profile'],
         ];
         return $this->user ? ($navigation[$this->user['role']] ?? []) : [];

@@ -5,7 +5,7 @@ FROM php:${PHP_VERSION}-apache
 # The SmartTrack schema and every query in SmartTrack_model are MySQL specific.
 RUN docker-php-ext-install pdo pdo_mysql
 
-# mod_rewrite drives the front controller routes (/login, /manage/..., /documents/...).
+# mod_rewrite drives the fronilet controller routes (/login, /manage/..., /documents/...).
 RUN a2enmod rewrite headers
 
 # Allow .htaccess overrides so public/.htaccess is honoured.
