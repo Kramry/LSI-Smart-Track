@@ -10,7 +10,7 @@ LSI SmartTrack is a QR-enabled attendance and TESDA trainee monitoring system fo
 | --- | --- |
 | Trainee | Sign in/out; change password; update profile; view and print QR ID; view attendance history and present/late/absent summary; upload and retrieve personal requirements; view announcements; send inquiries and read replies. |
 | Instructor | Sign in/out; change password; update profile; view assigned classes and trainee lists; scan or manually enter QR IDs for time-in/time-out; view live class attendance; correct attendance with remarks; see absence alerts and follow-up lists; generate and export daily, weekly, and monthly reports; upload class documents; post announcements; reply to inquiries. |
-| Administrator / Staff | Manage user accounts and roles; reset passwords and deactivate accounts; manage trainee and instructor records and QR IDs; manage programs, classes, schedules, and instructor assignments; record and monitor attendance; manage absences and reports; classify, retrieve, and secure documents; manage announcements and inquiries; review activity logs. |
+| Administrator / Staff | Manage user accounts and roles; reset passwords and deactivate accounts; manage trainee and instructor records and QR IDs; manage programs, classes, schedules, and instructor assignments; record and monitor attendance; manage absences and reports; classify, retrieve, and secure documents; configure versioned completion-certificate templates; review eligibility and issue or revoke certificates; manage announcements and inquiries; review activity logs. |
 
 ## Sitemap
 
@@ -78,6 +78,16 @@ Sign in / First-run administrator setup
 
 The SQL schema is provided in `lsi_smarttrack-database.sql`. Passwords are stored as password hashes. File contents are stored outside the public web root; database records hold their private path and access level.
 
+Completion certificate designs are stored as immutable versions in
+`certificate_templates`. Each issued certificate stores its template version
+and JSON snapshot, so later template edits do not change previously issued
+certificates. Uploaded backgrounds and logos are kept under the protected
+`runtime/uploads/certificates/templates` directory. Apply the additions in
+`lsi_smarttrack-upgrade.sql` before using certificate template settings.
+Administrators and staff can load a saved version into the editor; saving
+creates a new version. Only inactive versions without issued-certificate
+references can be deleted.
+
 ```mermaid
 erDiagram
     USERS ||--o{ TRAINEES : account_for
@@ -108,7 +118,7 @@ erDiagram
 | `training_schedules` | `schedule_id` | Optional class/program, date, start and end time. |
 | `class_enrollments` | `enrollment_id` | Unique class/trainee pair and enrollment timestamp. |
 | `attendance_records` | `attendance_id` | Trainee, class, schedule, date, time-in/out, status, remarks, recording user. |
-| `trainee_documents` | `document_id` | Optional trainee owner for institute-level files, optional class, uploader, document label, private file path, upload date, status, access level. |
+| `trainee_documents` | `document_id` | Optional trainee owner for institute-level files, optional class, uploader, document label, private file path, upload date, active status, review status and reviewer metadata, access level. Trainee requirement uploads are pending until staff approve or reject them. |
 | `announcements` | `announcement_id` | Author, title, content, publication status and timestamp. |
 | `inquiries` | `inquiry_id` | Trainee, subject, message, reply, status and timestamp. |
 | `notifications` | `notification_id` | Recipient, message, type, read state and timestamp. |

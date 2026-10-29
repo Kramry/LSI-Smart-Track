@@ -19,6 +19,7 @@ class Document_model extends Base_model
                 'total' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents")['total'] ?? 0),
                 'active' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE status = 'active'")['total'] ?? 0),
                 'archived' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE status = 'archived'")['total'] ?? 0),
+                'pending_review' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE trainee_id IS NOT NULL AND review_status = 'pending'")['total'] ?? 0),
                 'private' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE access_level = 'private'")['total'] ?? 0),
                 'class' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE access_level = 'class'")['total'] ?? 0),
                 'staff' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE access_level = 'staff'")['total'] ?? 0),
@@ -100,6 +101,11 @@ class Document_model extends Base_model
             $values[] = $filters['status'];
         }
 
+        if (!empty($filters['review_status'])) {
+            $whereClauses[] = 'd.review_status = ?';
+            $values[] = $filters['review_status'];
+        }
+
         // Filter by upload date range
         if (!empty($filters['date_from'])) {
             $whereClauses[] = 'd.upload_date >= ?';
@@ -125,6 +131,16 @@ class Document_model extends Base_model
     public function documentRequirements()
     {
         return $this->rows('SELECT r.*, c.class_name FROM certificate_document_requirements r JOIN training_classes c ON c.class_id = r.class_id ORDER BY c.class_name, r.required_document_name');
+    }
+
+    public function requirementsForTrainee($userId)
+    {
+        return $this->rows('SELECT r.requirement_id, r.class_id, r.required_document_name, c.class_name FROM certificate_document_requirements r JOIN training_classes c ON c.class_id = r.class_id JOIN class_enrollments e ON e.class_id = c.class_id JOIN trainees t ON t.trainee_id = e.trainee_id WHERE t.user_id = ? ORDER BY c.class_name, r.required_document_name', [(int) $userId]);
+    }
+
+    public function traineeRequirementById($requirementId, $userId)
+    {
+        return $this->row('SELECT r.requirement_id, r.class_id, r.required_document_name FROM certificate_document_requirements r JOIN class_enrollments e ON e.class_id = r.class_id JOIN trainees t ON t.trainee_id = e.trainee_id WHERE r.requirement_id = ? AND t.user_id = ? LIMIT 1', [(int) $requirementId, (int) $userId]);
     }
 
     public function addDocumentRequirement($classId, $documentName, $createdBy)

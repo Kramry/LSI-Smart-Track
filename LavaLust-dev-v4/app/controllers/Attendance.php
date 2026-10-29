@@ -33,7 +33,7 @@ class Attendance extends Base
                 return $this->deny('That class is not assigned to your account.');
             }
         }
-        $result = $this->model->scanAttendance($qrCode, $action, $classId, $scheduleId, (int) $this->user['user_id']);
+        $result = $this->attendanceModel->scanAttendance($qrCode, $action, $classId, $scheduleId, (int) $this->user['user_id']);
         if (isset($result['success'])) {
             $this->recalculateEligibilityPair($qrTrainee['trainee_id'], $classId);
             $this->model->logActivity((int) $this->user['user_id'], 'Recorded attendance', $result['success']);

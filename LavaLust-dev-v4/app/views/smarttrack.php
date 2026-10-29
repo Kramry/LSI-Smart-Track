@@ -485,6 +485,9 @@ $labels = [
                             <article class="doc-stat"><span>ARCHIVED</span><strong><?= $e(
                                 $doc_stats["archived"] ?? 0,
                             ) ?></strong></article>
+                            <article class="doc-stat"><span>PENDING REVIEW</span><strong><?= $e(
+                                $doc_stats["pending_review"] ?? 0,
+                            ) ?></strong></article>
                             <article class="doc-stat"><span>PRIVATE</span><strong><?= $e(
                                 $doc_stats["private"] ?? 0,
                             ) ?></strong></article>
@@ -571,6 +574,25 @@ $labels = [
 "archived"
     ? "selected"
     : "" ?>>Archived</option></select></label>
+                                <label>Review status<select name="review_status"><option value="">All review statuses</option><option value="pending" <?= ($_GET[
+    "review_status"
+                                ] ??
+    "") ===
+                                "pending"
+    ? "selected"
+    : "" ?>>Pending</option><option value="approved" <?= ($_GET[
+    "review_status"
+] ??
+    "") ===
+"approved"
+    ? "selected"
+    : "" ?>>Approved</option><option value="rejected" <?= ($_GET[
+    "review_status"
+] ??
+    "") ===
+"rejected"
+    ? "selected"
+    : "" ?>>Rejected</option></select></label>
                                 <label>Upload date from<input type="date" name="date_from" value="<?= $e(
                                     $_GET["date_from"] ?? "",
                                 ) ?>"></label>
@@ -608,7 +630,16 @@ $labels = [
 ): ?><option value="<?= $e($choice["id"]) ?>"><?= $e(
     $choice["label"],
 ) ?></option><?php endforeach; ?></select></label><?php endif; ?>
-                                <label>Document name<input name="document_name" maxlength="150" placeholder="e.g. National ID"></label>
+                                <?php if (
+                                    $user["role"] === "trainee"
+                                ): ?><label>Required document<select name="requirement_id" required><option value="">Select a class requirement</option><?php foreach (
+    $document_requirements ?? []
+    as $requirement
+): ?><option value="<?= $e(
+    $requirement["requirement_id"],
+) ?>"><?= $e(
+    $requirement["class_name"] . " - " . $requirement["required_document_name"],
+) ?></option><?php endforeach; ?></select></label><?php if (empty($document_requirements)): ?><p class="muted">No document requirements are configured for your enrolled classes. Please contact staff.</p><?php endif; ?><?php else: ?><label>Document name<input name="document_name" maxlength="150" placeholder="e.g. National ID"></label><?php endif; ?>
                                 <?php if (
                                     $user["role"] !== "trainee"
                                 ): ?><label>Class<select name="class_id"><option value="">No class</option><?php foreach (
@@ -622,7 +653,9 @@ $labels = [
                                     $user["role"] !== "instructor"
                                 ): ?><label>Access<select name="access_level"><option value="private">Private</option><option value="class">Class instructors</option><option value="staff">Staff only</option></select></label><?php endif; ?>
                                 <label class="file-field">Choose file<input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png,.docx" required></label>
-                                <button class="button primary" type="submit">Upload document</button>
+                                <button class="button primary" type="submit" <?= $user["role"] === "trainee" && empty($document_requirements)
+                                    ? "disabled"
+                                    : "" ?>>Upload document</button>
                             </form>
                         </section>
                         <?php if (
@@ -843,72 +876,10 @@ $labels = [
                     <?php endif; ?>
 
                     <?php if ($section === "certificate_config"): ?>
-                        <section class="panel form-panel">
-                            <div class="panel-heading"><div><p class="eyebrow">CERTIFICATE</p><h2>Certificate</h2></div></div>
-                            <form method="post" action="<?= $e(
-                                $app_url,
-                            ) ?>manage/certificate-config" class="form-stack" enctype="multipart/form-data">
-                                <input type="hidden" name="_csrf" value="<?= $e(
-                                    $csrf,
-                                ) ?>">
-                                <input type="hidden" name="current_logo_path" value="<?= $e(
-                                    $configs["logo_path"],
-                                ) ?>">
-                                <label>Institution name<input name="institution_name" value="<?= $e(
-                                    $configs["institution_name"],
-                                ) ?>" required></label>
-                                <label>Logo upload<input type="file" name="logo" accept=".png,.jpg,.jpeg,.svg"></label>
-                                <?php if (!empty($configs["logo_path"])): ?>
-                                    <div class="logo-preview">
-                                        <img src="<?= $e($app_url) .
-                                            $e(
-                                                $configs["logo_path"],
-                                            ) ?>" alt="Current logo" style="max-height: 100px;">
-                                        <a class="text-button" href="<?= $e(
-                                            $app_url,
-                                        ) .
-                                            $e(
-                                                $configs["logo_path"],
-                                            ) ?>" target="_blank">View current logo</a>
-                                    </div>
-                                <?php endif; ?>
-                                <label>Certificate title<input name="certificate_title" value="<?= $e(
-                                    $configs["certificate_title"],
-                                ) ?>" required></label>
-                                <label>Certificate subtitle<input name="certificate_subtitle" value="<?= $e(
-                                    $configs["certificate_subtitle"],
-                                ) ?>" required></label>
-                                <label>Signatory name<input name="signatory_name" value="<?= $e(
-                                    $configs["signatory_name"],
-                                ) ?>" required></label>
-                                <label>Signatory designation<input name="signatory_designation" value="<?= $e(
-                                    $configs["signatory_designation"],
-                                ) ?>" required></label>
-                                <label>Template color<input type="color" name="template_color" value="<?= $e(
-                                    $configs["template_color"],
-                                ) ?>"></label>
-                                <label>Minimum attendance percentage<input type="number" name="min_attendance_percentage" value="<?= $e(
-                                    $configs["min_attendance_percentage"],
-                                ) ?>" min="0" max="100" required></label>
-                                <label>Require documents<input type="checkbox" name="require_documents" value="1" <?= $configs[
-                                    "require_documents"
-                                ]
-                                    ? "checked"
-                                    : "" ?>></label>
-                                <label>Require assessments<input type="checkbox" name="require_assessments" value="1" <?= $configs[
-                                    "require_assessments"
-                                ]
-                                    ? "checked"
-                                    : "" ?>></label>
-                                <label>Passed assessments required per class<input type="number" name="required_assessment_count" value="<?= $e(
-                                    $configs["required_assessment_count"],
-                                ) ?>" min="1" max="100" required></label>
-                                <button class="button primary" type="submit">Save template</button>
-                            </form>
-                        </section>
+                        <?php require APP_DIR . "views/certificate_config.php"; ?>
                         <section class="panel">
                             <div class="panel-heading"><div><p class="eyebrow">ELIGIBILITY</p><h2>Required document checklist</h2></div></div>
-                            <p class="muted">A trainee must have an active document whose name matches each requirement for their class.</p>
+                            <p class="muted">Add the required documents for each class. Trainees select a requirement when uploading; only active, staff-approved uploads count toward eligibility.</p>
                             <form method="post" action="<?= $e(
                                 $app_url,
                             ) ?>certificate-requirements/save" class="upload-form">
@@ -1125,11 +1096,13 @@ $labels = [
                                                     ],
                                                     1,
                                                 ) ?>%</td>
-                                                <td><?= $e(
-                                                    $el["documents_approved"],
-                                                ) ?>/<?= $e(
+                                                <td><?php if ((int) ($el["documents_required"] ?? 0) === 0): ?><span class="status pending">Not configured</span> <a class="text-button" href="<?= $e(
+    $app_url,
+) ?>manage/certificate-config">Set up checklist</a><?php else: ?><?= $e(
+    $el["documents_approved"],
+) ?>/<?= $e(
     $el["documents_required"],
-) ?></td>
+) ?> approved<?php endif; ?></td>
                                                 <td><span class="status <?= $el[
                                                     "is_eligible"
                                                 ]
@@ -1287,7 +1260,7 @@ $labels = [
                                 <div class="table-scroll"><table><thead><tr><?php
                                 foreach ($columns as $column): ?><th><?= $e(
     $column === "documents_approved"
-        ? "Required Documents Matched"
+        ? "Approved / Required"
         : ucwords(str_replace("_", " ", $column)),
 ) ?></th><?php endforeach;
                                 if (
@@ -1311,9 +1284,11 @@ $labels = [
                                     ): ?><tr><?php foreach (
     $columns
     as $column
-): ?><td><?php if ($column === "documents_approved"): ?><?= $e(
+): ?><td><?php if ($column === "documents_approved"): ?><?php if ((int) ($record["documents_required"] ?? 0) === 0): ?><span class="status pending">Not configured</span> <a class="text-button" href="<?= $e(
+    $app_url,
+) ?>manage/certificate-config">Set up</a><?php else: ?><?= $e(
     $record["documents_approved"] ?? 0,
-) ?>/<?= $e($record["documents_required"] ?? 0) ?><?php elseif (
+) ?>/<?= $e($record["documents_required"] ?? 0) ?><?php endif; ?><?php elseif (
     $column === "qr_code"
 ): ?><div class="qr-cell"><code><?= $e(
     $record[$column] ?? "",
@@ -1373,7 +1348,20 @@ $labels = [
     $app_url,
 ) ?>documents/<?= $e($record["document_id"]) ?>">Download</a><?php if (
     in_array($user["role"], ["administrator", "staff"], true)
+): ?><?php if (
+    !empty($record["trainee_id"]) &&
+    ($record["review_status"] ?? "") === "pending"
 ): ?><form method="post" action="<?= $e($app_url) ?>documents/<?= $e(
+    $record["document_id"],
+) ?>/review" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e(
+    $csrf,
+) ?>"><input type="hidden" name="decision" value="approved"><button class="text-button" type="submit">Approve</button></form><form method="post" action="<?= $e(
+    $app_url,
+) ?>documents/<?= $e(
+    $record["document_id"],
+) ?>/review" data-confirm="Reject this trainee document?" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e(
+    $csrf,
+) ?>"><input type="hidden" name="decision" value="rejected"><button class="text-button danger-text" type="submit">Reject</button></form><?php endif; ?><form method="post" action="<?= $e($app_url) ?>documents/<?= $e(
     $record["document_id"],
 ) ?>/status" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e(
     $csrf,

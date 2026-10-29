@@ -142,12 +142,12 @@ class SmartTrack_api extends Base
             $records = $this->model->records($section, $user);
             $fields = $canManage ? $this->fieldsFor($section) : [];
         } elseif ($section === 'certificates' && in_array($user['role'], ['administrator', 'staff'], true)) {
-            $this->model->refreshEligibilityRecords();
-            $records = $this->model->getCertificates([]);
+            $this->eligibilityModel->refreshEligibilityRecords();
+            $records = $this->certificateModel->getCertificates([]);
             $columns = ['trainee_name', 'program_name', 'class_name', 'certificate_number', 'issue_date', 'status'];
             $key = 'certificate_id';
         } elseif ($section === 'eligibility' && in_array($user['role'], ['administrator', 'staff'], true)) {
-            $records = $this->model->getEligibilityRecords([]);
+            $records = $this->eligibilityModel->getEligibilityRecords([]);
             $columns = ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'attendance_percentage', 'documents_approved', 'assessments_completed', 'is_eligible', 'approval_status', 'ineligibility_reasons'];
             $key = 'eligibility_id';
         } elseif ($section === 'assessments' && in_array($user['role'], ['administrator', 'staff'], true)) {
@@ -169,21 +169,23 @@ class SmartTrack_api extends Base
             }
             $columns = ['certificate_number', 'program_name', 'class_name', 'issue_date', 'status'];
             $key = 'certificate_id';
-        } elseif ($section === 'certificate_config' && $user['role'] === 'administrator') {
+        } elseif ($section === 'certificate_config' && in_array($user['role'], ['administrator', 'staff'], true)) {
             $configs = [];
             foreach ([
-                'institution_name', 'logo_path', 'signatory_name', 'signatory_designation',
                 'min_attendance_percentage', 'require_documents', 'require_assessments',
-                'required_assessment_count', 'certificate_title', 'certificate_subtitle', 'template_color',
+                'required_assessment_count',
             ] as $configKey) {
-                $configs[$configKey] = $this->model->getConfig($configKey, '');
+                $configs[$configKey] = $this->configModel->getConfig($configKey, '');
             }
+            $template = $this->certificateModel->getLatestTemplate() ?: $this->certificateModel->legacyTemplate();
             $this->api->respond([
                 'title' => 'Certificate Settings',
                 'section' => 'certificate_config',
                 'configs' => $configs,
-                'document_requirements' => $this->model->documentRequirements(),
-                'certificate_classes' => $this->model->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+                'certificate_template' => $template,
+                'certificate_template_versions' => $this->certificateModel->getTemplateVersions(),
+                'document_requirements' => $this->documentModel->documentRequirements(),
+                'certificate_classes' => $this->recordModel->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
                 'can_configure_certificates' => true,
                 'can_manage' => false,
                 'records' => [],
@@ -252,7 +254,7 @@ class SmartTrack_api extends Base
                 'trainees' => $this->model->options('trainees', $user),
                 'classes' => $this->model->options('classes', $user),
             ] : [],
-            'certificate_stats' => $section === 'certificates' ? $this->model->certificateStats() : null,
+            'certificate_stats' => $section === 'certificates' ? $this->certificateModel->certificateStats() : null,
             'assessment_options' => $section === 'assessments' ? [
                 'trainees' => $this->model->options('trainees', $user),
                 'classes' => $this->model->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
@@ -322,6 +324,15 @@ class SmartTrack_api extends Base
         $documents = new Documents();
         $documents->before_action();
         $documents->updateDocumentStatus($id);
+    }
+
+    public function apiReviewDocument($id)
+    {
+        $this->apiRequest = true;
+        require_once APP_DIR . 'controllers/Documents.php';
+        $documents = new Documents();
+        $documents->before_action();
+        $documents->reviewDocument($id);
     }
 
     public function apiDeleteDocument($id)

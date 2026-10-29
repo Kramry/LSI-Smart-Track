@@ -119,7 +119,7 @@ class Eligibility_model extends Base_model
         }
 
         $requirements = $this->rows('SELECT required_document_name FROM certificate_document_requirements WHERE class_id = ? ORDER BY required_document_name', [(int) $classId]);
-        $submittedDocuments = $this->rows('SELECT document_name FROM trainee_documents WHERE trainee_id = ? AND class_id = ? AND status = "active"', [(int) $traineeId, (int) $classId]);
+        $submittedDocuments = $this->rows('SELECT document_name FROM trainee_documents WHERE trainee_id = ? AND class_id = ? AND status = "active" AND review_status = "approved"', [(int) $traineeId, (int) $classId]);
         $submittedNames = [];
         foreach ($submittedDocuments as $document) {
             $submittedNames[mb_strtolower(trim($document['document_name']))] = true;

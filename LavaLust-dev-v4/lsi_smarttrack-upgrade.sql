@@ -127,6 +127,9 @@ CREATE TABLE IF NOT EXISTS `trainee_documents` (
   `file_path` varchar(255) NOT NULL,
   `upload_date` date NOT NULL,
   `status` varchar(30) NOT NULL DEFAULT 'active',
+  `review_status` varchar(20) NOT NULL DEFAULT 'approved',
+  `reviewed_by` int unsigned DEFAULT NULL,
+  `reviewed_at` timestamp NULL DEFAULT NULL,
   `access_level` varchar(20) NOT NULL DEFAULT 'private',
   PRIMARY KEY (`document_id`),
   KEY `idx_smarttrack_document_trainee` (`trainee_id`),
@@ -136,6 +139,16 @@ CREATE TABLE IF NOT EXISTS `trainee_documents` (
   CONSTRAINT `smarttrack_documents_class_fk` FOREIGN KEY (`class_id`) REFERENCES `training_classes` (`class_id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `smarttrack_documents_uploader_fk` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @tbl = 'trainee_documents', @col = 'review_status', @def = 'varchar(20) NOT NULL DEFAULT ''approved''';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'trainee_documents', @col = 'reviewed_by', @def = 'int unsigned DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'trainee_documents', @col = 'reviewed_at', @def = 'timestamp NULL DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS `announcements` (
   `announcement_id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -337,6 +350,29 @@ CREATE TABLE IF NOT EXISTS `certificate_config` (
   PRIMARY KEY (`config_id`),
   UNIQUE KEY `uq_smarttrack_config_key` (`config_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `certificate_templates` (
+  `template_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `mode` varchar(20) NOT NULL,
+  `file_path` varchar(255) DEFAULT NULL,
+  `field_layout` JSON NOT NULL,
+  `settings` JSON NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 0,
+  `version` int unsigned NOT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`template_id`),
+  UNIQUE KEY `uq_smarttrack_certificate_template_version` (`version`),
+  KEY `idx_smarttrack_certificate_template_active` (`is_active`),
+  CONSTRAINT `smarttrack_certificate_template_creator_fk` FOREIGN KEY (`created_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @tbl = 'certificates', @col = 'template_id', @def = 'int unsigned DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificates', @col = 'template_snapshot', @def = 'JSON DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- Default certificate configuration (existing values are preserved)
 INSERT INTO `certificate_config` (`config_key`, `config_value`, `description`) VALUES

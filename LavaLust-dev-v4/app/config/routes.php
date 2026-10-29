@@ -61,6 +61,10 @@ $router->get('/manage/certificates', 'Certificates::certificates');
 $router->get('/manage/eligibility', 'Certificates::eligibility');
 $router->get('/manage/certificate-config', 'Certificates::certificateConfig');
 $router->get('/manage/certificate_config', 'Certificates::certificateConfig');
+$router->get('/certificate-templates/{id}/file', 'Certificates::certificateTemplateFile');
+$router->post('/manage/certificate-config/activate/{id}', 'Certificates::activateCertificateTemplate');
+$router->post('/manage/certificate-config/delete/{id}', 'Certificates::deleteCertificateTemplate');
+$router->post('/manage/certificate-config', 'Certificates::certificateConfig');
 $router->get('/manage/{section}', 'Dashboard::module');
 $router->post('/manage/{section}/save', 'Dashboard::save');
 $router->post('/manage/{section}/delete/{id}', 'Dashboard::delete');
@@ -79,6 +83,7 @@ $router->post('/documents/upload', 'Documents::uploadDocument');
 $router->get('/documents/{id}', 'Documents::downloadDocument');
 $router->post('/documents/{id}/delete', 'Documents::deleteDocument');
 $router->post('/documents/{id}/status', 'Documents::updateDocumentStatus');
+$router->post('/documents/{id}/review', 'Documents::reviewDocument');
 
 # CERTIFICATE CONFIG
 $router->post('/certificate-requirements/save', 'Documents::saveDocumentRequirement');
@@ -89,7 +94,6 @@ $router->post('/assessments/save', 'Assessments::saveAssessment');
 $router->post('/assessments/{id}/delete', 'Assessments::deleteAssessment');
 
 # CERTIFICATES
-$router->post('/manage/certificate-config', 'Certificates::certificateConfig');
 $router->post('/certificates/recalculate', 'Certificates::recalculateEligibility');
 $router->post('/certificates/review', 'Certificates::reviewEligibility');
 $router->post('/certificates/eligibility/{id}/delete', 'Certificates::deleteEligibility');
@@ -115,6 +119,7 @@ $router->post('/api/profile/password', 'SmartTrack_api::apiSavePassword');
 $router->post('/api/documents/upload', 'SmartTrack_api::apiUploadDocument');
 $router->get('/api/documents/{id}', 'SmartTrack_api::apiDownloadDocument');
 $router->post('/api/documents/{id}/status', 'SmartTrack_api::apiUpdateDocumentStatus');
+$router->post('/api/documents/{id}/review', 'SmartTrack_api::apiReviewDocument');
 $router->post('/api/documents/{id}/delete', 'SmartTrack_api::apiDeleteDocument');
 $router->post('/api/assessments/save', 'SmartTrack_api::apiSaveAssessment');
 $router->post('/api/assessments/{id}/delete', 'SmartTrack_api::apiDeleteAssessment');

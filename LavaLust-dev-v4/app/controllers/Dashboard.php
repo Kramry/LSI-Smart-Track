@@ -48,7 +48,7 @@ class Dashboard extends Base
 
         if ($section === 'documents') {
             $filters = [];
-            foreach (['search', 'document_type', 'class_id', 'access_level', 'status', 'date_from', 'date_to', 'sort'] as $filter) {
+            foreach (['search', 'document_type', 'class_id', 'access_level', 'status', 'review_status', 'date_from', 'date_to', 'sort'] as $filter) {
                 $value = $_GET[$filter] ?? '';
                 $filters[$filter] = is_scalar($value) ? trim((string) $value) : '';
             }
@@ -84,6 +84,9 @@ class Dashboard extends Base
                 : [],
             'followups' => $section === 'attendance' && $this->user['role'] !== 'trainee'
                 ? $this->dashboardModel->absenceFollowUps($this->user)
+                : [],
+            'document_requirements' => $section === 'documents' && $this->user['role'] === 'trainee'
+                ? $this->documentModel->requirementsForTrainee((int) $this->user['user_id'])
                 : [],
         ];
 

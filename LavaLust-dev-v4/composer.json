@@ -1,6 +1,7 @@
 {
     "require": {
         "aws/aws-sdk-php": "^3.401",
+        "setasign/fpdi": "^2.6",
         "tecnickcom/tcpdf": "^6.11"
     }
 }
