@@ -486,3 +486,114 @@ INSERT INTO `certificate_config` (`config_key`, `config_value`, `description`) V
 ('require_assessments', '0', 'Whether assessments are required for certificate'),
 ('required_assessment_count', '1', 'Number of passed assessments required per class')
 ON DUPLICATE KEY UPDATE `config_key` = `config_key`; -- keep any values already customised
+
+-- Payments and refundable bond ledger
+CREATE TABLE IF NOT EXISTS `fee_types` (
+  `fee_type_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `program_id` int unsigned DEFAULT NULL,
+  `class_id` int unsigned DEFAULT NULL,
+  `fee_kind` varchar(20) NOT NULL,
+  `fee_name` varchar(150) NOT NULL,
+  `amount` decimal(12,2) NOT NULL,
+  `due_date` date DEFAULT NULL,
+  `required_for_certificate` tinyint(1) NOT NULL DEFAULT 0,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`fee_type_id`),
+  KEY `idx_smarttrack_fee_program` (`program_id`),
+  KEY `idx_smarttrack_fee_class` (`class_id`),
+  KEY `idx_smarttrack_fee_scope` (`fee_kind`, `is_active`),
+  CONSTRAINT `smarttrack_fee_program_fk` FOREIGN KEY (`program_id`) REFERENCES `training_programs` (`program_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_fee_class_fk` FOREIGN KEY (`class_id`) REFERENCES `training_classes` (`class_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_fee_creator_fk` FOREIGN KEY (`created_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `trainee_fees` (
+  `trainee_fee_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `fee_type_id` int unsigned DEFAULT NULL,
+  `trainee_id` int unsigned NOT NULL,
+  `class_id` int unsigned NOT NULL,
+  `fee_kind` varchar(20) NOT NULL,
+  `fee_name` varchar(150) NOT NULL,
+  `amount_due` decimal(12,2) NOT NULL,
+  `due_date` date DEFAULT NULL,
+  `bond_status` varchar(20) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`trainee_fee_id`),
+  UNIQUE KEY `uq_smarttrack_trainee_fee_instance` (`trainee_id`, `class_id`, `fee_type_id`),
+  KEY `idx_smarttrack_trainee_fee_trainee` (`trainee_id`),
+  KEY `idx_smarttrack_trainee_fee_class` (`class_id`),
+  KEY `idx_smarttrack_trainee_fee_kind_status` (`fee_kind`, `bond_status`),
+  CONSTRAINT `smarttrack_trainee_fee_type_fk` FOREIGN KEY (`fee_type_id`) REFERENCES `fee_types` (`fee_type_id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_trainee_fee_trainee_fk` FOREIGN KEY (`trainee_id`) REFERENCES `trainees` (`trainee_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_trainee_fee_class_fk` FOREIGN KEY (`class_id`) REFERENCES `training_classes` (`class_id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `payments` (
+  `payment_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `trainee_fee_id` int unsigned NOT NULL,
+  `entry_type` varchar(20) NOT NULL DEFAULT 'payment',
+  `amount` decimal(12,2) NOT NULL,
+  `method` varchar(20) DEFAULT NULL,
+  `reference_number` varchar(100) DEFAULT NULL,
+  `payment_date` date NOT NULL,
+  `receipt_number` varchar(50) DEFAULT NULL,
+  `reversal_of_payment_id` int unsigned DEFAULT NULL,
+  `remarks` text DEFAULT NULL,
+  `recorded_by` int unsigned DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`payment_id`),
+  UNIQUE KEY `uq_smarttrack_payment_reference` (`reference_number`),
+  UNIQUE KEY `uq_smarttrack_payment_receipt` (`receipt_number`),
+  KEY `idx_smarttrack_payment_fee_date` (`trainee_fee_id`, `payment_date`),
+  KEY `idx_smarttrack_payment_reversal` (`reversal_of_payment_id`),
+  CONSTRAINT `smarttrack_payment_fee_fk` FOREIGN KEY (`trainee_fee_id`) REFERENCES `trainee_fees` (`trainee_fee_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_payment_reversal_fk` FOREIGN KEY (`reversal_of_payment_id`) REFERENCES `payments` (`payment_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_payment_recorder_fk` FOREIGN KEY (`recorded_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `payment_proofs` (
+  `proof_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `trainee_fee_id` int unsigned NOT NULL,
+  `uploaded_by` int unsigned NOT NULL,
+  `amount` decimal(12,2) NOT NULL,
+  `method` varchar(20) NOT NULL,
+  `reference_number` varchar(100) NOT NULL,
+  `payment_date` date NOT NULL,
+  `file_path` varchar(255) NOT NULL,
+  `status` varchar(30) NOT NULL DEFAULT 'pending_verification',
+  `remarks` text DEFAULT NULL,
+  `payment_id` int unsigned DEFAULT NULL,
+  `verified_by` int unsigned DEFAULT NULL,
+  `verified_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`proof_id`),
+  UNIQUE KEY `uq_smarttrack_proof_reference` (`reference_number`),
+  KEY `idx_smarttrack_proof_fee_status` (`trainee_fee_id`, `status`),
+  CONSTRAINT `smarttrack_proof_fee_fk` FOREIGN KEY (`trainee_fee_id`) REFERENCES `trainee_fees` (`trainee_fee_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_proof_uploader_fk` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`user_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_proof_payment_fk` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`payment_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_proof_verifier_fk` FOREIGN KEY (`verified_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `bond_transactions` (
+  `bond_transaction_id` int unsigned NOT NULL AUTO_INCREMENT,
+  `trainee_fee_id` int unsigned NOT NULL,
+  `transaction_type` varchar(20) NOT NULL,
+  `amount` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `payment_id` int unsigned DEFAULT NULL,
+  `transaction_date` date NOT NULL,
+  `method` varchar(20) DEFAULT NULL,
+  `reference_number` varchar(100) DEFAULT NULL,
+  `remarks` text DEFAULT NULL,
+  `performed_by` int unsigned DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`bond_transaction_id`),
+  UNIQUE KEY `uq_smarttrack_bond_reference` (`reference_number`),
+  KEY `idx_smarttrack_bond_fee_date` (`trainee_fee_id`, `transaction_date`),
+  CONSTRAINT `smarttrack_bond_fee_fk` FOREIGN KEY (`trainee_fee_id`) REFERENCES `trainee_fees` (`trainee_fee_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_bond_payment_fk` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`payment_id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `smarttrack_bond_performer_fk` FOREIGN KEY (`performed_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

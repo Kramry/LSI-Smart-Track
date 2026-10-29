@@ -2,6 +2,7 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once APP_DIR . 'models/Base_model.php';
+require_once APP_DIR . 'models/Payment_model.php';
 
 class Eligibility_model extends Base_model
 {
@@ -99,6 +100,7 @@ class Eligibility_model extends Base_model
         if (!$class) {
             return ['eligible' => false, 'reasons' => ['Class not found']];
         }
+        $paymentModel = new Payment_model($this->db);
 
         $reasons = [];
         if (empty($class['end_date']) || $class['end_date'] > date('Y-m-d')) {
@@ -108,6 +110,23 @@ class Eligibility_model extends Base_model
         $enrollment = $this->row('SELECT * FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [(int) $traineeId, (int) $classId]);
         if (!$enrollment) {
             $reasons[] = 'Not enrolled in this class';
+        } else {
+            $paymentModel->syncEnrollmentFees((int) $traineeId, (int) $classId);
+            $requiredFees = $this->rows("SELECT ft.fee_type_id, ft.fee_name, ft.class_id FROM fee_types ft WHERE ft.is_active = 1 AND ft.required_for_certificate = 1 AND (ft.class_id = ? OR (ft.class_id IS NULL AND ft.program_id = ? AND NOT EXISTS (SELECT 1 FROM fee_types class_override WHERE class_override.class_id = ? AND class_override.is_active = 1 AND class_override.fee_kind = ft.fee_kind)))", [
+                (int) $classId, (int) $class['program_id'], (int) $classId,
+            ]);
+            $unpaidFeeNames = [];
+            foreach ($requiredFees as $requiredFee) {
+                $feeBalance = $this->row("SELECT tf.trainee_fee_id, GREATEST(tf.amount_due - COALESCE(SUM(CASE WHEN pay.entry_type = 'payment' THEN pay.amount WHEN pay.entry_type = 'reversal' THEN -pay.amount ELSE 0 END), 0), 0) AS balance FROM trainee_fees tf JOIN training_classes fee_class ON fee_class.class_id = tf.class_id LEFT JOIN payments pay ON pay.trainee_fee_id = tf.trainee_fee_id WHERE tf.fee_type_id = ? AND tf.trainee_id = ? AND (? IS NULL OR tf.class_id = ?) AND fee_class.program_id = ? GROUP BY tf.trainee_fee_id", [
+                    (int) $requiredFee['fee_type_id'], (int) $traineeId, $requiredFee['class_id'], (int) $requiredFee['class_id'], (int) $class['program_id'],
+                ]);
+                if (!$feeBalance || (float) $feeBalance['balance'] > 0.00001) {
+                    $unpaidFeeNames[] = $requiredFee['fee_name'];
+                }
+            }
+            if ($unpaidFeeNames) {
+                $reasons[] = 'Required fees unpaid: ' . implode(', ', $unpaidFeeNames);
+            }
         }
 
         $attendance = $this->row("SELECT COUNT(*) AS total, SUM(CASE WHEN status IN ('Present', 'Late') THEN 1 ELSE 0 END) AS attended FROM attendance_records WHERE trainee_id = ? AND class_id = ?", [(int) $traineeId, (int) $classId]);
@@ -204,6 +223,7 @@ class Eligibility_model extends Base_model
             ]);
         }
 
+        $paymentModel->evaluateBondClearanceForEnrollment((int) $traineeId, (int) $classId);
         return [
             'eligible' => $isEligible,
             'reasons' => $reasons,

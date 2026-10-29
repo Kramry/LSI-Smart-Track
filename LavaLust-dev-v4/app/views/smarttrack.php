@@ -16,6 +16,8 @@ $labels = [
     'enrollments' => 'Enrollments',
     'attendance' => 'Attendance',
     'documents' => 'Documents',
+    'payments' => 'Payments',
+    'my_payments' => 'My payments',
     'certificates' => 'Certificates',
     'certificates_to_sign' => 'Certificates to sign',
     'eligibility' => 'Certificate Eligibility',
@@ -1409,6 +1411,12 @@ $labels = [
     ? "present"
     : "absent" ?>"><?= $e(
     ucfirst($record[$column] ?? ""),
+) ?></span><?php elseif (
+    $column === "registration_payment_status"
+): ?><span class="status <?= ($record[$column] ?? "") === "Paid"
+    ? "present"
+    : "pending" ?>"><?= $e(
+    $record[$column] ?? "Pending payment",
 ) ?></span><?php elseif (
     $column === "status"
 ): ?><span class="status <?= strtolower($e($record[$column] ?? "")) ?>"><?= $e(

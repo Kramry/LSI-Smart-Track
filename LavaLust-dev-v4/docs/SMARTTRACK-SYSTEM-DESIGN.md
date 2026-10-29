@@ -8,9 +8,9 @@ LSI SmartTrack is a QR-enabled attendance and TESDA trainee monitoring system fo
 
 | Role | Features |
 | --- | --- |
-| Trainee | Sign in/out; change password; update profile; view and print QR ID; view attendance history and present/late/absent summary; upload and retrieve personal requirements; view announcements; send inquiries and read replies. |
+| Trainee | Sign in/out; change password; update profile; view and print QR ID; view attendance history and present/late/absent summary; upload and retrieve personal requirements; view balances, payment history and receipts; submit private payment proofs; view announcements; send inquiries and read replies. |
 | Instructor | Sign in/out; change password; update profile; view assigned classes and trainee lists; scan or manually enter QR IDs for time-in/time-out; view live class attendance; correct attendance with remarks; see absence alerts and follow-up lists; generate and export daily, weekly, and monthly reports; upload class documents; post announcements; reply to inquiries. |
-| Administrator / Staff | Manage user accounts and roles; reset passwords and deactivate accounts; manage trainee and instructor records and QR IDs; manage programs, classes, schedules, and instructor assignments; record and monitor attendance; manage absences and reports; classify, retrieve, and secure documents; configure versioned completion-certificate templates; review eligibility and issue or revoke certificates; manage announcements and inquiries; review activity logs. |
+| Administrator / Staff | Manage user accounts and roles; reset passwords and deactivate accounts; manage trainee and instructor records and QR IDs; manage programs, classes, schedules, and instructor assignments; record and monitor attendance; manage absences and reports; configure program/class fees; record and reverse payment ledger entries; verify proofs and process bond refunds/forfeitures; export collection and outstanding reports; classify, retrieve, and secure documents; configure versioned completion-certificate templates; review eligibility and issue or revoke certificates; manage announcements and inquiries; review activity logs. |
 
 ## Sitemap
 
@@ -30,6 +30,8 @@ Sign in / First-run administrator setup
     │   └── Schedules and enrollments
     ├── User accounts and roles (administrator/staff)
     ├── Documents (upload, classify, retrieve, access control)
+    ├── Payments (fee setup, cashier, proof review, bonds, reports)
+    │   └── My payments (balances, proofs, receipts)
     ├── Announcements
     ├── Inquiries and replies
     ├── Activity log (administrator/staff)
@@ -95,6 +97,20 @@ signature images stay under the protected
 `runtime/uploads/certificates/signatures` directory and are only read by the
 PDF generator.
 
+Payments use immutable `payments` ledger rows. Correcting a recorded payment
+adds a reversal entry rather than editing or deleting the original. Program
+and class fee rules are copied to `trainee_fees` when an enrollment is
+synchronized, so later fee-rule changes do not rewrite existing balances.
+Uploaded payment proofs are stored outside the public directory under
+`runtime/uploads/payment-proofs`; only the trainee who uploaded the proof and
+administrator/staff accounts can retrieve it. Verified proofs create a ledger
+payment and official PDF receipt. Bond deposits, refunds, forfeitures, and
+automatic `refund_pending` clearance transitions are recorded in
+`bond_transactions`. Required fee rules can optionally block certificate
+eligibility while a balance remains. CSV exports are compatible with Excel;
+reports and individual receipts can also be generated as PDFs. Online gateway
+payments and webhook verification are not included in this phase.
+
 ```mermaid
 erDiagram
     USERS ||--o{ TRAINEES : account_for
@@ -114,6 +130,13 @@ erDiagram
     TRAINEES ||--o{ TRAINEE_DOCUMENTS : owns
     TRAINEES ||--o{ INQUIRIES : sends
     USERS ||--o{ NOTIFICATIONS : receives
+    USERS ||--o{ FEE_TYPES : configures
+    USERS ||--o{ PAYMENTS : records
+    TRAINEES ||--o{ TRAINEE_FEES : owes
+    FEE_TYPES ||--o{ TRAINEE_FEES : assigns
+    TRAINEE_FEES ||--o{ PAYMENTS : ledger
+    TRAINEE_FEES ||--o{ PAYMENT_PROOFS : proof_for
+    TRAINEE_FEES ||--o{ BOND_TRANSACTIONS : bond_ledger
 ```
 
 | Table | Primary key | Main fields and relationships |
@@ -130,6 +153,11 @@ erDiagram
 | `inquiries` | `inquiry_id` | Trainee, subject, message, reply, status and timestamp. |
 | `notifications` | `notification_id` | Recipient, message, type, read state and timestamp. |
 | `activity_logs` | `log_id` | Optional user, action, details and timestamp. |
+| `fee_types` | `fee_type_id` | Registration or bond fee rule scoped to a program or class, with amount, due date, and optional certificate eligibility requirement. |
+| `trainee_fees` | `trainee_fee_id` | Per-trainee/class fee snapshot and refundable bond status. |
+| `payments` | `payment_id` | Append-only collection and reversal ledger, payment method/reference/date, and unique official receipt number. |
+| `payment_proofs` | `proof_id` | Private uploaded proof with pending/verified/rejected status and reviewer details. |
+| `bond_transactions` | `bond_transaction_id` | Append-only bond deposits, refunds, forfeitures, reversals, and automatic clearance transitions. |
 
 ## Local Setup
 

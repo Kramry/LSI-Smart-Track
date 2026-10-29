@@ -57,6 +57,9 @@ $router->post('/logout', 'Auth::logout');
 # DASHBOARD & MODULES
 $router->get('/dashboard', 'Dashboard::dashboard');
 $router->get('/manage/assessments', 'Assessments::assessments');
+$router->get('/manage/payments', 'Payment::payments');
+$router->get('/payments', 'Payment::payments');
+$router->get('/my-payments', 'Payment::myPayments');
 $router->get('/manage/certificates', 'Certificates::certificates');
 $router->get('/manage/eligibility', 'Certificates::eligibility');
 $router->get('/manage/certificate-config', 'Certificates::certificateConfig');
@@ -92,6 +95,18 @@ $router->post('/certificate-requirements/{id}/delete', 'Documents::deleteDocumen
 # ASSESSMENTS
 $router->post('/assessments/save', 'Assessments::saveAssessment');
 $router->post('/assessments/{id}/delete', 'Assessments::deleteAssessment');
+
+# PAYMENTS
+$router->post('/payments/fees/save', 'Payment::saveFeeType');
+$router->post('/payments/fees/{id}/deactivate', 'Payment::deactivateFeeType');
+$router->post('/payments/record', 'Payment::recordPayment');
+$router->post('/my-payments/proof', 'Payment::submitProof');
+$router->post('/payments/proofs/{id}/review', 'Payment::reviewProof');
+$router->get('/payments/proof/{id}', 'Payment::proofFile');
+$router->get('/payments/receipt/{id}', 'Payment::receipt');
+$router->post('/payments/bonds/{id}/action', 'Payment::bondAction');
+$router->post('/payments/{id}/reverse', 'Payment::reversePayment');
+$router->get('/payments/report/export', 'Payment::exportReport');
 
 # CERTIFICATES
 $router->post('/certificates/recalculate', 'Certificates::recalculateEligibility');
