@@ -93,7 +93,8 @@ class Base extends Controller
         ];
         $data['navigation'] = $this->user ? ($navigation[$this->user['role']] ?? []) : [];
 
-        $this->call->view($page === 'module' ? 'smarttrack' : $page, $data);
+        $customViews = ['classes', 'class_detail'];
+        $this->call->view(in_array($page, $customViews, true) ? $page : 'smarttrack', $data);
     }
 
     protected function input($key)
@@ -329,7 +330,10 @@ class Base extends Controller
             'announcements' => [
                 ['name' => 'title', 'label' => 'Title', 'required' => true],
                 ['name' => 'content', 'label' => 'Announcement', 'type' => 'textarea', 'required' => true],
-                ['name' => 'status', 'label' => 'Visibility', 'type' => 'select', 'required' => true, 'values' => ['published', 'draft']],
+                ['name' => 'category', 'label' => 'Category', 'type' => 'select', 'required' => true, 'values' => ['General', 'Training Schedule', 'Training Updates', 'Requirements', 'Important Notice']],
+                ['name' => 'attachment', 'label' => 'Attachment URL', 'type' => 'url'],
+                ['name' => 'published_at', 'label' => 'Publication date and time', 'type' => 'datetime-local'],
+                ['name' => 'status', 'label' => 'Visibility', 'type' => 'select', 'required' => true, 'values' => ['draft', 'published', 'archived']],
             ],
             'inquiries' => [
                 ['name' => 'subject', 'label' => 'Subject', 'required' => true],

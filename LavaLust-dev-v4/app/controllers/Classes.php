@@ -66,6 +66,57 @@ class Classes extends Base
         ]);
     }
 
+    public function apiIndex()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET' || !$this->requireUser()) {
+            return;
+        }
+        if (!in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+            return $this->jsonResponse(['message' => 'You are not allowed to view classes.'], 403);
+        }
+        $filters = [
+            'program_id' => $this->numericFilter($_GET['program_id'] ?? ''),
+            'instructor_id' => $this->numericFilter($_GET['instructor_id'] ?? ''),
+        ];
+        $classes = $this->classesModel->classes($this->user, $filters);
+        foreach ($classes as &$class) {
+            $class['teaching_status'] = $this->teachingStatus($class);
+            $class['today_not_scanned'] = max(0, (int) $class['enrolled_count'] - (int) $class['today_scanned']);
+        }
+        unset($class);
+        return $this->jsonResponse([
+            'classes' => $classes,
+            'programs' => $this->recordModel->options('programs'),
+            'instructors' => $this->recordModel->options('instructors'),
+        ]);
+    }
+
+    public function apiDetail($id)
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET' || !$this->requireUser()) {
+            return;
+        }
+        if (!in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)
+            || !ctype_digit((string) $id) || !(int) $id) {
+            return $this->jsonResponse(['message' => 'Class not found.'], 404);
+        }
+        $classId = (int) $id;
+        $class = $this->classesModel->classById($classId, $this->user);
+        if (!$class) {
+            return $this->jsonResponse(['message' => 'Class not found.'], 404);
+        }
+        return $this->jsonResponse([
+            'class' => $class,
+            'schedules' => $this->classesModel->schedules($classId),
+            'roster' => $this->classesModel->roster($classId),
+            'attendance' => $this->classesModel->attendance($classId),
+            'assessments' => $this->classesModel->assessments($classId),
+            'documents' => $this->classesModel->documents($classId),
+            'announcements' => $this->classesModel->announcements($classId),
+            'stats' => $this->classesModel->quickStats($classId),
+        ]);
+    }
+
     private function numericFilter($value)
     {
         return is_scalar($value) && ctype_digit((string) $value) && (int) $value > 0 ? (int) $value : null;

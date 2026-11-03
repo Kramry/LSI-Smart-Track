@@ -132,12 +132,21 @@ $router->get('/verify-certificate', 'Certificates::verifyCertificate');
 
 # API ENDPOINTS
 $router->get('/api/session', 'SmartTrack_api::apiSession');
+$router->get('/api/storage/status', 'SmartTrack_api::apiStorageStatus');
+$router->get('/api/registration-options', 'SmartTrack_api::apiRegistrationOptions');
 $router->post('/api/login', 'SmartTrack_api::apiLogin');
 $router->post('/api/register', 'SmartTrack_api::apiRegister');
+$router->get('/api/notifications/history', 'SmartTrack_api::apiNotificationHistory');
+$router->post('/api/notifications/send', 'SmartTrack_api::apiSendAnnouncement');
+$router->post('/api/notifications/{id}/retry', 'SmartTrack_api::apiRetryNotification');
+$router->post('/api/notifications/settings', 'SmartTrack_api::apiSaveNotificationSettings');
+$router->post('/api/notifications/test', 'SmartTrack_api::apiTestNotification');
 $router->post('/api/refresh', 'SmartTrack_api::apiRefresh');
 $router->post('/api/logout', 'SmartTrack_api::apiLogout');
 $router->get('/api/dashboard', 'SmartTrack_api::apiDashboard');
 $router->get('/api/analytics', 'Analytics::data');
+$router->get('/api/classes', 'Classes::apiIndex');
+$router->get('/api/classes/{id}', 'Classes::apiDetail');
 $router->get('/api/payments', 'Payment::apiData');
 $router->get('/api/payments/proof/{id}', 'Payment::proofFile');
 $router->get('/api/payments/receipt/{id}', 'Payment::receipt');

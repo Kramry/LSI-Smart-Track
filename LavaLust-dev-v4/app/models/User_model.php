@@ -42,6 +42,28 @@ class User_model extends Base_model
         );
     }
 
+    public function createTraineeForUser($userId, array $data)
+    {
+        $this->execute(
+            'INSERT INTO trainees (first_name, last_name, sex, date_of_birth, address, email, contact_number, course, program_id, status, user_id, qr_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [
+                $data['first_name'],
+                $data['last_name'],
+                $data['sex'],
+                $data['date_of_birth'] ?: null,
+                $data['address'] ?: null,
+                $data['email'] ?: null,
+                $data['contact_number'],
+                $data['course'],
+                $data['program_id'] ?: null,
+                'active',
+                (int) $userId,
+                'LSI-' . strtoupper(bin2hex(random_bytes(6))),
+            ]
+        );
+    }
+
     public function traineeForUser($userId)
     {
         return $this->row('SELECT * FROM trainees WHERE user_id = ? LIMIT 1', [(int) $userId]);

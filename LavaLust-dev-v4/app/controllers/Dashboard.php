@@ -174,6 +174,17 @@ class Dashboard extends Base
                     $value .= ':00';
                 }
             }
+            if ($value !== '' && $name === 'published_at') {
+                $value = str_replace('T', ' ', $value);
+                if (strlen($value) === 16) {
+                    $value .= ':00';
+                }
+                $publishedAt = DateTime::createFromFormat('!Y-m-d H:i:s', $value);
+                if (!$publishedAt || $publishedAt->format('Y-m-d H:i:s') !== $value) {
+                    $errors[] = 'Enter a valid publication date and time.';
+                    continue;
+                }
+            }
             $maxLengths = ['full_name' => 150, 'username' => 50, 'first_name' => 100, 'last_name' => 100, 'sex' => 20, 'contact_number' => 20, 'course' => 100, 'program_code' => 30, 'program_name' => 150, 'class_name' => 150, 'title' => 150, 'subject' => 150, 'document_name' => 150];
             if (isset($maxLengths[$name]) && strlen($value) > $maxLengths[$name]) {
                 $errors[] = $field['label'] . ' is too long.';
@@ -236,6 +247,12 @@ class Dashboard extends Base
         }
         if ($section === 'announcements') {
             $data['user_id'] = (int) $this->user['user_id'];
+            if (($data['status'] ?? '') === 'published' && $this->user['role'] !== 'administrator') {
+                $errors[] = 'Only administrators can publish announcements.';
+            }
+            if (($data['status'] ?? '') === 'published' && empty($data['published_at'])) {
+                $data['published_at'] = date('Y-m-d H:i:s');
+            }
         }
         if ($section === 'inquiries') {
             if ($this->user['role'] === 'trainee') {

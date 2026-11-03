@@ -4,6 +4,12 @@ require_once APP_DIR . 'controllers/Base.php';
 
 class SmartTrack_api extends Base
 {
+    private function notificationService()
+    {
+        require_once APP_DIR . 'libraries/NotificationService.php';
+        return new NotificationService($this->db);
+    }
+
     public function apiSession()
     {
         $this->jsonResponse([
@@ -14,6 +20,111 @@ class SmartTrack_api extends Base
                 'csrf' => $this->session->userdata('csrf'),
             ],
             'message' => '',
+        ]);
+    }
+
+    public function apiNotificationHistory()
+    {
+        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+            return;
+        }
+        $service = $this->notificationService();
+        $this->jsonResponse([
+            'history' => $service->history([
+                'channel' => is_scalar($_GET['channel'] ?? null) ? trim((string) $_GET['channel']) : '',
+                'status' => is_scalar($_GET['status'] ?? null) ? trim((string) $_GET['status']) : '',
+            ]),
+            'settings' => $service->settings(),
+            'ready' => $service->isReady(),
+            'missing_tables' => $service->missingTables(),
+        ]);
+    }
+
+    public function apiSendAnnouncement()
+    {
+        if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
+            return $this->jsonResponse(['message' => 'Only administrators can send notifications.'], 403);
+        }
+        $announcementId = (int) $this->input('announcement_id');
+        $mode = trim((string) $this->input('recipient_mode'));
+        $classId = (int) $this->input('class_id');
+        $channels = $this->input('channels');
+        $channels = is_array($channels) ? array_values(array_intersect($channels, ['sms', 'email'])) : [];
+        $traineeIds = $this->input('trainee_ids');
+        $traineeIds = is_array($traineeIds) ? $traineeIds : [];
+        if (!$announcementId || !$channels || !in_array($mode, ['all', 'batch', 'selected'], true)) {
+            return $this->jsonResponse(['message' => 'Choose an announcement, recipients, and notification channel.'], 422);
+        }
+        $announcement = $this->recordModel->row('SELECT announcement_id, title, content, published_at, status FROM announcements WHERE announcement_id = ?', [$announcementId]);
+        if (!$announcement || $announcement['status'] !== 'published') {
+            return $this->jsonResponse(['message' => 'Only published announcements can be sent.'], 422);
+        }
+        $service = $this->notificationService();
+        $recipients = $service->recipients($mode, $classId, $traineeIds);
+        $queued = $service->queue($announcement, $recipients, $channels);
+        $result = $service->processAnnouncement($announcementId);
+        $this->recordModel->logActivity((int) $this->user['user_id'], 'Sent announcement notifications', $announcement['title']);
+        $this->jsonResponse([
+            'message' => 'Notification processing completed.',
+            'data' => ['recipients' => count($recipients), 'queued' => $queued['queued'], 'skipped' => $queued['skipped']] + $result,
+        ]);
+    }
+
+    public function apiRetryNotification($id)
+    {
+        if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
+            return $this->jsonResponse(['message' => 'Only administrators can retry notifications.'], 403);
+        }
+        $notification = $this->recordModel->row('SELECT announcement_id FROM announcement_notifications WHERE id = ? AND status = "failed"', [(int) $id]);
+        if (!$notification) {
+            return $this->jsonResponse(['message' => 'Only failed notifications can be retried.'], 404);
+        }
+        $this->recordModel->execute('UPDATE announcement_notifications SET status = "pending", error_message = NULL WHERE id = ?', [(int) $id]);
+        $result = $this->notificationService()->processAnnouncement((int) $notification['announcement_id']);
+        $this->jsonResponse(['message' => 'Notification retry completed.', 'data' => $result]);
+    }
+
+    public function apiSaveNotificationSettings()
+    {
+        if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
+            return $this->jsonResponse(['message' => 'Only administrators can change notification settings.'], 403);
+        }
+        $sms = $this->input('sms_enabled') ? 1 : 0;
+        $email = $this->input('email_enabled') ? 1 : 0;
+        $this->recordModel->execute('INSERT INTO notification_settings (id, sms_enabled, email_enabled) VALUES (1, ?, ?) ON DUPLICATE KEY UPDATE sms_enabled = VALUES(sms_enabled), email_enabled = VALUES(email_enabled)', [$sms, $email]);
+        $this->jsonResponse(['message' => 'Notification settings saved.']);
+    }
+
+    public function apiTestNotification()
+    {
+        if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
+            return $this->jsonResponse(['message' => 'Only administrators can test notifications.'], 403);
+        }
+        $channel = trim((string) $this->input('channel'));
+        $recipient = trim((string) $this->input('recipient'));
+        require_once APP_DIR . 'libraries/SemaphoreService.php';
+        require_once APP_DIR . 'libraries/BrevoService.php';
+        $result = $channel === 'sms'
+            ? (new SemaphoreService())->send($recipient, 'LSI SmartTrack test notification.')
+            : (new BrevoService())->send($recipient, 'SmartTrack administrator', 'LSI SmartTrack test notification', '<p>This is a test notification from LSI SmartTrack.</p>');
+        if (!$result['ok']) {
+            return $this->jsonResponse(['message' => $result['error'] ?? 'Provider test failed.'], 422);
+        }
+        $this->jsonResponse(['message' => 'Provider accepted the test notification.']);
+    }
+
+    public function apiStorageStatus()
+    {
+        if (!$this->requireUser()) {
+            return;
+        }
+        $this->call->library('CloudStorage');
+        $storage = new CloudStorage();
+        $enabled = $storage->isEnabled();
+        $this->jsonResponse([
+            'enabled' => $enabled,
+            'provider' => $enabled ? (getenv('CLOUD_STORAGE_PROVIDER') ?: 'cloud') : 'local',
+            'fallback_available' => true,
         ]);
     }
 
@@ -74,6 +185,13 @@ class SmartTrack_api extends Base
         ]);
     }
 
+    public function apiRegistrationOptions()
+    {
+        $this->jsonResponse([
+            'programs' => $this->recordModel->options('programs'),
+        ]);
+    }
+
     public function apiRegister()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -84,8 +202,21 @@ class SmartTrack_api extends Base
         }
 
         $name = trim((string) $this->input('full_name'));
+        $firstName = trim((string) $this->input('first_name'));
+        $lastName = trim((string) $this->input('last_name'));
+        if ($firstName === '' || $lastName === '') {
+            $parts = preg_split('/\s+/', $name, 2);
+            $firstName = $firstName ?: (string) ($parts[0] ?? '');
+            $lastName = $lastName ?: (string) ($parts[1] ?? '');
+        }
         $username = trim((string) $this->input('username'));
         $email = strtolower(trim((string) $this->input('email')));
+        $sex = trim((string) $this->input('sex'));
+        $dateOfBirth = trim((string) $this->input('date_of_birth'));
+        $address = trim((string) $this->input('address'));
+        $contactNumber = trim((string) $this->input('contact_number'));
+        $course = trim((string) $this->input('course'));
+        $programId = trim((string) $this->input('program_id'));
         $password = (string) $this->input('password');
         $passwordConfirmation = (string) $this->input('password_confirmation');
         $errors = [];
@@ -93,11 +224,37 @@ class SmartTrack_api extends Base
         if ($name === '' || strlen($name) > 150) {
             $errors['full_name'] = 'Enter your full name.';
         }
+        if ($firstName === '' || strlen($firstName) > 100) {
+            $errors['first_name'] = 'Enter your first name.';
+        }
+        if ($lastName === '' || strlen($lastName) > 100) {
+            $errors['last_name'] = 'Enter your last name.';
+        }
+        if (!in_array($sex, ['Male', 'Female', 'Other'], true)) {
+            $errors['sex'] = 'Select your sex.';
+        }
+        if ($dateOfBirth !== '') {
+            $date = DateTime::createFromFormat('!Y-m-d', $dateOfBirth);
+            if (!$date || $date->format('Y-m-d') !== $dateOfBirth) {
+                $errors['date_of_birth'] = 'Enter a valid date of birth.';
+            }
+        }
+        if ($contactNumber === '' || strlen($contactNumber) > 20) {
+            $errors['contact_number'] = 'Enter your contact number.';
+        }
+        if ($course === '' || strlen($course) > 100) {
+            $errors['course'] = 'Enter your course or qualification.';
+        }
         if (!preg_match('/^[A-Za-z0-9_.-]{4,50}$/', $username)) {
             $errors['username'] = 'Usernames must be 4-50 characters and use only letters, numbers, dots, underscores, or hyphens.';
         }
         if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 100) {
             $errors['email'] = 'Enter a valid email address.';
+        }
+        if ($programId !== '' && !ctype_digit($programId)) {
+            $errors['program_id'] = 'Select a valid training program.';
+        } elseif ($programId !== '' && !$this->recordModel->row("SELECT program_id FROM training_programs WHERE program_id = ? AND status = 'active'", [(int) $programId])) {
+            $errors['program_id'] = 'Select a valid training program.';
         }
         if (strlen($password) < 10 || strlen($password) > 255) {
             $errors['password'] = 'Passwords must be 10-255 characters.';
@@ -119,6 +276,18 @@ class SmartTrack_api extends Base
         }
 
         $this->userModel->createUser($name, $username, $password, 'trainee', $email);
+        $account = $this->userModel->userByUsername($username);
+        $this->userModel->createTraineeForUser((int) $account['user_id'], [
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'sex' => $sex,
+            'date_of_birth' => $dateOfBirth,
+            'address' => $address,
+            'email' => $email,
+            'contact_number' => $contactNumber,
+            'course' => $course,
+            'program_id' => $programId,
+        ]);
         $this->jsonResponse([
             'ok' => true,
             'data' => ['registered' => true],
