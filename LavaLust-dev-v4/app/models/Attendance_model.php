@@ -5,6 +5,47 @@ require_once APP_DIR . 'models/Base_model.php';
 
 class Attendance_model extends Base_model
 {
+    public function attendanceClasses(array $user)
+    {
+        $sql = "SELECT class_id, class_name FROM training_classes WHERE status = 'active'";
+        $values = [];
+        if ($user['role'] === 'instructor') {
+            $sql .= ' AND instructor_id = ?';
+            $values[] = (int) $user['user_id'];
+        }
+        return $this->rows($sql . ' ORDER BY class_name', $values);
+    }
+
+    public function attendanceClass($classId, array $user)
+    {
+        $sql = "SELECT class_id, class_name FROM training_classes WHERE class_id = ? AND status = 'active'";
+        $values = [(int) $classId];
+        if ($user['role'] === 'instructor') {
+            $sql .= ' AND instructor_id = ?';
+            $values[] = (int) $user['user_id'];
+        }
+        return $this->row($sql, $values);
+    }
+
+    public function attendanceSchedules($classId)
+    {
+        return $this->rows(
+            'SELECT schedule_id, schedule_date, start_time, end_time FROM training_schedules WHERE class_id = ? AND schedule_date = CURDATE() ORDER BY start_time',
+            [(int) $classId]
+        );
+    }
+
+    public function todayAttendance(array $user)
+    {
+        $sql = 'SELECT a.attendance_id, a.trainee_id, CONCAT(t.first_name, \' \', t.last_name) AS trainee_name, a.class_id, c.class_name, a.attendance_date, a.time_in, a.time_out, a.status FROM attendance_records a JOIN trainees t ON t.trainee_id = a.trainee_id LEFT JOIN training_classes c ON c.class_id = a.class_id WHERE a.attendance_date = CURDATE()';
+        $values = [];
+        if ($user['role'] === 'instructor') {
+            $sql .= ' AND c.instructor_id = ?';
+            $values[] = (int) $user['user_id'];
+        }
+        return $this->rows($sql . ' ORDER BY a.time_in DESC, t.last_name, t.first_name', $values);
+    }
+
     public function attendanceSummary($traineeId)
     {
         return $this->row("SELECT SUM(status = 'Present') AS present, SUM(status = 'Late') AS late, SUM(status = 'Absent') AS absent FROM attendance_records WHERE trainee_id = ?", [(int) $traineeId]) ?: [];
@@ -32,7 +73,7 @@ class Attendance_model extends Base_model
         }
 
         $today = date('Y-m-d');
-        $existing = $this->row('SELECT attendance_id, time_in, time_out FROM attendance_records WHERE trainee_id = ? AND attendance_date = ? AND class_id <=> ? LIMIT 1', [(int) $trainee['trainee_id'], $today, $classId ?: null]);
+        $existing = $this->row('SELECT attendance_id, time_in, time_out, status FROM attendance_records WHERE trainee_id = ? AND attendance_date = ? AND class_id <=> ? LIMIT 1', [(int) $trainee['trainee_id'], $today, $classId ?: null]);
         if ($action === 'in') {
             if ($existing && $existing['time_in']) {
                 return ['error' => 'This trainee already has a time-in for today.'];
@@ -49,7 +90,12 @@ class Attendance_model extends Base_model
             } else {
                 $this->execute('INSERT INTO attendance_records (trainee_id, class_id, schedule_id, attendance_date, time_in, time_out, status, remarks, recorded_by) VALUES (?, ?, ?, ?, NOW(), NULL, ?, ?, ?)', [(int) $trainee['trainee_id'], $classId ?: null, $scheduleId ?: null, $today, $status, 'QR/manual scan', $userId]);
             }
-            return ['success' => $trainee['first_name'] . ' ' . $trainee['last_name'] . ' checked in.'];
+            return [
+                'success' => $trainee['first_name'] . ' ' . $trainee['last_name'] . ' checked in.',
+                'trainee' => ['trainee_id' => (int) $trainee['trainee_id'], 'name' => $trainee['first_name'] . ' ' . $trainee['last_name']],
+                'status' => $status,
+                'action' => $action,
+            ];
         }
 
         if (!$existing || !$existing['time_in']) {
@@ -59,6 +105,11 @@ class Attendance_model extends Base_model
             return ['error' => 'This trainee already has a time-out for today.'];
         }
         $this->execute('UPDATE attendance_records SET time_out = NOW(), recorded_by = ? WHERE attendance_id = ?', [$userId, (int) $existing['attendance_id']]);
-        return ['success' => $trainee['first_name'] . ' ' . $trainee['last_name'] . ' checked out.'];
+        return [
+            'success' => $trainee['first_name'] . ' ' . $trainee['last_name'] . ' checked out.',
+            'trainee' => ['trainee_id' => (int) $trainee['trainee_id'], 'name' => $trainee['first_name'] . ' ' . $trainee['last_name']],
+            'status' => $existing['status'],
+            'action' => $action,
+        ];
     }
 }

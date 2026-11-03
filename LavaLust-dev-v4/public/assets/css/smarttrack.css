@@ -133,6 +133,8 @@ tbody tr:hover { background: #fbfcf8; }
 .table-search input { margin-top: 5px; padding: 8px 9px; font-size: 11px; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .row-actions form { margin: 0; }
+.class-requirements { margin: 0; padding-left: 18px; }
+.class-requirements li + li { margin-top: 4px; }
 .qr-cell { display: grid; justify-items: start; gap: 5px; }
 .qr-cell code, .personal-id > code { color: var(--green-deep); font-size: 10px; font-weight: 700; }
 .qr-code { width: 82px; min-height: 82px; display: grid; place-items: center; border: 1px solid #e1e6df; padding: 5px; background: #fff; }

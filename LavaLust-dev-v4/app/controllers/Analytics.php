@@ -41,10 +41,12 @@ class Analytics extends Base
 
     public function data()
     {
-        $this->api->require_method('GET');
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
         $user = $this->user;
         if (!$user) {
-            $token = $this->api->require_jwt();
+            $token = $this->apiLibrary()->require_jwt();
             $user = $token['custom_data'] ?? [];
         }
         if (!$this->canViewAnalytics($user)) {

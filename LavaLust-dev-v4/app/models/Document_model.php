@@ -138,6 +138,11 @@ class Document_model extends Base_model
         return $this->rows('SELECT r.requirement_id, r.class_id, r.required_document_name, c.class_name FROM certificate_document_requirements r JOIN training_classes c ON c.class_id = r.class_id JOIN class_enrollments e ON e.class_id = c.class_id JOIN trainees t ON t.trainee_id = e.trainee_id WHERE t.user_id = ? ORDER BY c.class_name, r.required_document_name', [(int) $userId]);
     }
 
+    public function classesForTrainee($userId)
+    {
+        return $this->rows('SELECT DISTINCT c.class_id, c.class_name, c.program_id, p.program_name FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id JOIN class_enrollments e ON e.class_id = c.class_id JOIN trainees t ON t.trainee_id = e.trainee_id WHERE t.user_id = ? ORDER BY p.program_name, c.class_name', [(int) $userId]);
+    }
+
     public function traineeRequirementById($requirementId, $userId)
     {
         return $this->row('SELECT r.requirement_id, r.class_id, r.required_document_name FROM certificate_document_requirements r JOIN class_enrollments e ON e.class_id = r.class_id JOIN trainees t ON t.trainee_id = e.trainee_id WHERE r.requirement_id = ? AND t.user_id = ? LIMIT 1', [(int) $requirementId, (int) $userId]);

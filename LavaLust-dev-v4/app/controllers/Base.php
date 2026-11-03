@@ -9,9 +9,14 @@ class Base extends Controller
     protected $db;
     protected $session;
     protected $api;
+    protected $requestData;
 
     public function before_action()
     {
+        $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+        $this->apiRequest = is_string($requestPath)
+            && preg_match('#(?:^|/)api(?:/|$)#', $requestPath) === 1;
+
         require_once APP_DIR . 'models/Base_model.php';
         require_once APP_DIR . 'models/User_model.php';
         require_once APP_DIR . 'models/Record_model.php';
@@ -27,7 +32,6 @@ class Base extends Controller
         $this->call->helper('url');
         $this->db = $this->call->database();
         $this->session = $this->call->library('session');
-        $this->api = $this->call->library('api');
 
         // Instantiate models with dependencies
         $this->configModel = new Config_model($this->db);
@@ -49,6 +53,14 @@ class Base extends Controller
         if (!$this->session->userdata('csrf')) {
             $this->session->set_userdata('csrf', bin2hex(random_bytes(32)));
         }
+    }
+
+    protected function apiLibrary()
+    {
+        if ($this->api === null) {
+            $this->api = $this->call->library('api');
+        }
+        return $this->api;
     }
 
     protected function render($page, array $data = [])
@@ -76,21 +88,65 @@ class Base extends Controller
         $navigation = [
             'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
             'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'announcements', 'inquiries'],
+            'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'assessments', 'announcements', 'inquiries'],
             'trainee' => ['dashboard', 'attendance', 'documents', 'my_payments', 'my_certificates', 'announcements', 'inquiries'],
         ];
         $data['navigation'] = $this->user ? ($navigation[$this->user['role']] ?? []) : [];
 
-        $this->call->view('smarttrack', $data);
+        $this->call->view($page === 'module' ? 'smarttrack' : $page, $data);
     }
 
     protected function input($key)
     {
-        return $_POST[$key] ?? '';
+        $data = $this->requestData();
+        return $data[$key] ?? '';
+    }
+
+    protected function requestData()
+    {
+        if ($this->requestData !== null) {
+            return $this->requestData;
+        }
+
+        if ($_POST) {
+            $this->requestData = $_POST;
+            return $this->requestData;
+        }
+
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+        $body = file_get_contents('php://input');
+        if (stripos($contentType, 'application/json') !== false) {
+            $decoded = json_decode($body, true);
+            $this->requestData = is_array($decoded) ? $decoded : [];
+            return $this->requestData;
+        }
+
+        parse_str($body, $formData);
+        $this->requestData = is_array($formData) ? $formData : [];
+        return $this->requestData;
     }
 
     protected function jsonResponse(array $data, $status = 200)
     {
+        if (!array_key_exists('ok', $data)) {
+            if ($status >= 400) {
+                $response = [
+                    'ok' => false,
+                    'message' => (string) ($data['message'] ?? 'The request could not be completed.'),
+                ];
+                if (isset($data['errors']) && is_array($data['errors'])) {
+                    $response['errors'] = $data['errors'];
+                }
+                $data = $response;
+            } else {
+                $data = [
+                    'ok' => true,
+                    'data' => $data,
+                    'message' => '',
+                ];
+            }
+        }
+
         http_response_code($status);
         header('Content-Type: application/json; charset=UTF-8');
         echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -108,16 +164,10 @@ class Base extends Controller
 
     protected function validCsrf()
     {
-        $submitted = (string) $this->input('_csrf');
+        $submitted = (string) ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? $this->input('_csrf'));
         $stored = (string) $this->session->userdata('csrf');
 
-        // Auto-regenerate CSRF token if session expired
-        if ($stored === '') {
-            $this->session->set_userdata('csrf', bin2hex(random_bytes(32)));
-            return true;
-        }
-
-        return $submitted !== '' && hash_equals($stored, $submitted);
+        return $stored !== '' && $submitted !== '' && hash_equals($stored, $submitted);
     }
 
     protected function requireUser()
@@ -137,7 +187,7 @@ class Base extends Controller
         $roles = [
             'administrator' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
             'staff' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'instructor' => ['trainees', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'announcements', 'inquiries'],
+            'instructor' => ['trainees', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'assessments', 'announcements', 'inquiries'],
             'trainee' => ['attendance', 'documents', 'my_payments', 'announcements', 'inquiries'],
         ];
         return in_array($section, $roles[$this->user['role']] ?? [], true);
@@ -149,7 +199,7 @@ class Base extends Controller
             return true;
         }
         if ($this->user['role'] === 'instructor') {
-            return in_array($section, ['attendance', 'announcements', 'inquiries', 'documents'], true);
+            return in_array($section, ['attendance', 'assessments', 'announcements', 'inquiries', 'documents'], true);
         }
         return $this->user['role'] === 'trainee' && $section === 'inquiries';
     }

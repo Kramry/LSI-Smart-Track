@@ -267,8 +267,8 @@ class Documents extends Base
 
     public function saveDocumentRequirement()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || $this->user['role'] !== 'administrator') {
-            return $this->deny('Only administrators can configure required documents.');
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+            return $this->deny('You are not allowed to configure required documents.');
         }
 
         $classId = (int) $this->input('class_id');
@@ -295,8 +295,8 @@ class Documents extends Base
 
     public function deleteDocumentRequirement($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || $this->user['role'] !== 'administrator') {
-            return $this->deny('Only administrators can configure required documents.');
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+            return $this->deny('You are not allowed to configure required documents.');
         }
         $requirement = ctype_digit((string) $id)
             ? $this->documentModel->row('SELECT class_id FROM certificate_document_requirements WHERE requirement_id = ?', [(int) $id])

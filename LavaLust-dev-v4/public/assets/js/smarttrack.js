@@ -153,11 +153,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { Accept: 'application/json' },
                     credentials: 'same-origin',
                 });
-                const data = await response.json();
+                const payload = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.message || `Request failed (${response.status})`);
+                    throw new Error(payload.message || `Request failed (${response.status})`);
                 }
+                const data = payload.data && typeof payload.data === 'object' ? payload.data : payload;
                 if (!Array.isArray(data.trainees)) {
                     throw new Error('The API returned an invalid trainees list.');
                 }

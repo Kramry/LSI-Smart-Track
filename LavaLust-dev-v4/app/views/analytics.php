@@ -241,8 +241,9 @@ $urls = [
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
             });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message || `Request failed (${response.status}).`);
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.message || `Request failed (${response.status}).`);
+            const data = payload.data && typeof payload.data === 'object' ? payload.data : payload;
             if (!data.summary || !Array.isArray(data.trend) || !Array.isArray(data.classes) || !Array.isArray(data.trainees)) {
                 throw new Error('The analytics API returned an invalid response.');
             }

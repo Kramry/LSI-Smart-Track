@@ -7,8 +7,16 @@ class User_model extends Base_model
     public function userByUsername($username)
     {
         return $this->row(
-            'SELECT user_id, full_name, username, password, role, status FROM users WHERE username = ? LIMIT 1',
+            'SELECT user_id, full_name, username, email, password, role, status FROM users WHERE username = ? LIMIT 1',
             [$username]
+        );
+    }
+
+    public function userByEmail($email)
+    {
+        return $this->row(
+            'SELECT user_id FROM users WHERE email = ? LIMIT 1',
+            [$email]
         );
     }
 
@@ -26,11 +34,11 @@ class User_model extends Base_model
         );
     }
 
-    public function createUser($name, $username, $password, $role)
+    public function createUser($name, $username, $password, $role, $email = null)
     {
         $this->execute(
-            'INSERT INTO users (full_name, username, password, role, status, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
-            [$name, $username, password_hash($password, PASSWORD_DEFAULT), $role, 'active']
+            'INSERT INTO users (full_name, username, email, password, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
+            [$name, $username, $email, password_hash($password, PASSWORD_DEFAULT), $role, 'active']
         );
     }
 

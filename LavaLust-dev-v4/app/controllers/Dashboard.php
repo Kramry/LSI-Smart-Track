@@ -57,6 +57,20 @@ class Dashboard extends Base
         } else {
             $records = $this->recordModel->records($section, $this->user);
         }
+        if ($section === 'classes') {
+            $requirementsByClass = [];
+            foreach ($this->documentModel->documentRequirements() as $requirement) {
+                $requirementsByClass[(int) $requirement['class_id']][] = $requirement['required_document_name'];
+            }
+            foreach ($records as &$record) {
+                $record['requirements'] = $requirementsByClass[(int) $record['class_id']] ?? [];
+            }
+            unset($record);
+        }
+        $columns = $definition['columns'];
+        if ($section === 'classes') {
+            $columns[] = 'requirements';
+        }
 
         $editId = (int) ($_GET['edit'] ?? $this->session->flashdata('smarttrack_edit') ?? 0);
         $editing = $editId ? $this->recordModel->findRecord($definition['table'], $definition['key'], $editId) : null;
@@ -73,7 +87,7 @@ class Dashboard extends Base
             'fields' => $fields,
             'records' => $records,
             'editing' => $editing,
-            'columns' => $definition['columns'],
+            'columns' => $columns,
             'options' => [
                 'trainees' => $this->recordModel->options('trainees', $this->user),
                 'classes' => $this->recordModel->options('classes', $this->user),

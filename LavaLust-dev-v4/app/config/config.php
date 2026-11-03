@@ -66,6 +66,10 @@ $config['version']                 = '4.6.0';
 */
 $config['environment'] = getenv('APP_ENV') ?: 'development';
 
+if (!defined('TCPDF_SILENCE_DEPRECATION')) {
+    define('TCPDF_SILENCE_DEPRECATION', true);
+}
+
 /*
 |--------------------------------------------------------------------------
 | Default Timezone
@@ -262,10 +266,16 @@ $config['session_hmac_secret']     = getenv('APP_KEY') ?: '';
 $config['cookie_prefix']           = '';
 $config['cookie_domain']           = '';
 $config['cookie_path']             = '/';
-$config['cookie_secure']           = FALSE;
+$secureCookieSetting = getenv('SESSION_COOKIE_SECURE');
+$config['cookie_secure']           = filter_var(
+    $secureCookieSetting === false
+        ? (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        : $secureCookieSetting,
+    FILTER_VALIDATE_BOOLEAN
+);
 $config['cookie_expiration']       = 86400;
 $config['cookie_httponly']         = FALSE;
-$config['cookie_samesite']         = 'Strict';
+$config['cookie_samesite']         = getenv('SESSION_COOKIE_SAMESITE') ?: 'Strict';
 
 /*
 |--------------------------------------------------------------------------

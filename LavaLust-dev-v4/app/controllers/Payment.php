@@ -5,6 +5,62 @@ require_once APP_DIR . 'controllers/Base.php';
 
 class Payment extends Base
 {
+    public function apiData()
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
+        if (!$this->requireUser()) {
+            return;
+        }
+        if (($this->user['role'] ?? '') === 'trainee') {
+            $trainee = $this->userModel->traineeForUser((int) $this->user['user_id']);
+            if (!$trainee) {
+                return $this->jsonResponse(['message' => 'No trainee profile is linked to your account.'], 404);
+            }
+            $traineeId = (int) $trainee['trainee_id'];
+            return $this->jsonResponse([
+                'view' => 'my_payments',
+                'fees' => $this->paymentModel->traineeFees($traineeId),
+                'payments' => $this->paymentModel->traineePayments($traineeId),
+                'proofs' => $this->paymentModel->proofHistory($traineeId),
+            ]);
+        }
+        if (!$this->isPaymentStaff()) {
+            return $this->jsonResponse(['message' => 'You are not allowed to manage payments.'], 403);
+        }
+
+        $this->paymentModel->synchronizeEnrollmentFees();
+        $view = is_scalar($_GET['view'] ?? null) ? (string) $_GET['view'] : 'cashier';
+        if (!in_array($view, ['cashier', 'fees', 'bonds', 'reports'], true)) {
+            return $this->jsonResponse(['message' => 'Choose a valid payment section.'], 422);
+        }
+        $data = ['view' => $view];
+        if ($view === 'cashier') {
+            $data['fees'] = $this->paymentModel->openFees();
+            $data['pending_proofs'] = $this->paymentModel->pendingProofs();
+            $data['recent_payments'] = $this->paymentModel->recentPayments();
+        } elseif ($view === 'fees') {
+            $data['fee_types'] = $this->paymentModel->feeTypes();
+            $data['programs'] = $this->recordModel->rows('SELECT program_id, program_name FROM training_programs ORDER BY program_name');
+            $data['classes'] = $this->recordModel->rows('SELECT c.class_id, c.class_name, c.program_id, p.program_name FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id ORDER BY p.program_name, c.class_name');
+        } elseif ($view === 'bonds') {
+            $data['bonds'] = $this->paymentModel->bondTransactions();
+        } else {
+            $start = $this->validDateInput($_GET['start_date'] ?? '') ?: date('Y-m-01');
+            $end = $this->validDateInput($_GET['end_date'] ?? '') ?: date('Y-m-d');
+            if ($start > $end) {
+                return $this->jsonResponse(['message' => 'The report start date must be before its end date.'], 422);
+            }
+            $data['start_date'] = $start;
+            $data['end_date'] = $end;
+            $data['summary'] = $this->paymentModel->reportSummary();
+            $data['report_rows'] = $this->paymentModel->reportRows($start, $end);
+            $data['outstanding'] = $this->paymentModel->outstandingReport();
+        }
+        return $this->jsonResponse($data);
+    }
+
     private function isPaymentStaff()
     {
         return in_array($this->user['role'] ?? '', ['administrator', 'staff'], true);
@@ -124,6 +180,9 @@ class Payment extends Base
             return $this->actionError('An active fee of that type is already configured for the selected program or class.', 'payments?view=fees');
         }
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Configured trainee fee', $name . ' (' . strtoupper($kind) . '), fee type #' . $id);
+        if ($this->apiRequest) {
+            return $this->jsonResponse(['message' => 'Fee configuration saved.', 'fee_type_id' => $id]);
+        }
         $this->notice('Fee configuration saved. It will apply to new fee assignments; existing trainee fee amounts remain unchanged.');
         redirect($this->url('payments?view=fees'));
     }
@@ -137,6 +196,9 @@ class Payment extends Base
             return $this->actionError('Fee configuration not found.', 'payments?view=fees', 404);
         }
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Deactivated trainee fee configuration', 'Fee type #' . (int) $id);
+        if ($this->apiRequest) {
+            return $this->jsonResponse(['message' => 'Fee configuration deactivated.']);
+        }
         $this->notice('Fee configuration deactivated. Existing trainee fee balances were retained.');
         redirect($this->url('payments?view=fees'));
     }
@@ -167,6 +229,13 @@ class Payment extends Base
         }
         $this->paymentModel->evaluateBondClearanceForEnrollment((int) $fee['trainee_id'], (int) $fee['class_id']);
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Recorded trainee payment', $fee['trainee_name'] . ' · ' . $result['receipt_number'] . ' · ' . number_format($amount, 2));
+        if ($this->apiRequest) {
+            return $this->jsonResponse([
+                'message' => 'Payment recorded.',
+                'payment_id' => $result['payment_id'],
+                'receipt_number' => $result['receipt_number'],
+            ]);
+        }
         $this->notice('Payment recorded. Official receipt ' . $result['receipt_number'] . ' is ready to print.');
         redirect($this->url('payments/receipt/' . $result['payment_id']));
     }
@@ -220,6 +289,9 @@ class Payment extends Base
             return $this->actionError('The proof could not be submitted. Check that the reference number is unique.', 'my-payments');
         }
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Submitted payment proof', $reference . ', proof #' . $proofId);
+        if ($this->apiRequest) {
+            return $this->jsonResponse(['message' => 'Payment proof submitted.', 'proof_id' => $proofId]);
+        }
         $this->notice('Proof submitted. It will appear in your payment history after staff review.');
         redirect($this->url('my-payments'));
     }
@@ -251,6 +323,9 @@ class Payment extends Base
             $this->paymentModel->evaluateBondClearanceForEnrollment((int) $proof['trainee_id'], (int) $fee['class_id']);
         }
         $this->recordModel->logActivity((int) $this->user['user_id'], $decision === 'verified' ? 'Verified payment proof' : 'Rejected payment proof', 'Proof #' . (int) $id . ': ' . ($remarks ?: 'Payment verified.'));
+        if ($this->apiRequest) {
+            return $this->jsonResponse(['message' => 'Payment proof ' . $decision . '.']);
+        }
         $this->notice('Payment proof ' . $decision . '.');
         redirect($this->url('payments'));
     }
@@ -350,6 +425,9 @@ class Payment extends Base
             return $this->actionError($result['message'], 'payments?view=bonds');
         }
         $this->recordModel->logActivity((int) $this->user['user_id'], $action === 'refund' ? 'Refunded bond deposit' : 'Forfeited bond deposit', 'Fee #' . (int) $id . ', amount ' . number_format($amount, 2) . ($remarks ? ': ' . $remarks : ''));
+        if ($this->apiRequest) {
+            return $this->jsonResponse(['message' => 'Bond ' . $action . ' recorded.', 'bond_status' => $result['bond_status']]);
+        }
         $this->notice('Bond ' . $action . ' recorded. The ledger entry is permanent.');
         redirect($this->url('payments?view=bonds'));
     }
@@ -368,6 +446,9 @@ class Payment extends Base
             return $this->actionError('The reversal exceeds the payment balance or the payment could not be found.', 'payments');
         }
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Reversed payment ledger entry', 'Payment #' . (int) $id . ', amount ' . number_format($amount, 2) . ': ' . $remarks);
+        if ($this->apiRequest) {
+            return $this->jsonResponse(['message' => 'Payment reversal recorded.']);
+        }
         $this->notice('Reversal recorded as a new ledger entry. The original payment was not changed.');
         redirect($this->url('payments'));
     }
@@ -418,6 +499,12 @@ class Payment extends Base
         }
         fclose($output);
         exit;
+    }
+
+    public function apiExportReport()
+    {
+        $this->apiRequest = true;
+        return $this->exportReport();
     }
 
     private function validAmount($value)

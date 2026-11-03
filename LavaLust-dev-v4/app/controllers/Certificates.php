@@ -907,6 +907,9 @@ class Certificates extends Base
             return $this->actionError('That certificate template version could not be found.', 'manage/certificate-config', 404);
         }
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Activated certificate template', 'Template version ' . $template['version']);
+        if ($this->apiRequest) {
+            return $this->jsonResponse(['message' => 'Certificate template version ' . $template['version'] . ' activated.']);
+        }
         $this->notice('Certificate template version ' . $template['version'] . ' activated.');
         redirect($this->url('manage/certificate-config'));
     }
@@ -1045,6 +1048,50 @@ class Certificates extends Base
         header('Content-Length: ' . filesize($filePath));
         readfile($filePath);
         exit;
+    }
+
+    public function apiVerifyCertificate()
+    {
+        $qrCode = isset($_GET['qr']) && is_scalar($_GET['qr']) ? trim((string) $_GET['qr']) : '';
+        $certificateNumber = isset($_GET['certificate_number']) && is_scalar($_GET['certificate_number'])
+            ? trim((string) $_GET['certificate_number'])
+            : '';
+
+        $certificate = null;
+        if ($qrCode !== '') {
+            $certificate = $this->recordModel->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, cl.class_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.qr_code = ?', [$qrCode]);
+        } elseif ($certificateNumber !== '') {
+            $certificate = $this->recordModel->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, cl.class_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.certificate_number = ?', [$certificateNumber]);
+        }
+        if (!$certificate) {
+            return $this->jsonResponse(['message' => 'Certificate not found.'], 404);
+        }
+
+        $signatures = $this->certificateModel->certificateSignatures($certificate);
+        $allHashesMatch = count($signatures) > 0;
+        $signatories = [];
+        foreach ($signatures as $signature) {
+            $allHashesMatch = $allHashesMatch && !empty($signature['hash_valid']);
+            $signatories[] = [
+                'name' => $signature['signatory_name'],
+                'position' => $signature['signatory_position'],
+                'signed_at' => $signature['signed_at'],
+                'hash_valid' => (bool) $signature['hash_valid'],
+            ];
+        }
+
+        return $this->jsonResponse([
+            'certificate' => [
+                'certificate_number' => $certificate['certificate_number'],
+                'trainee_name' => $certificate['trainee_name'],
+                'program_name' => $certificate['program_name'],
+                'class_name' => $certificate['class_name'],
+                'issue_date' => $certificate['issue_date'],
+                'status' => $certificate['status'],
+            ],
+            'signatories' => $signatories,
+            'integrity_valid' => $allHashesMatch,
+        ]);
     }
 
     public function verifyCertificate()

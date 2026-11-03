@@ -491,7 +491,7 @@ if ( ! function_exists('handle_cors'))
 
 		header(
 			'Access-Control-Allow-Headers: ' .
-			'Authorization, Content-Type, X-Requested-With, X-RateLimit-*'
+			'Authorization, Content-Type, X-Requested-With, X-CSRF-Token, X-RateLimit-*'
 		);
 
 		header(

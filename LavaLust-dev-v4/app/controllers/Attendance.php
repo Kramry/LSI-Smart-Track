@@ -6,43 +6,93 @@ class Attendance extends Base
 {
     public function scanAttendance()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->requireUser()) {
+            return;
+        }
+        if (!$this->validCsrf()) {
+            $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
+        }
+        if (!in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
             return $this->deny('You are not allowed to record attendance.');
         }
         $qrCode = trim((string) $this->input('qr_code'));
         $action = (string) $this->input('scan_action');
-        $classId = (int) $this->input('class_id');
-        $scheduleId = (int) $this->input('schedule_id');
-        if ($qrCode === '' || !in_array($action, ['in', 'out'], true)) {
+        $classIdInput = trim((string) $this->input('class_id'));
+        $scheduleIdInput = trim((string) $this->input('schedule_id'));
+        $classId = filter_var($classIdInput, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $scheduleId = $scheduleIdInput === ''
+            ? 0
+            : filter_var($scheduleIdInput, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $errors = [];
+        if ($qrCode === '' || strlen($qrCode) > 100) {
+            $errors['qr_code'] = 'Enter a QR code of 1 to 100 characters.';
+        }
+        if (!in_array($action, ['in', 'out'], true)) {
+            $errors['scan_action'] = 'Choose time-in or time-out.';
+        }
+        if ($classId === false) {
+            $errors['class_id'] = 'Choose a valid class.';
+        }
+        if ($scheduleId === false) {
+            $errors['schedule_id'] = 'Choose a valid session.';
+        }
+        if ($errors) {
+            if ($this->apiRequest) {
+                $this->jsonResponse([
+                    'message' => 'Check the scan details and try again.',
+                    'errors' => $errors,
+                ], 422);
+            }
             return $this->actionError('Enter a QR ID and choose time-in or time-out.', 'manage/attendance');
         }
-        if (!$classId) {
-            return $this->actionError('Choose a class before scanning attendance.', 'manage/attendance');
+        $class = $this->attendanceModel->attendanceClass((int) $classId, $this->user);
+        if (!$class) {
+            if (!$this->apiRequest) {
+                return $this->actionError('That class is not available to your account.', 'manage/attendance', 404);
+            }
+            $this->jsonResponse(['message' => 'That class is not available to your account.'], 404);
         }
         $qrTrainee = $this->model->row('SELECT trainee_id FROM trainees WHERE qr_code = ? AND status = \'active\'', [$qrCode]);
-        $enrolled = $qrTrainee ? $this->model->row('SELECT enrollment_id FROM class_enrollments WHERE class_id = ? AND trainee_id = ?', [$classId, (int) $qrTrainee['trainee_id']]) : null;
+        $enrolled = $qrTrainee ? $this->model->row('SELECT enrollment_id FROM class_enrollments WHERE class_id = ? AND trainee_id = ?', [(int) $classId, (int) $qrTrainee['trainee_id']]) : null;
         if (!$enrolled) {
+            if ($this->apiRequest) {
+                $this->jsonResponse([
+                    'message' => 'That trainee is not enrolled in the selected class.',
+                    'errors' => ['qr_code' => 'No active enrolled trainee matches this code.'],
+                ], 422);
+            }
             return $this->actionError('That trainee is not enrolled in the selected class.', 'manage/attendance');
         }
-        if ($scheduleId && !$this->model->row('SELECT schedule_id FROM training_schedules WHERE schedule_id = ? AND class_id = ? AND schedule_date = CURDATE()', [$scheduleId, $classId])) {
+        if ($scheduleId && !$this->model->row('SELECT schedule_id FROM training_schedules WHERE schedule_id = ? AND class_id = ? AND schedule_date = CURDATE()', [(int) $scheduleId, (int) $classId])) {
+            if ($this->apiRequest) {
+                $this->jsonResponse([
+                    'message' => 'Choose a session scheduled for this class today.',
+                    'errors' => ['schedule_id' => 'This session is not scheduled for the selected class today.'],
+                ], 422);
+            }
             return $this->actionError('Choose a session scheduled for this class today.', 'manage/attendance');
         }
-        if ($this->user['role'] === 'instructor' && $classId) {
-            $assigned = $this->model->row('SELECT class_id FROM training_classes WHERE class_id = ? AND instructor_id = ?', [$classId, (int) $this->user['user_id']]);
-            if (!$assigned) {
-                return $this->deny('That class is not assigned to your account.');
-            }
-        }
-        $result = $this->attendanceModel->scanAttendance($qrCode, $action, $classId, $scheduleId, (int) $this->user['user_id']);
+        $result = $this->attendanceModel->scanAttendance($qrCode, $action, (int) $classId, (int) $scheduleId, (int) $this->user['user_id']);
         if (isset($result['success'])) {
             $this->recalculateEligibilityPair($qrTrainee['trainee_id'], $classId);
             $this->model->logActivity((int) $this->user['user_id'], 'Recorded attendance', $result['success']);
         }
         if ($this->apiRequest) {
             if (isset($result['error'])) {
-                $this->jsonResponse(['message' => $result['error']], 422);
+                $this->jsonResponse([
+                    'message' => $result['error'],
+                    'errors' => ['scan_action' => $result['error']],
+                ], 422);
             }
-            $this->jsonResponse(['message' => $result['success']]);
+            $this->jsonResponse([
+                'ok' => true,
+                'data' => [
+                    'trainee' => $result['trainee'],
+                    'status' => $result['status'],
+                    'scan_action' => $result['action'],
+                ],
+                'message' => $result['success'],
+            ]);
         }
         $this->notice($result['success'] ?? $result['error']);
         redirect($this->url('manage/attendance'));

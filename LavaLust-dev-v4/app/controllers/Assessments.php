@@ -7,7 +7,7 @@ class Assessments extends Base
 {
     public function assessments()
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
             return $this->deny('You are not allowed to manage assessments.');
         }
 
@@ -30,12 +30,15 @@ class Assessments extends Base
                 'classes' => $this->recordModel->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
             ],
             'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'],
+            'assessment_class_id' => is_scalar($_GET['class_id'] ?? '') && ctype_digit((string) ($_GET['class_id'] ?? ''))
+                ? (int) $_GET['class_id']
+                : 0,
         ]);
     }
 
     public function saveAssessment()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
             return $this->deny('You are not allowed to record assessment results.');
         }
 
@@ -53,6 +56,9 @@ class Assessments extends Base
             }
         }
         $enrollment = $this->recordModel->row('SELECT enrollment_id FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [$traineeId, $classId]);
+        if ($this->user['role'] === 'instructor' && !$this->attendanceModel->attendanceClass($classId, $this->user)) {
+            return $this->actionError('That class is not assigned to your instructor account.', 'manage/assessments', 403);
+        }
         $date = DateTime::createFromFormat('!Y-m-d', $assessmentDate);
 
         if (!$traineeId || !$classId || !$enrollment || $name === '' || strlen($name) > 150
@@ -98,7 +104,7 @@ class Assessments extends Base
 
     public function deleteAssessment($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
             return $this->deny('You are not allowed to delete assessment results.');
         }
         if (!ctype_digit((string) $id) || !(int) $id) {

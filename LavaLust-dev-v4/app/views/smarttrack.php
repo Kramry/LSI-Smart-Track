@@ -11,7 +11,7 @@ $labels = [
     'users' => 'User accounts',
     'trainees' => 'Trainees',
     'programs' => 'Programs',
-    'classes' => 'Classes',
+    'classes' => ($user['role'] ?? '') === 'instructor' ? 'My classes' : 'Classes',
     'schedules' => 'Schedules',
     'enrollments' => 'Enrollments',
     'attendance' => 'Attendance',
@@ -1060,7 +1060,7 @@ $labels = [
                                     as $class
                                 ): ?><option value="<?= $e(
     $class["id"],
-) ?>" <?= (string) ($editing["class_id"] ?? "") === (string) $class["id"]
+) ?>" <?= (string) ($editing["class_id"] ?? $assessment_class_id ?? "") === (string) $class["id"]
     ? "selected"
     : "" ?>><?= $e(
     $class["label"],
@@ -1390,7 +1390,7 @@ $labels = [
                                     ): ?><tr><?php foreach (
     $columns
     as $column
-): ?><td><?php if ($column === "documents_approved"): ?><?php if ((int) ($record["documents_required"] ?? 0) === 0): ?><span class="status pending">Not configured</span> <a class="text-button" href="<?= $e(
+): ?><td><?php if ($column === "requirements"): ?><?php if (!empty($record["requirements"])): ?><ul class="class-requirements"><?php foreach ($record["requirements"] as $requirement): ?><li><?= $e($requirement) ?></li><?php endforeach; ?></ul><?php else: ?><span class="muted">None listed</span><?php endif; ?><?php elseif ($column === "documents_approved"): ?><?php if ((int) ($record["documents_required"] ?? 0) === 0): ?><span class="status pending">Not configured</span> <a class="text-button" href="<?= $e(
     $app_url,
 ) ?>manage/certificate-config">Set up</a><?php else: ?><?= $e(
     $record["documents_approved"] ?? 0,
