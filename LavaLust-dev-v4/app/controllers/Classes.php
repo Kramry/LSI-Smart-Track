@@ -35,6 +35,8 @@ class Classes extends Base
             'filters' => $filters,
             'programs' => $this->recordModel->options('programs'),
             'instructors' => $this->recordModel->options('instructors'),
+            'can_create' => $this->canManage('classes'),
+            'show_create_form' => $this->canManage('classes') && !empty($_GET['create']),
         ]);
     }
 
