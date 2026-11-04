@@ -9,21 +9,20 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS notification_settings (
   id TINYINT UNSIGNED NOT NULL,
-  sms_enabled TINYINT(1) NOT NULL DEFAULT 0,
   email_enabled TINYINT(1) NOT NULL DEFAULT 0,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT INTO notification_settings (id, sms_enabled, email_enabled)
-VALUES (1, 0, 0)
+INSERT INTO notification_settings (id, email_enabled)
+VALUES (1, 0)
 ON DUPLICATE KEY UPDATE id = id;
 
 CREATE TABLE IF NOT EXISTS announcement_notifications (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   announcement_id INT UNSIGNED NOT NULL,
   trainee_id INT UNSIGNED NOT NULL,
-  channel ENUM('sms', 'email') NOT NULL,
+  channel ENUM('email') NOT NULL,
   recipient VARCHAR(150) NOT NULL,
   message TEXT NOT NULL,
   status ENUM('pending', 'sent', 'failed') NOT NULL DEFAULT 'pending',

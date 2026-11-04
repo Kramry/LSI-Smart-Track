@@ -49,7 +49,7 @@ class SmartTrack_api extends Base
         $mode = trim((string) $this->input('recipient_mode'));
         $classId = (int) $this->input('class_id');
         $channels = $this->input('channels');
-        $channels = is_array($channels) ? array_values(array_intersect($channels, ['sms', 'email'])) : [];
+        $channels = is_array($channels) ? array_values(array_intersect($channels, ['email'])) : [];
         $traineeIds = $this->input('trainee_ids');
         $traineeIds = is_array($traineeIds) ? $traineeIds : [];
         if (!$announcementId || !$channels || !in_array($mode, ['all', 'batch', 'selected'], true)) {
@@ -84,14 +84,29 @@ class SmartTrack_api extends Base
         $this->jsonResponse(['message' => 'Notification retry completed.', 'data' => $result]);
     }
 
+    public function apiDeleteNotification($id)
+    {
+        if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
+            return $this->jsonResponse(['message' => 'Only administrators can delete notification history.'], 403);
+        }
+        $notification = $this->recordModel->row(
+            'SELECT id FROM announcement_notifications WHERE id = ?',
+            [(int) $id]
+        );
+        if (!$notification) {
+            return $this->jsonResponse(['message' => 'Notification history record not found.'], 404);
+        }
+        $this->recordModel->execute('DELETE FROM announcement_notifications WHERE id = ?', [(int) $id]);
+        $this->jsonResponse(['message' => 'Notification history record deleted.']);
+    }
+
     public function apiSaveNotificationSettings()
     {
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can change notification settings.'], 403);
         }
-        $sms = $this->input('sms_enabled') ? 1 : 0;
         $email = $this->input('email_enabled') ? 1 : 0;
-        $this->recordModel->execute('INSERT INTO notification_settings (id, sms_enabled, email_enabled) VALUES (1, ?, ?) ON DUPLICATE KEY UPDATE sms_enabled = VALUES(sms_enabled), email_enabled = VALUES(email_enabled)', [$sms, $email]);
+        $this->recordModel->execute('INSERT INTO notification_settings (id, email_enabled) VALUES (1, ?) ON DUPLICATE KEY UPDATE email_enabled = VALUES(email_enabled)', [$email]);
         $this->jsonResponse(['message' => 'Notification settings saved.']);
     }
 
@@ -102,11 +117,11 @@ class SmartTrack_api extends Base
         }
         $channel = trim((string) $this->input('channel'));
         $recipient = trim((string) $this->input('recipient'));
-        require_once APP_DIR . 'libraries/SemaphoreService.php';
         require_once APP_DIR . 'libraries/BrevoService.php';
-        $result = $channel === 'sms'
-            ? (new SemaphoreService())->send($recipient, 'LSI SmartTrack test notification.')
-            : (new BrevoService())->send($recipient, 'SmartTrack administrator', 'LSI SmartTrack test notification', '<p>This is a test notification from LSI SmartTrack.</p>');
+        if ($channel !== 'email') {
+            return $this->jsonResponse(['message' => 'Only email notifications are supported.'], 422);
+        }
+        $result = (new BrevoService())->send($recipient, 'SmartTrack administrator', 'LSI SmartTrack test notification', '<p>This is a test notification from LSI SmartTrack.</p>');
         if (!$result['ok']) {
             return $this->jsonResponse(['message' => $result['error'] ?? 'Provider test failed.'], 422);
         }
@@ -745,6 +760,131 @@ class SmartTrack_api extends Base
         $attendance = new Attendance();
         $attendance->before_action();
         $attendance->exportReport($period);
+    }
+
+    public function apiReports()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
+        $user = $this->authenticatedApiUser();
+        if (!$user) {
+            $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
+        }
+        if (!in_array($user['role'], ['administrator', 'staff'], true)) {
+            $this->jsonResponse(['message' => 'Reports are available to administrator and staff accounts.'], 403);
+        }
+        require_once APP_DIR . 'models/Reports_model.php';
+        $reportsModel = new Reports_model($this->db);
+        $this->jsonResponse([
+            'reports' => $reportsModel->availableReports(),
+            'programs' => $this->recordModel->options('programs', $user),
+            'classes' => $this->recordModel->options('classes', $user),
+        ]);
+    }
+
+    public function apiGenerateReport()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
+        $user = $this->authenticatedApiUser();
+        if (!$user) {
+            $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
+        }
+        if (!in_array($user['role'], ['administrator', 'staff'], true)) {
+            $this->jsonResponse(['message' => 'Reports are available to administrator and staff accounts.'], 403);
+        }
+        if (!$this->validCsrf()) {
+            $this->jsonResponse(['message' => 'Invalid CSRF token.'], 403);
+        }
+        require_once APP_DIR . 'models/Reports_model.php';
+        $reportsModel = new Reports_model($this->db);
+        $reportType = trim((string) $this->input('report_type'));
+        $format = trim((string) $this->input('format'));
+        $filters = [
+            'start_date' => trim((string) $this->input('start_date')),
+            'end_date' => trim((string) $this->input('end_date')),
+            'program_id' => trim((string) $this->input('program_id')),
+            'class_id' => trim((string) $this->input('class_id')),
+            'status' => trim((string) $this->input('status')),
+            'fee_kind' => trim((string) $this->input('fee_kind')),
+            'method' => trim((string) $this->input('method')),
+        ];
+        $availableReports = $reportsModel->availableReports();
+        if (!isset($availableReports[$reportType])) {
+            $this->jsonResponse(['message' => 'Invalid report type.'], 400);
+        }
+        if (!in_array($format, $availableReports[$reportType]['formats'])) {
+            $this->jsonResponse(['message' => 'Invalid format for this report type.'], 400);
+        }
+        $data = $reportsModel->getReportData($reportType, $filters);
+        if ($format === 'pdf') {
+            $this->apiGeneratePDF($reportType, $data, $filters, $availableReports);
+        } else {
+            $this->apiGenerateCSV($reportType, $data, $filters);
+        }
+    }
+
+    private function apiGeneratePDF($reportType, $data, array $filters, array $availableReports)
+    {
+        require_once ROOT_DIR . 'vendor/autoload.php';
+        $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->SetTitle('SmartTrack ' . $availableReports[$reportType]['name']);
+        $pdf->SetAuthor('LSI SmartTrack');
+        $pdf->SetCreator('LSI SmartTrack System');
+        $pdf->AddPage();
+        $html = '<h1 style="color: #173a60;">' . htmlspecialchars($availableReports[$reportType]['name'], ENT_QUOTES, 'UTF-8') . '</h1>';
+        $html .= '<p style="color: #5d6f82; font-size: 12px;">';
+        $html .= 'Report Period: ' . htmlspecialchars($filters['start_date'] . ' to ' . $filters['end_date'], ENT_QUOTES, 'UTF-8') . '<br>';
+        $html .= 'Generated: ' . date('Y-m-d H:i:s');
+        $html .= '</p>';
+        if (!empty($data)) {
+            $html .= '<table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; font-size: 10px;">';
+            $html .= '<thead style="background-color: #173a60; color: white;"><tr>';
+            $headers = array_keys($data[0]);
+            foreach ($headers as $header) {
+                $html .= '<th style="padding: 8px; text-align: left;">' . htmlspecialchars(str_replace('_', ' ', $header), ENT_QUOTES, 'UTF-8') . '</th>';
+            }
+            $html .= '</tr></thead><tbody>';
+            foreach ($data as $row) {
+                $html .= '<tr>';
+                foreach ($row as $cell) {
+                    $html .= '<td style="padding: 6px; border-bottom: 1px solid #e1e8f1;">' . htmlspecialchars((string) $cell, ENT_QUOTES, 'UTF-8') . '</td>';
+                }
+                $html .= '</tr>';
+            }
+            $html .= '</tbody></table>';
+            $html .= '<p style="font-size: 10px; color: #5d6f82; margin-top: 20px;">Total records: ' . count($data) . '</p>';
+        } else {
+            $html .= '<p style="color: #c4372c;">No data found for the selected filters.</p>';
+        }
+        $pdf->writeHTML($html, true, false, true, false, '');
+        $filename = 'smarttrack-' . $reportType . '-report-' . $filters['start_date'] . '-to-' . $filters['end_date'] . '.pdf';
+        $pdf->Output($filename, 'D');
+        exit;
+    }
+
+    private function apiGenerateCSV($reportType, $data, array $filters)
+    {
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="smarttrack-' . $reportType . '-report-' . $filters['start_date'] . '-to-' . $filters['end_date'] . '.csv"');
+        $output = fopen('php://output', 'w');
+        $safeCell = static function ($value) {
+            $value = (string) $value;
+            return preg_match('/^\s*[=+\-@]/u', $value) ? '"' . $value . '"' : $value;
+        };
+        if (!empty($data)) {
+            $headers = array_keys($data[0]);
+            fputcsv($output, array_map('ucwords', array_map(function($h) { return str_replace('_', ' ', $h); }, $headers)));
+            foreach ($data as $row) {
+                fputcsv($output, array_map($safeCell, $row));
+            }
+        } else {
+            fputcsv($output, ['No data found for the selected filters.']);
+        }
+        fclose($output);
+        exit;
     }
 
     public function apiReviewEligibility()

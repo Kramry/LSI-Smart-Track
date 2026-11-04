@@ -18,7 +18,7 @@ class Assessment_model extends Base_model
     public function saveAssessment(array $assessment)
     {
         if (!empty($assessment['assessment_id'])) {
-            $this->execute('UPDATE training_assessments SET trainee_id = ?, class_id = ?, assessment_name = ?, outcome = ?, assessed_by = ?, assessment_date = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE assessment_id = ?', [
+            $this->execute('UPDATE training_assessments SET trainee_id = ?, class_id = ?, assessment_name = ?, outcome = ?, assessed_by = ?, assessment_date = ?, notes = ?, time_limit_minutes = ?, updated_at = CURRENT_TIMESTAMP WHERE assessment_id = ?', [
                 (int) $assessment['trainee_id'],
                 (int) $assessment['class_id'],
                 $assessment['assessment_name'],
@@ -26,6 +26,7 @@ class Assessment_model extends Base_model
                 (int) $assessment['assessed_by'],
                 $assessment['assessment_date'],
                 $assessment['notes'],
+                !empty($assessment['time_limit_minutes']) ? (int) $assessment['time_limit_minutes'] : null,
                 (int) $assessment['assessment_id'],
             ]);
             return (int) $assessment['assessment_id'];
@@ -38,17 +39,18 @@ class Assessment_model extends Base_model
         ]);
 
         if ($existing) {
-            $this->execute('UPDATE training_assessments SET outcome = ?, assessed_by = ?, assessment_date = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE assessment_id = ?', [
+            $this->execute('UPDATE training_assessments SET outcome = ?, assessed_by = ?, assessment_date = ?, notes = ?, time_limit_minutes = ?, updated_at = CURRENT_TIMESTAMP WHERE assessment_id = ?', [
                 $assessment['outcome'],
                 (int) $assessment['assessed_by'],
                 $assessment['assessment_date'],
                 $assessment['notes'],
+                !empty($assessment['time_limit_minutes']) ? (int) $assessment['time_limit_minutes'] : null,
                 (int) $existing['assessment_id'],
             ]);
             return (int) $existing['assessment_id'];
         }
 
-        $this->execute('INSERT INTO training_assessments (trainee_id, class_id, assessment_name, outcome, assessed_by, assessment_date, notes) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+        $this->execute('INSERT INTO training_assessments (trainee_id, class_id, assessment_name, outcome, assessed_by, assessment_date, notes, time_limit_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
             (int) $assessment['trainee_id'],
             (int) $assessment['class_id'],
             $assessment['assessment_name'],
@@ -56,6 +58,7 @@ class Assessment_model extends Base_model
             (int) $assessment['assessed_by'],
             $assessment['assessment_date'],
             $assessment['notes'],
+            !empty($assessment['time_limit_minutes']) ? (int) $assessment['time_limit_minutes'] : null,
         ]);
         return (int) $this->row('SELECT assessment_id FROM training_assessments WHERE trainee_id = ? AND class_id = ? AND assessment_name = ?', [
             (int) $assessment['trainee_id'],

@@ -5,6 +5,116 @@ require_once APP_DIR . 'controllers/Base.php';
 
 class Payment extends Base
 {
+    public function apiCreateXenditPayment()
+    {
+        if (!$this->requireUser() || !$this->validCsrf() || ($this->user['role'] ?? '') !== 'trainee') {
+            return $this->jsonResponse(['message' => 'Only trainees can start an online payment.'], 403);
+        }
+        $trainee = $this->userModel->traineeForUser((int) $this->user['user_id']);
+        $feeId = (int) $this->input('trainee_fee_id');
+        $flow = trim((string) $this->input('flow'));
+        $fee = $this->paymentModel->feeDetails($feeId);
+        if (!$trainee || !$fee || (int) $fee['trainee_id'] !== (int) $trainee['trainee_id'] || (float) $fee['balance'] <= 0
+            || !in_array($flow, ['invoice', 'payment-link'], true)) {
+            return $this->jsonResponse(['message' => 'Choose one of your outstanding fees and a valid Xendit payment session option.'], 422);
+        }
+        require_once APP_DIR . 'libraries/XenditService.php';
+        $reference = 'ST-' . $feeId . '-' . bin2hex(random_bytes(8));
+        $payload = [
+            'reference_id' => $reference,
+            'session_type' => 'PAY',
+            'mode' => 'PAYMENT_LINK',
+            'country' => 'PH',
+            'currency' => 'PHP',
+            'amount' => (float) $fee['balance'],
+            'success_return_url' => getenv('XENDIT_SUCCESS_URL') ?: rtrim(getenv('SMARTTRACK_PUBLIC_URL') ?: '/', '/') . '/payments?payment=success',
+            'failure_return_url' => getenv('XENDIT_FAILURE_URL') ?: rtrim(getenv('SMARTTRACK_PUBLIC_URL') ?: '/', '/') . '/payments?payment=failed',
+            'items' => [
+                [
+                    'reference_id' => 'fee-' . $feeId,
+                    'name' => (string) $fee['fee_name'],
+                    'description' => 'SmartTrack training fee',
+                    'type' => 'DIGITAL_PRODUCT',
+                    'category' => 'EDUCATION',
+                    'quantity' => 1,
+                    'net_unit_amount' => (float) $fee['balance'],
+                    'currency' => 'PHP',
+                ],
+            ],
+        ];
+        $result = (new XenditService())->createPaymentSession($payload);
+        if (!$result['ok']) {
+            return $this->jsonResponse(['message' => $result['error']], 422);
+        }
+        $response = $result['data'];
+        $checkoutUrl = $this->xenditCheckoutUrl($response);
+        if ($checkoutUrl === '') {
+            return $this->jsonResponse(['message' => 'Xendit did not return a checkout URL.'], 502);
+        }
+        $this->paymentModel->createXenditPayment([
+            'trainee_fee_id' => $feeId,
+            'user_id' => (int) $this->user['user_id'],
+            'flow' => $flow,
+            'reference_id' => $reference,
+            'provider_id' => $response['payment_session_id'] ?? null,
+            'amount' => $payload['amount'],
+            'checkout_url' => $checkoutUrl,
+            'raw_response' => json_encode($response),
+        ]);
+        $this->jsonResponse(['message' => 'Xendit payment session created.', 'checkout_url' => $checkoutUrl]);
+    }
+
+    public function apiXenditWebhook()
+    {
+        $expected = trim((string) getenv('XENDIT_WEBHOOK_TOKEN'));
+        $provided = (string) ($_SERVER['HTTP_X_CALLBACK_TOKEN'] ?? '');
+        if ($expected === '' || !hash_equals($expected, $provided)) {
+            return $this->jsonResponse(['message' => 'Invalid webhook token.'], 401);
+        }
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        $reference = trim((string) ($payload['reference_id'] ?? $payload['data']['reference_id'] ?? ''));
+        $status = strtoupper((string) ($payload['status'] ?? $payload['data']['status'] ?? ''));
+        if ($reference === '') {
+            return $this->jsonResponse(['message' => 'Payment reference not found.'], 404);
+        }
+        $payment = $this->paymentModel->xenditPaymentByReference($reference);
+        if (!$payment) {
+            return $this->jsonResponse(['message' => 'Payment reference not found.'], 404);
+        }
+        $normalized = in_array($status, ['SUCCEEDED', 'COMPLETED', 'PAID'], true) ? 'paid' : (in_array($status, ['FAILED', 'EXPIRED'], true) ? 'failed' : 'pending');
+        if ($normalized === 'paid' && $payment['status'] !== 'paid') {
+            $result = $this->paymentModel->recordPayment([
+                'trainee_fee_id' => (int) $payment['trainee_fee_id'],
+                'amount' => $payment['amount'],
+                'method' => 'xendit',
+                'reference_number' => $reference,
+                'payment_date' => date('Y-m-d'),
+                'remarks' => 'Xendit online payment',
+                'recorded_by' => null,
+            ]);
+            if (!$result['success']) {
+                return $this->jsonResponse(['message' => $result['message']], 422);
+            }
+            $this->paymentModel->updateXenditPayment((int) $payment['id'], 'paid', json_encode($payload), true);
+        } else {
+            $this->paymentModel->updateXenditPayment((int) $payment['id'], $normalized, json_encode($payload));
+        }
+        $this->jsonResponse(['message' => 'Webhook received.']);
+    }
+
+    private function xenditCheckoutUrl(array $response)
+    {
+        if (!empty($response['payment_link_url']) && filter_var($response['payment_link_url'], FILTER_VALIDATE_URL)) {
+            return (string) $response['payment_link_url'];
+        }
+        foreach (($response['actions'] ?? []) as $action) {
+            if (!empty($action['value']) && filter_var($action['value'], FILTER_VALIDATE_URL)) {
+                return (string) $action['value'];
+            }
+        }
+        return (string) ($response['invoice_url'] ?? $response['checkout_url'] ?? '');
+    }
+
     public function apiData()
     {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {

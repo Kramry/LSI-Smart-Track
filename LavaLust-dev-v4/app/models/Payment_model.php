@@ -143,6 +143,37 @@ class Payment_model extends Base_model
         return $this->rows("SELECT p.*, f.fee_kind, f.fee_name, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name FROM payments p JOIN trainee_fees f ON f.trainee_fee_id = p.trainee_fee_id JOIN trainees t ON t.trainee_id = f.trainee_id WHERE f.trainee_id = ? ORDER BY p.payment_date DESC, p.payment_id DESC", [(int) $traineeId]);
     }
 
+    public function createXenditPayment(array $data)
+    {
+        $this->execute(
+            'INSERT INTO xendit_payments (trainee_fee_id, user_id, flow, reference_id, provider_id, amount, status, checkout_url, raw_response) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [
+                (int) $data['trainee_fee_id'], (int) $data['user_id'], $data['flow'], $data['reference_id'],
+                $data['provider_id'] ?: null, $data['amount'], 'pending', $data['checkout_url'], $data['raw_response'],
+            ]
+        );
+        return (int) $this->row('SELECT LAST_INSERT_ID() AS id')['id'];
+    }
+
+    public function xenditPaymentByReference($reference)
+    {
+        return $this->row('SELECT * FROM xendit_payments WHERE reference_id = ?', [(string) $reference]);
+    }
+
+    public function updateXenditPayment($id, $status, $rawResponse, $paid = false)
+    {
+        if ($paid) {
+            return $this->execute(
+                'UPDATE xendit_payments SET status = ?, paid_at = NOW(), raw_response = ? WHERE id = ?',
+                [$status, $rawResponse, (int) $id]
+            );
+        }
+        return $this->execute(
+            'UPDATE xendit_payments SET status = ?, raw_response = ? WHERE id = ?',
+            [$status, $rawResponse, (int) $id]
+        );
+    }
+
     public function pendingProofs()
     {
         return $this->rows("SELECT proof.*, f.fee_name, f.fee_kind, f.amount_due, t.trainee_id, t.user_id, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, t.qr_code AS trainee_number, c.class_name FROM payment_proofs proof JOIN trainee_fees f ON f.trainee_fee_id = proof.trainee_fee_id JOIN trainees t ON t.trainee_id = f.trainee_id JOIN training_classes c ON c.class_id = f.class_id WHERE proof.status = 'pending_verification' ORDER BY proof.created_at");
@@ -197,7 +228,7 @@ class Payment_model extends Base_model
         $receipt = $this->newReceiptNumber();
         $this->execute("INSERT INTO payments (trainee_fee_id, entry_type, amount, method, reference_number, payment_date, receipt_number, remarks, recorded_by) VALUES (?, 'payment', ?, ?, ?, ?, ?, ?, ?)", [
             (int) $data['trainee_fee_id'], $data['amount'], $data['method'], $data['reference_number'] ?: null,
-            $data['payment_date'], $receipt, $data['remarks'] ?: null, (int) $data['recorded_by'],
+            $data['payment_date'], $receipt, $data['remarks'] ?: null, $data['recorded_by'] ?? null,
         ]);
         $paymentId = (int) $this->row('SELECT LAST_INSERT_ID() AS id')['id'];
         $this->syncBondAfterPayment((int) $data['trainee_fee_id'], $paymentId, $data);

@@ -111,6 +111,10 @@ $router->post('/payments/bonds/{id}/action', 'Payment::bondAction');
 $router->post('/payments/{id}/reverse', 'Payment::reversePayment');
 $router->get('/payments/report/export', 'Payment::exportReport');
 
+# REPORTS
+$router->get('/manage/reports', 'Reports::index');
+$router->post('/manage/reports/generate', 'Reports::generate');
+
 # CERTIFICATES
 $router->post('/certificates/recalculate', 'Certificates::recalculateEligibility');
 $router->post('/certificates/review', 'Certificates::reviewEligibility');
@@ -139,6 +143,7 @@ $router->post('/api/register', 'SmartTrack_api::apiRegister');
 $router->get('/api/notifications/history', 'SmartTrack_api::apiNotificationHistory');
 $router->post('/api/notifications/send', 'SmartTrack_api::apiSendAnnouncement');
 $router->post('/api/notifications/{id}/retry', 'SmartTrack_api::apiRetryNotification');
+$router->post('/api/notifications/{id}/delete', 'SmartTrack_api::apiDeleteNotification');
 $router->post('/api/notifications/settings', 'SmartTrack_api::apiSaveNotificationSettings');
 $router->post('/api/notifications/test', 'SmartTrack_api::apiTestNotification');
 $router->post('/api/refresh', 'SmartTrack_api::apiRefresh');
@@ -148,6 +153,8 @@ $router->get('/api/analytics', 'Analytics::data');
 $router->get('/api/classes', 'Classes::apiIndex');
 $router->get('/api/classes/{id}', 'Classes::apiDetail');
 $router->get('/api/payments', 'Payment::apiData');
+$router->post('/api/payments/xendit', 'Payment::apiCreateXenditPayment');
+$router->post('/api/payments/xendit/webhook', 'Payment::apiXenditWebhook');
 $router->get('/api/payments/proof/{id}', 'Payment::proofFile');
 $router->get('/api/payments/receipt/{id}', 'Payment::receipt');
 $router->get('/api/payments/report/export', 'Payment::apiExportReport');
@@ -176,6 +183,8 @@ $router->get('/api/attendance/classes', 'SmartTrack_api::apiAttendanceClasses');
 $router->get('/api/attendance/classes/{classId}/schedules', 'SmartTrack_api::apiAttendanceSchedules');
 $router->get('/api/attendance/today', 'SmartTrack_api::apiTodayAttendance');
 $router->get('/api/reports/export/{period}', 'SmartTrack_api::apiExportReport');
+$router->get('/api/reports', 'SmartTrack_api::apiReports');
+$router->post('/api/reports/generate', 'SmartTrack_api::apiGenerateReport');
 $router->post('/api/certificates/review', 'SmartTrack_api::apiReviewEligibility');
 $router->post('/api/certificates/recalculate', 'SmartTrack_api::apiRecalculateEligibility');
 $router->post('/api/certificates/eligibility/{id}/delete', 'SmartTrack_api::apiDeleteEligibility');

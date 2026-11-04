@@ -48,6 +48,7 @@ class Assessments extends Base
         $outcome = strtolower(trim((string) $this->input('outcome')));
         $assessmentDate = trim((string) $this->input('assessment_date'));
         $notes = trim((string) $this->input('notes'));
+        $timeLimit = trim((string) $this->input('time_limit_minutes'));
         $assessmentId = trim((string) $this->input('assessment_id'));
         $editing = null;
         if ($assessmentId !== '') {
@@ -60,6 +61,15 @@ class Assessments extends Base
             return $this->actionError('That class is not assigned to your instructor account.', 'manage/assessments', 403);
         }
         $date = DateTime::createFromFormat('!Y-m-d', $assessmentDate);
+
+        // Validate time limit if provided
+        $timeLimitMinutes = null;
+        if ($timeLimit !== '') {
+            if (!ctype_digit($timeLimit) || (int) $timeLimit < 1 || (int) $timeLimit > 1440) {
+                return $this->actionError('Time limit must be between 1 and 1440 minutes (24 hours).', 'manage/assessments');
+            }
+            $timeLimitMinutes = (int) $timeLimit;
+        }
 
         if (!$traineeId || !$classId || !$enrollment || $name === '' || strlen($name) > 150
             || !in_array($outcome, ['pass', 'fail'], true)
@@ -89,6 +99,7 @@ class Assessments extends Base
             'assessed_by' => (int) $this->user['user_id'],
             'assessment_date' => $assessmentDate,
             'notes' => $notes,
+            'time_limit_minutes' => $timeLimitMinutes,
         ]);
         if ($editing && ((int) $editing['trainee_id'] !== $traineeId || (int) $editing['class_id'] !== $classId)) {
             $this->recalculateEligibilityPair($editing['trainee_id'], $editing['class_id']);

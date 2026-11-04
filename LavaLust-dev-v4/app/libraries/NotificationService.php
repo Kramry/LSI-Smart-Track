@@ -1,30 +1,26 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
-require_once APP_DIR . 'libraries/SemaphoreService.php';
 require_once APP_DIR . 'libraries/BrevoService.php';
 
 class NotificationService
 {
     private $db;
-    private $semaphore;
     private $brevo;
 
     public function __construct($db)
     {
         $this->db = $db;
-        $this->semaphore = new SemaphoreService();
         $this->brevo = new BrevoService();
     }
 
     public function settings()
     {
         if (!$this->tableExists('notification_settings')) {
-            return ['sms_enabled' => false, 'email_enabled' => false, 'ready' => false];
+            return ['email_enabled' => false, 'ready' => false];
         }
-        $row = $this->row('SELECT sms_enabled, email_enabled FROM notification_settings WHERE id = 1');
+        $row = $this->row('SELECT email_enabled FROM notification_settings WHERE id = 1');
         return [
-            'sms_enabled' => (bool) ($row['sms_enabled'] ?? false),
             'email_enabled' => (bool) ($row['email_enabled'] ?? false),
             'ready' => $this->tableExists('announcement_notifications'),
         ];
@@ -59,20 +55,12 @@ class NotificationService
         foreach ($recipients as $trainee) {
             $name = trim($trainee['first_name'] . ' ' . $trainee['last_name']);
             foreach ($channels as $channel) {
-                if ($channel === 'sms' && (!$settings['sms_enabled'] || !$this->normalizePhone($trainee['contact_number']))) {
-                    $skipped++;
-                    continue;
-                }
                 if ($channel === 'email' && (!$settings['email_enabled'] || !filter_var($trainee['email'], FILTER_VALIDATE_EMAIL))) {
                     $skipped++;
                     continue;
                 }
-                $recipient = $channel === 'sms'
-                    ? $this->normalizePhone($trainee['contact_number'])
-                    : strtolower(trim($trainee['email']));
-                $message = $channel === 'sms'
-                    ? $this->smsMessage($announcement)
-                    : $announcement['content'];
+                $recipient = strtolower(trim($trainee['email']));
+                $message = $announcement['content'];
                 $queued += $this->execute(
                     'INSERT IGNORE INTO announcement_notifications (announcement_id, trainee_id, channel, recipient, message, status) VALUES (?, ?, ?, ?, ?, "pending")',
                     [(int) $announcement['announcement_id'], (int) $trainee['trainee_id'], $channel, $recipient, $message]
@@ -88,20 +76,18 @@ class NotificationService
             "SELECT n.*, a.title, a.content, a.attachment, a.published_at, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name
              FROM announcement_notifications n JOIN announcements a ON a.announcement_id = n.announcement_id
              JOIN trainees t ON t.trainee_id = n.trainee_id
-             WHERE n.announcement_id = ? AND n.status IN ('pending', 'failed')
+             WHERE n.announcement_id = ? AND n.channel = 'email' AND n.status IN ('pending', 'failed')
              ORDER BY n.id LIMIT 500",
             [(int) $announcementId]
         );
         $results = ['sent' => 0, 'failed' => 0, 'pending' => 0];
         foreach ($rows as $notification) {
-            $result = $notification['channel'] === 'sms'
-                ? $this->semaphore->send($notification['recipient'], $this->smsMessage($notification))
-                : $this->brevo->send(
-                    $notification['recipient'],
-                    $notification['trainee_name'],
-                    $notification['title'],
-                    $this->emailHtml($notification)
-                );
+            $result = $this->brevo->send(
+                $notification['recipient'],
+                $notification['trainee_name'],
+                $notification['title'],
+                $this->emailHtml($notification)
+            );
             if ($result['ok']) {
                 $this->execute('UPDATE announcement_notifications SET status = "sent", provider_message_id = ?, error_message = NULL, sent_at = NOW() WHERE id = ?', [$result['provider_message_id'] ?? null, (int) $notification['id']]);
                 $results['sent']++;
@@ -120,7 +106,7 @@ class NotificationService
         }
         $where = [];
         $values = [];
-        if (!empty($filters['channel']) && in_array($filters['channel'], ['sms', 'email'], true)) {
+        if (!empty($filters['channel']) && $filters['channel'] === 'email') {
             $where[] = 'n.channel = ?';
             $values[] = $filters['channel'];
         }
@@ -135,12 +121,6 @@ class NotificationService
         return $this->rows($sql . ' ORDER BY n.created_at DESC LIMIT 500', $values);
     }
 
-    private function smsMessage(array $announcement)
-    {
-        $content = trim(strip_tags((string) $announcement['content']));
-        return substr((string) $announcement['title'] . ': ' . $content, 0, 320);
-    }
-
     private function emailHtml(array $announcement)
     {
         $title = htmlspecialchars((string) $announcement['title'], ENT_QUOTES, 'UTF-8');
@@ -151,21 +131,6 @@ class NotificationService
             ? '<p><a href="' . htmlspecialchars((string) $announcement['attachment'], ENT_QUOTES, 'UTF-8') . '" style="color:#265f94">View attachment</a></p>'
             : '';
         return '<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#173a60"><h1 style="background:#173a60;color:#fff;padding:24px">LSI SmartTrack</h1><main style="padding:24px"><h2>' . $title . '</h2><p>' . $content . '</p><p style="color:#64748b">Published: ' . $date . '</p>' . $attachment . '<a href="' . $link . '" style="color:#265f94">Open SmartTrack</a></main></div>';
-    }
-
-    private function normalizePhone($phone)
-    {
-        $phone = preg_replace('/[\s().-]+/', '', (string) $phone);
-        if (preg_match('/^09\d{9}$/', $phone)) {
-            return '+63' . substr($phone, 1);
-        }
-        if (preg_match('/^\+639\d{9}$/', $phone)) {
-            return $phone;
-        }
-        if (preg_match('/^639\d{9}$/', $phone)) {
-            return '+' . $phone;
-        }
-        return null;
     }
 
     private function rows($sql, array $values = [])

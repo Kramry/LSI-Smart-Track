@@ -213,6 +213,10 @@ class Analytics_model extends Base_model
         ];
         if (in_array($user['role'] ?? '', ['administrator', 'staff'], true)) {
             $result['payments'] = $this->paymentAnalytics($filters);
+            $result['training'] = $this->trainingAnalytics($filters);
+            $result['documents'] = $this->documentAnalytics($filters);
+            $result['certificates'] = $this->certificateAnalytics($filters);
+            $result['announcements'] = $this->announcementAnalytics($filters);
         }
         return $result;
     }
@@ -359,6 +363,379 @@ class Analytics_model extends Base_model
             'collections' => $collections,
             'by_fee_kind' => $byFeeKind,
             'by_method' => $byMethod,
+        ];
+    }
+
+    private function trainingAnalytics(array $filters)
+    {
+        $classWhere = '';
+        $classValues = [];
+        if (!empty($filters['class_id'])) {
+            $classWhere .= ' AND c.class_id = ?';
+            $classValues[] = (int) $filters['class_id'];
+        }
+
+        // Training enrollment statistics
+        $enrollmentStats = $this->row(
+            "SELECT
+                COUNT(DISTINCT e.trainee_id) AS total_enrolled,
+                COUNT(DISTINCT CASE WHEN t.status = 'active' THEN e.trainee_id END) AS active_trainees,
+                COUNT(DISTINCT CASE WHEN t.status = 'inactive' THEN e.trainee_id END) AS inactive_trainees
+             FROM class_enrollments e
+             JOIN trainees t ON t.trainee_id = e.trainee_id
+             JOIN training_classes c ON c.class_id = e.class_id
+             WHERE 1 = 1 {$classWhere}",
+            $classValues
+        ) ?: [];
+
+        // Training completion rates
+        $completionStats = $this->row(
+            "SELECT
+                COUNT(DISTINCT cert.trainee_id) AS completed_trainings,
+                COUNT(DISTINCT e.trainee_id) AS total_enrolled,
+                COALESCE(COUNT(DISTINCT cert.trainee_id) / NULLIF(COUNT(DISTINCT e.trainee_id), 0) * 100, 0) AS completion_rate
+             FROM class_enrollments e
+             JOIN training_classes c ON c.class_id = e.class_id
+             LEFT JOIN certificates cert ON cert.trainee_id = e.trainee_id AND cert.class_id = e.class_id AND cert.status = 'issued'
+             WHERE 1 = 1 {$classWhere}",
+            $classValues
+        ) ?: [];
+
+        // Trainees per training batch
+        $traineesPerBatch = $this->rows(
+            "SELECT c.class_id, c.class_name, p.program_name,
+                    COUNT(DISTINCT e.trainee_id) AS trainee_count,
+                    c.start_date, c.end_date
+             FROM training_classes c
+             JOIN training_programs p ON p.program_id = c.program_id
+             LEFT JOIN class_enrollments e ON e.class_id = c.class_id
+             WHERE 1 = 1 {$classWhere}
+             GROUP BY c.class_id, c.class_name, p.program_name, c.start_date, c.end_date
+             ORDER BY c.start_date DESC",
+            $classValues
+        );
+
+        // Monthly registration trends
+        $monthlyTrends = $this->rows(
+            "SELECT DATE_FORMAT(e.enrolled_at, '%Y-%m') AS month,
+                    COUNT(DISTINCT e.trainee_id) AS new_registrations
+             FROM class_enrollments e
+             JOIN training_classes c ON c.class_id = e.class_id
+             WHERE e.enrolled_at BETWEEN ? AND ? {$classWhere}
+             GROUP BY DATE_FORMAT(e.enrolled_at, '%Y-%m')
+             ORDER BY month",
+            array_merge([$filters['start_date'], $filters['end_date']], $classValues)
+        );
+
+        // Training program popularity
+        $programPopularity = $this->rows(
+            "SELECT p.program_id, p.program_name, p.program_code,
+                    COUNT(DISTINCT e.trainee_id) AS trainee_count,
+                    COUNT(DISTINCT c.class_id) AS class_count
+             FROM training_programs p
+             LEFT JOIN training_classes c ON c.program_id = p.program_id
+             LEFT JOIN class_enrollments e ON e.class_id = c.class_id
+             WHERE 1 = 1 {$classWhere}
+             GROUP BY p.program_id, p.program_name, p.program_code
+             ORDER BY trainee_count DESC",
+            $classValues
+        );
+
+        foreach ($traineesPerBatch as &$batch) {
+            $batch['class_id'] = (int) $batch['class_id'];
+            $batch['trainee_count'] = (int) $batch['trainee_count'];
+        }
+        unset($batch);
+
+        foreach ($monthlyTrends as &$trend) {
+            $trend['new_registrations'] = (int) $trend['new_registrations'];
+        }
+        unset($trend);
+
+        foreach ($programPopularity as &$program) {
+            $program['program_id'] = (int) $program['program_id'];
+            $program['trainee_count'] = (int) $program['trainee_count'];
+            $program['class_count'] = (int) $program['class_count'];
+        }
+        unset($program);
+
+        return [
+            'summary' => [
+                'total_enrolled' => (int) ($enrollmentStats['total_enrolled'] ?? 0),
+                'active_trainees' => (int) ($enrollmentStats['active_trainees'] ?? 0),
+                'inactive_trainees' => (int) ($enrollmentStats['inactive_trainees'] ?? 0),
+                'completed_trainings' => (int) ($completionStats['completed_trainings'] ?? 0),
+                'completion_rate' => round((float) ($completionStats['completion_rate'] ?? 0), 1),
+            ],
+            'trainees_per_batch' => $traineesPerBatch,
+            'monthly_trends' => $monthlyTrends,
+            'program_popularity' => $programPopularity,
+        ];
+    }
+
+    private function documentAnalytics(array $filters)
+    {
+        $classWhere = '';
+        $classValues = [];
+        if (!empty($filters['class_id'])) {
+            $classWhere .= ' AND d.class_id = ?';
+            $classValues[] = (int) $filters['class_id'];
+        }
+
+        $dateWhere = ' AND d.upload_date BETWEEN ? AND ?';
+        $dateValues = [$filters['start_date'], $filters['end_date']];
+
+        // Document statistics
+        $docStats = $this->row(
+            "SELECT
+                COUNT(*) AS total_submitted,
+                SUM(CASE WHEN d.review_status = 'approved' THEN 1 ELSE 0 END) AS verified,
+                SUM(CASE WHEN d.review_status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+                SUM(CASE WHEN d.review_status = 'pending' THEN 1 ELSE 0 END) AS pending
+             FROM trainee_documents d
+             WHERE 1 = 1 {$classWhere} {$dateWhere}",
+            array_merge($classValues, $dateValues)
+        ) ?: [];
+
+        // Missing documents based on requirements
+        $missingDocs = $this->row(
+            "SELECT COUNT(*) AS missing_count
+             FROM certificate_document_requirements cdr
+             LEFT JOIN trainee_documents d ON d.class_id = cdr.class_id
+                 AND d.document_name = cdr.required_document_name
+                 AND d.review_status = 'approved'
+             WHERE 1 = 1 {$classWhere}
+             AND d.document_id IS NULL",
+            $classValues
+        ) ?: [];
+
+        // Document completion rates per class
+        $completionByClass = $this->rows(
+            "SELECT c.class_id, c.class_name,
+                    COUNT(DISTINCT cdr.requirement_id) AS required_count,
+                    COUNT(DISTINCT d.document_id) AS submitted_count,
+                    COALESCE(COUNT(DISTINCT d.document_id) / NULLIF(COUNT(DISTINCT cdr.requirement_id), 0) * 100, 0) AS completion_rate
+             FROM training_classes c
+             LEFT JOIN certificate_document_requirements cdr ON cdr.class_id = c.class_id
+             LEFT JOIN trainee_documents d ON d.class_id = c.class_id
+                 AND d.document_name = cdr.required_document_name
+                 AND d.review_status = 'approved'
+             WHERE 1 = 1 {$classWhere}
+             GROUP BY c.class_id, c.class_name
+             ORDER BY completion_rate DESC",
+            $classValues
+        );
+
+        // Document types distribution
+        $docTypes = $this->rows(
+            "SELECT d.document_name,
+                    COUNT(*) AS count,
+                    SUM(CASE WHEN d.review_status = 'approved' THEN 1 ELSE 0 END) AS approved,
+                    SUM(CASE WHEN d.review_status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+                    SUM(CASE WHEN d.review_status = 'pending' THEN 1 ELSE 0 END) AS pending
+             FROM trainee_documents d
+             WHERE 1 = 1 {$classWhere} {$dateWhere}
+             GROUP BY d.document_name
+             ORDER BY count DESC",
+            array_merge($classValues, $dateValues)
+        );
+
+        foreach ($completionByClass as &$completion) {
+            $completion['class_id'] = (int) $completion['class_id'];
+            $completion['required_count'] = (int) $completion['required_count'];
+            $completion['submitted_count'] = (int) $completion['submitted_count'];
+            $completion['completion_rate'] = round((float) $completion['completion_rate'], 1);
+        }
+        unset($completion);
+
+        foreach ($docTypes as &$type) {
+            $type['count'] = (int) $type['count'];
+            $type['approved'] = (int) $type['approved'];
+            $type['rejected'] = (int) $type['rejected'];
+            $type['pending'] = (int) $type['pending'];
+        }
+        unset($type);
+
+        return [
+            'summary' => [
+                'total_submitted' => (int) ($docStats['total_submitted'] ?? 0),
+                'verified' => (int) ($docStats['verified'] ?? 0),
+                'rejected' => (int) ($docStats['rejected'] ?? 0),
+                'pending' => (int) ($docStats['pending'] ?? 0),
+                'missing' => (int) ($missingDocs['missing_count'] ?? 0),
+                'completion_rate' => (int) ($docStats['total_submitted'] ?? 0) > 0
+                    ? round(((int) ($docStats['verified'] ?? 0) / (int) ($docStats['total_submitted'] ?? 1)) * 100, 1)
+                    : 0,
+            ],
+            'completion_by_class' => $completionByClass,
+            'document_types' => $docTypes,
+        ];
+    }
+
+    private function certificateAnalytics(array $filters)
+    {
+        $classWhere = '';
+        $classValues = [];
+        if (!empty($filters['class_id'])) {
+            $classWhere .= ' AND cert.class_id = ?';
+            $classValues[] = (int) $filters['class_id'];
+        }
+
+        $dateWhere = ' AND cert.issue_date BETWEEN ? AND ?';
+        $dateValues = [$filters['start_date'], $filters['end_date']];
+
+        // Certificate statistics
+        $certStats = $this->row(
+            "SELECT
+                COUNT(*) AS total_issued,
+                SUM(CASE WHEN cert.status = 'issued' THEN 1 ELSE 0 END) AS issued,
+                SUM(CASE WHEN cert.status = 'draft' THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN cert.status = 'revoked' THEN 1 ELSE 0 END) AS revoked
+             FROM certificates cert
+             WHERE 1 = 1 {$classWhere} {$dateWhere}",
+            array_merge($classValues, $dateValues)
+        ) ?: [];
+
+        // Certificates per training batch
+        $certsPerBatch = $this->rows(
+            "SELECT c.class_id, c.class_name, p.program_name,
+                    COUNT(DISTINCT cert.certificate_id) AS certificate_count,
+                    COUNT(DISTINCT cert.trainee_id) AS trainee_count
+             FROM training_classes c
+             JOIN training_programs p ON p.program_id = c.program_id
+             LEFT JOIN certificates cert ON cert.class_id = c.class_id {$dateWhere}
+             WHERE 1 = 1 {$classWhere}
+             GROUP BY c.class_id, c.class_name, p.program_name
+             ORDER BY certificate_count DESC",
+            array_merge($classValues, $dateValues)
+        );
+
+        // Monthly certificate issuance
+        $monthlyIssuance = $this->rows(
+            "SELECT DATE_FORMAT(cert.issue_date, '%Y-%m') AS month,
+                    COUNT(*) AS certificates_issued
+             FROM certificates cert
+             WHERE cert.issue_date BETWEEN ? AND ? {$classWhere}
+             GROUP BY DATE_FORMAT(cert.issue_date, '%Y-%m')
+             ORDER BY month",
+            array_merge([$filters['start_date'], $filters['end_date']], $classValues)
+        );
+
+        // Certificate eligibility statistics
+        $eligibilityStats = $this->row(
+            "SELECT
+                COUNT(*) AS total_eligible,
+                SUM(CASE WHEN e.is_eligible = 1 THEN 1 ELSE 0 END) AS eligible,
+                SUM(CASE WHEN e.is_eligible = 0 THEN 1 ELSE 0 END) AS not_eligible,
+                AVG(e.attendance_percentage) AS avg_attendance
+             FROM certificate_eligibility e
+             JOIN training_classes c ON c.class_id = e.class_id
+             WHERE 1 = 1 {$classWhere}",
+            $classValues
+        ) ?: [];
+
+        foreach ($certsPerBatch as &$batch) {
+            $batch['class_id'] = (int) $batch['class_id'];
+            $batch['certificate_count'] = (int) $batch['certificate_count'];
+            $batch['trainee_count'] = (int) $batch['trainee_count'];
+        }
+        unset($batch);
+
+        foreach ($monthlyIssuance as &$monthly) {
+            $monthly['certificates_issued'] = (int) $monthly['certificates_issued'];
+        }
+        unset($monthly);
+
+        return [
+            'summary' => [
+                'total_issued' => (int) ($certStats['total_issued'] ?? 0),
+                'issued' => (int) ($certStats['issued'] ?? 0),
+                'pending' => (int) ($certStats['pending'] ?? 0),
+                'revoked' => (int) ($certStats['revoked'] ?? 0),
+            ],
+            'certificates_per_batch' => $certsPerBatch,
+            'monthly_issuance' => $monthlyIssuance,
+            'eligibility' => [
+                'total_eligible' => (int) ($eligibilityStats['total_eligible'] ?? 0),
+                'eligible' => (int) ($eligibilityStats['eligible'] ?? 0),
+                'not_eligible' => (int) ($eligibilityStats['not_eligible'] ?? 0),
+                'avg_attendance' => round((float) ($eligibilityStats['avg_attendance'] ?? 0), 1),
+            ],
+        ];
+    }
+
+    private function announcementAnalytics(array $filters)
+    {
+        $dateWhere = ' AND created_at BETWEEN ? AND ?';
+        $dateValues = [$filters['start_date'], $filters['end_date']];
+
+        // Announcement statistics
+        $announcementStats = $this->row(
+            "SELECT
+                COUNT(*) AS total_published,
+                SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published,
+                SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft
+             FROM announcements
+             WHERE 1 = 1 {$dateWhere}",
+            $dateValues
+        ) ?: [];
+
+        // Notification statistics (from notifications table)
+        $notificationStats = $this->row(
+            "SELECT
+                COUNT(*) AS total_notifications,
+                SUM(CASE WHEN notification_type = 'email' THEN 1 ELSE 0 END) AS email_notifications,
+                SUM(CASE WHEN notification_type = 'sms' THEN 1 ELSE 0 END) AS sms_notifications,
+                SUM(CASE WHEN is_read = 1 THEN 1 ELSE 0 END) AS read_notifications,
+                SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) AS unread_notifications
+             FROM notifications
+             WHERE created_at BETWEEN ? AND ?",
+            $dateValues
+        ) ?: [];
+
+        // Failed notifications (simulated - add actual tracking if needed)
+        $failedNotifications = $this->row(
+            "SELECT COUNT(*) AS failed_count
+             FROM notifications
+             WHERE created_at BETWEEN ? AND ?
+             AND (notification_type = 'email' OR notification_type = 'sms')
+             AND is_read = 0
+             AND created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)",
+            $dateValues
+        ) ?: [];
+
+        // Announcement read statistics (if tracking exists)
+        $readStats = $this->rows(
+            "SELECT a.announcement_id, a.title, a.created_at,
+                    COUNT(DISTINCT n.user_id) AS unique_readers
+             FROM announcements a
+             LEFT JOIN notifications n ON n.notification_type = 'announcement'
+                 AND n.message LIKE CONCAT('%', a.title, '%')
+                 AND n.is_read = 1
+             WHERE a.created_at BETWEEN ? AND ?
+             GROUP BY a.announcement_id, a.title, a.created_at
+             ORDER BY a.created_at DESC",
+            $dateValues
+        );
+
+        foreach ($readStats as &$stat) {
+            $stat['announcement_id'] = (int) $stat['announcement_id'];
+            $stat['unique_readers'] = (int) $stat['unique_readers'];
+        }
+        unset($stat);
+
+        return [
+            'summary' => [
+                'total_published' => (int) ($announcementStats['total_published'] ?? 0),
+                'published' => (int) ($announcementStats['published'] ?? 0),
+                'draft' => (int) ($announcementStats['draft'] ?? 0),
+                'email_notifications' => (int) ($notificationStats['email_notifications'] ?? 0),
+                'sms_notifications' => (int) ($notificationStats['sms_notifications'] ?? 0),
+                'read_notifications' => (int) ($notificationStats['read_notifications'] ?? 0),
+                'unread_notifications' => (int) ($notificationStats['unread_notifications'] ?? 0),
+                'failed_notifications' => (int) ($failedNotifications['failed_count'] ?? 0),
+            ],
+            'read_statistics' => $readStats,
         ];
     }
 }
