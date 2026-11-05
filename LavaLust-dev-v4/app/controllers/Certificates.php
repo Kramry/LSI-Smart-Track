@@ -714,7 +714,7 @@ class Certificates extends Base
         $settings = [
             'institution_name' => trim($this->formString('institution_name')),
             'title_text' => trim($this->formString('title_text')),
-            'body_text' => trim($this->formString('body_text')),
+            'body_text' => str_replace('{date_completion}', '{date_completed}', trim($this->formString('body_text'))),
             'signatory_name' => trim($this->formString('signatory_name')),
             'signatory_title' => trim($this->formString('signatory_title')),
             'border_style' => $this->formString('border_style'),

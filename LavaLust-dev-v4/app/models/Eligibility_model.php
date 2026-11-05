@@ -16,7 +16,7 @@ class Eligibility_model extends Base_model
 
     public function getEligibilityRecords(array $filters = [])
     {
-        $sql = 'SELECT e.*, cert.certificate_id, cert.status AS certificate_status, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, t.qr_code AS trainee_number, p.program_name, c.class_name, u.full_name AS reviewer_name, approver.full_name AS approver_name FROM certificate_eligibility e JOIN trainees t ON t.trainee_id = e.trainee_id JOIN training_classes c ON c.class_id = e.class_id JOIN training_programs p ON p.program_id = e.program_id LEFT JOIN certificates cert ON cert.trainee_id = e.trainee_id AND cert.class_id = e.class_id LEFT JOIN users u ON u.user_id = e.reviewed_by LEFT JOIN users approver ON approver.user_id = e.approved_by';
+        $sql = "SELECT e.*, cert.certificate_id, cert.status AS certificate_status, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, t.qr_code AS trainee_number, p.program_name, c.class_name, u.full_name AS reviewer_name, approver.full_name AS approver_name FROM certificate_eligibility e JOIN trainees t ON t.trainee_id = e.trainee_id JOIN training_classes c ON c.class_id = e.class_id JOIN training_programs p ON p.program_id = e.program_id LEFT JOIN certificates cert ON cert.trainee_id = e.trainee_id AND cert.class_id = e.class_id LEFT JOIN users u ON u.user_id = e.reviewed_by LEFT JOIN users approver ON approver.user_id = e.approved_by";
         $values = [];
         $whereClauses = [];
 
@@ -138,7 +138,7 @@ class Eligibility_model extends Base_model
         }
 
         $requirements = $this->rows('SELECT required_document_name FROM certificate_document_requirements WHERE class_id = ? ORDER BY required_document_name', [(int) $classId]);
-        $submittedDocuments = $this->rows('SELECT document_name FROM trainee_documents WHERE trainee_id = ? AND class_id = ? AND status = "active" AND review_status = "approved"', [(int) $traineeId, (int) $classId]);
+        $submittedDocuments = $this->rows("SELECT document_name FROM trainee_documents WHERE trainee_id = ? AND class_id = ? AND status = 'active' AND review_status = 'approved'", [(int) $traineeId, (int) $classId]);
         $submittedNames = [];
         foreach ($submittedDocuments as $document) {
             $submittedNames[mb_strtolower(trim($document['document_name']))] = true;

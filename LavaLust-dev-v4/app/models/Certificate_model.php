@@ -19,9 +19,9 @@ class Certificate_model extends Base_model
     {
         $eligible = $this->row('SELECT COUNT(*) as count FROM certificate_eligibility WHERE is_eligible = 1');
         $pending = $this->row("SELECT COUNT(*) AS count FROM certificate_eligibility WHERE is_eligible = 1 AND approval_status = 'pending'");
-        $issued = $this->row('SELECT COUNT(*) as count FROM certificates WHERE status = "issued"');
-        $revoked = $this->row('SELECT COUNT(*) as count FROM certificates WHERE status = "revoked"');
-        $signing = $this->row('SELECT COUNT(*) AS count FROM certificates WHERE status = "pending_signature"');
+        $issued = $this->row("SELECT COUNT(*) as count FROM certificates WHERE status = 'issued'");
+        $revoked = $this->row("SELECT COUNT(*) as count FROM certificates WHERE status = 'revoked'");
+        $signing = $this->row("SELECT COUNT(*) AS count FROM certificates WHERE status = 'pending_signature'");
 
         return [
             'eligible' => (int) ($eligible['count'] ?? 0),
@@ -299,7 +299,7 @@ class Certificate_model extends Base_model
 
         $this->db->transaction();
         try {
-            $this->execute('INSERT INTO certificates (trainee_id, class_id, program_id, certificate_number, completion_date, issue_date, status, qr_code, template_id, template_snapshot) VALUES (?, ?, ?, ?, ?, CURDATE(), "draft", ?, ?, ?)', [
+            $this->execute("INSERT INTO certificates (trainee_id, class_id, program_id, certificate_number, completion_date, issue_date, status, qr_code, template_id, template_snapshot) VALUES (?, ?, ?, ?, ?, CURDATE(), 'draft', ?, ?, ?)", [
                 (int) $traineeId,
                 (int) $classId,
                 (int) $class['program_id'],
@@ -311,7 +311,7 @@ class Certificate_model extends Base_model
             ]);
             $certificateId = (int) $this->row('SELECT LAST_INSERT_ID() AS id')['id'];
             foreach ($signatories as $signatory) {
-                $this->execute('INSERT INTO certificate_signatures (certificate_id, signatory_id, signatory_user_id, signatory_name, signatory_position, signature_path, x_position, y_position, decision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "pending")', [
+                $this->execute("INSERT INTO certificate_signatures (certificate_id, signatory_id, signatory_user_id, signatory_name, signatory_position, signature_path, x_position, y_position, decision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')", [
                     $certificateId,
                     (int) $signatory['signatory_id'],
                     (int) $signatory['user_id'],
@@ -327,7 +327,7 @@ class Certificate_model extends Base_model
                     'certificate_signature',
                 ]);
             }
-            $this->execute('UPDATE certificates SET status = "pending_signature" WHERE certificate_id = ?', [$certificateId]);
+            $this->execute("UPDATE certificates SET status = 'pending_signature' WHERE certificate_id = ?", [$certificateId]);
             $this->db->commit();
         } catch (Throwable $error) {
             $this->db->roll_back();
@@ -350,14 +350,14 @@ class Certificate_model extends Base_model
     {
         $this->db->transaction();
         try {
-            $certificate = $this->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id WHERE c.certificate_id = ? FOR UPDATE', [(int) $certificateId]);
+            $certificate = $this->row("SELECT c.*, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, p.program_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id WHERE c.certificate_id = ? FOR UPDATE", [(int) $certificateId]);
             $slot = $this->row("SELECT s.* FROM certificate_signatures s WHERE s.certificate_id = ? AND s.signatory_user_id = ? AND s.decision = 'pending' AND NOT EXISTS (SELECT 1 FROM certificate_signatures newer WHERE newer.certificate_id = s.certificate_id AND newer.signatory_id = s.signatory_id AND newer.signature_id > s.signature_id) ORDER BY s.signature_id DESC LIMIT 1 FOR UPDATE", [(int) $certificateId, (int) $userId]);
             if (!$certificate || $certificate['status'] !== 'pending_signature' || !$slot) {
                 $this->db->roll_back();
                 return ['success' => false, 'message' => 'This certificate is not assigned to you for signing.'];
             }
             $dataHash = $this->certificateDataHash($certificate);
-            $this->execute('UPDATE certificate_signatures SET decision = "signed", signed_at = CURRENT_TIMESTAMP, ip_address = ?, certificate_data_hash = ? WHERE signature_id = ?', [
+            $this->execute("UPDATE certificate_signatures SET decision = 'signed', signed_at = CURRENT_TIMESTAMP, ip_address = ?, certificate_data_hash = ? WHERE signature_id = ?", [
                 substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45),
                 $dataHash,
                 (int) $slot['signature_id'],
@@ -365,8 +365,8 @@ class Certificate_model extends Base_model
             $remaining = (int) ($this->row("SELECT COUNT(*) AS total FROM certificate_signatures s WHERE s.certificate_id = ? AND s.decision <> 'signed' AND NOT EXISTS (SELECT 1 FROM certificate_signatures newer WHERE newer.certificate_id = s.certificate_id AND newer.signatory_id = s.signatory_id AND newer.signature_id > s.signature_id)", [(int) $certificateId])['total'] ?? 0);
             $issued = $remaining === 0;
             if ($issued) {
-                $this->execute('UPDATE certificates SET status = "signed" WHERE certificate_id = ?', [(int) $certificateId]);
-                $this->execute('UPDATE certificates SET status = "issued", issue_date = CURDATE() WHERE certificate_id = ?', [(int) $certificateId]);
+                $this->execute("UPDATE certificates SET status = 'signed' WHERE certificate_id = ?", [(int) $certificateId]);
+                $this->execute("UPDATE certificates SET status = 'issued', issue_date = CURDATE() WHERE certificate_id = ?", [(int) $certificateId]);
                 $trainee = $this->row('SELECT t.user_id FROM trainees t JOIN certificates c ON c.trainee_id = t.trainee_id WHERE c.certificate_id = ?', [(int) $certificateId]);
                 if (!empty($trainee['user_id'])) {
                     $this->execute('INSERT INTO notifications (user_id, message, notification_type) VALUES (?, ?, ?)', [
@@ -394,12 +394,12 @@ class Certificate_model extends Base_model
                 $this->db->roll_back();
                 return false;
             }
-            $this->execute('UPDATE certificate_signatures SET decision = "rejected", remarks = ?, ip_address = ? WHERE signature_id = ?', [
+            $this->execute("UPDATE certificate_signatures SET decision = 'rejected', remarks = ?, ip_address = ? WHERE signature_id = ?", [
                 $remarks,
                 substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45),
                 (int) $slot['signature_id'],
             ]);
-            $this->execute('UPDATE certificates SET status = "draft" WHERE certificate_id = ?', [(int) $certificateId]);
+            $this->execute("UPDATE certificates SET status = 'draft' WHERE certificate_id = ?", [(int) $certificateId]);
             $staff = $this->rows("SELECT user_id FROM users WHERE status = 'active' AND role IN ('administrator', 'staff')");
             foreach ($staff as $account) {
                 $this->execute('INSERT INTO notifications (user_id, message, notification_type) VALUES (?, ?, ?)', [
@@ -431,7 +431,7 @@ class Certificate_model extends Base_model
                 return false;
             }
             foreach ($signatories as $signatory) {
-                $this->execute('INSERT INTO certificate_signatures (certificate_id, signatory_id, signatory_user_id, signatory_name, signatory_position, signature_path, x_position, y_position, decision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "pending")', [
+                $this->execute("INSERT INTO certificate_signatures (certificate_id, signatory_id, signatory_user_id, signatory_name, signatory_position, signature_path, x_position, y_position, decision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')", [
                     (int) $certificateId,
                     (int) $signatory['signatory_id'],
                     (int) $signatory['user_id'],
@@ -447,7 +447,7 @@ class Certificate_model extends Base_model
                     'certificate_signature',
                 ]);
             }
-            $this->execute('UPDATE certificates SET status = "pending_signature" WHERE certificate_id = ?', [(int) $certificateId]);
+            $this->execute("UPDATE certificates SET status = 'pending_signature' WHERE certificate_id = ?", [(int) $certificateId]);
             $this->db->commit();
         } catch (Throwable $error) {
             $this->db->roll_back();
@@ -458,7 +458,7 @@ class Certificate_model extends Base_model
 
     public function certificateSignatures($certificate)
     {
-        $records = $this->rows('SELECT s.* FROM certificate_signatures s WHERE s.certificate_id = ? AND s.decision = "signed" AND NOT EXISTS (SELECT 1 FROM certificate_signatures newer WHERE newer.certificate_id = s.certificate_id AND newer.signatory_id = s.signatory_id AND newer.signature_id > s.signature_id) ORDER BY s.signature_id', [(int) $certificate['certificate_id']]);
+        $records = $this->rows("SELECT s.* FROM certificate_signatures s WHERE s.certificate_id = ? AND s.decision = 'signed' AND NOT EXISTS (SELECT 1 FROM certificate_signatures newer WHERE newer.certificate_id = s.certificate_id AND newer.signatory_id = s.signatory_id AND newer.signature_id > s.signature_id) ORDER BY s.signature_id", [(int) $certificate['certificate_id']]);
         $expectedHash = $this->certificateDataHash($certificate);
         foreach ($records as &$record) {
             $record['hash_valid'] = hash_equals($expectedHash, (string) $record['certificate_data_hash']);
@@ -480,7 +480,7 @@ class Certificate_model extends Base_model
 
     public function revokeCertificate($certificateId, $revokedBy, $reason)
     {
-        return $this->execute('UPDATE certificates SET status = "revoked", revoked_at = CURDATE(), revoked_by = ?, revocation_reason = ? WHERE certificate_id = ? AND status = "issued"', [
+        return $this->execute("UPDATE certificates SET status = 'revoked', revoked_at = CURDATE(), revoked_by = ?, revocation_reason = ? WHERE certificate_id = ? AND status = 'issued'", [
             (int) $revokedBy,
             $reason,
             (int) $certificateId
