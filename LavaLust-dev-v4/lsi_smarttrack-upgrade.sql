@@ -346,6 +346,27 @@ SET cs.`signatory_name` = COALESCE(NULLIF(cs.`signatory_name`, ''), s.`name`),
     cs.`x_position` = COALESCE(cs.`x_position`, s.`x_position`),
     cs.`y_position` = COALESCE(cs.`y_position`, s.`y_position`);
 
+-- Legacy-only fields are retained for existing data, but new signature rows
+-- populate the canonical signatory_* fields instead.
+SET @tbl = 'certificate_signatures', @col = 'user_id', @def = 'int unsigned DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) > 0, CONCAT('ALTER TABLE `', @tbl, '` MODIFY COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col AND IS_NULLABLE = 'NO');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'position', @def = 'varchar(150) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) > 0, CONCAT('ALTER TABLE `', @tbl, '` MODIFY COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col AND IS_NULLABLE = 'NO');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'field_x', @def = 'decimal(5,2) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) > 0, CONCAT('ALTER TABLE `', @tbl, '` MODIFY COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col AND IS_NULLABLE = 'NO');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'field_y', @def = 'decimal(5,2) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) > 0, CONCAT('ALTER TABLE `', @tbl, '` MODIFY COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col AND IS_NULLABLE = 'NO');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'font_size', @def = 'smallint unsigned DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) > 0, CONCAT('ALTER TABLE `', @tbl, '` MODIFY COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col AND IS_NULLABLE = 'NO');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @tbl = 'certificate_signatures', @col = 'alignment', @def = 'char(1) DEFAULT NULL';
+SET @sql = (SELECT IF(COUNT(*) > 0, CONCAT('ALTER TABLE `', @tbl, '` MODIFY COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col AND IS_NULLABLE = 'NO');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 CREATE TABLE IF NOT EXISTS `certificate_eligibility` (
   `eligibility_id` int unsigned NOT NULL AUTO_INCREMENT,
   `trainee_id` int unsigned NOT NULL,
@@ -399,6 +420,7 @@ CREATE TABLE IF NOT EXISTS `training_assessments` (
   `assessed_by` int unsigned NOT NULL,
   `assessment_date` date NOT NULL,
   `notes` text DEFAULT NULL,
+  `time_limit_minutes` int unsigned DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`assessment_id`),
@@ -408,6 +430,10 @@ CREATE TABLE IF NOT EXISTS `training_assessments` (
   CONSTRAINT `smarttrack_assessments_class_fk` FOREIGN KEY (`class_id`) REFERENCES `training_classes` (`class_id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `smarttrack_assessments_assessor_fk` FOREIGN KEY (`assessed_by`) REFERENCES `users` (`user_id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @tbl = 'training_assessments', @col = 'time_limit_minutes', @def = 'int unsigned DEFAULT NULL AFTER `notes`';
+SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS `certificate_document_requirements` (
   `requirement_id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -467,6 +493,11 @@ CREATE TABLE IF NOT EXISTS `certificate_templates` (
   KEY `idx_smarttrack_certificate_template_active` (`is_active`),
   CONSTRAINT `smarttrack_certificate_template_creator_fk` FOREIGN KEY (`created_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @tbl = 'certificate_templates', @col = 'mode', @def = 'varchar(20) NOT NULL';
+SET @sql = (SELECT IF(COUNT(*) > 0 AND MAX(DATA_TYPE) <> 'varchar', CONCAT('ALTER TABLE `', @tbl, '` MODIFY COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+UPDATE `certificate_templates` SET `mode` = 'generated' WHERE `mode` = 'generate';
 
 SET @tbl = 'certificates', @col = 'template_id', @def = 'int unsigned DEFAULT NULL';
 SET @sql = (SELECT IF(COUNT(*) = 0, CONCAT('ALTER TABLE `', @tbl, '` ADD COLUMN `', @col, '` ', @def), 'DO 0') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = @tbl AND COLUMN_NAME = @col);

@@ -126,12 +126,10 @@ class Documents extends Base
         $isAdmin = in_array($this->user['role'], ['administrator', 'staff'], true);
         $isOwner = $document && $this->user['role'] === 'trainee' && $document['access_level'] !== 'staff' && (int) $document['trainee_user_id'] === (int) $this->user['user_id'];
         $isClassDocument = false;
-        if ($document && in_array($this->user['role'], ['instructor', 'trainee'], true) && $document['access_level'] === 'class' && !empty($document['class_id'])) {
-            if ($this->user['role'] === 'instructor') {
-                $isClassDocument = (bool) $this->model->row('SELECT class_id FROM training_classes WHERE class_id = ? AND instructor_id = ?', [(int) $document['class_id'], (int) $this->user['user_id']]);
-            } else {
-                $isClassDocument = (bool) $this->model->row('SELECT e.enrollment_id FROM class_enrollments e JOIN trainees t ON t.trainee_id = e.trainee_id WHERE e.class_id = ? AND t.user_id = ?', [(int) $document['class_id'], (int) $this->user['user_id']]);
-            }
+        if ($document && $this->user['role'] === 'instructor' && !empty($document['trainee_id']) && $document['access_level'] !== 'staff' && !empty($document['class_id'])) {
+            $isClassDocument = (bool) $this->model->row('SELECT class_id FROM training_classes WHERE class_id = ? AND instructor_id = ?', [(int) $document['class_id'], (int) $this->user['user_id']]);
+        } elseif ($document && $this->user['role'] === 'trainee' && $document['access_level'] === 'class' && !empty($document['class_id'])) {
+            $isClassDocument = (bool) $this->model->row('SELECT e.enrollment_id FROM class_enrollments e JOIN trainees t ON t.trainee_id = e.trainee_id WHERE e.class_id = ? AND t.user_id = ?', [(int) $document['class_id'], (int) $this->user['user_id']]);
         }
         if (!$document || (!$isAdmin && !$isOwner && !$isClassDocument)) {
             http_response_code(404);
@@ -238,7 +236,7 @@ class Documents extends Base
 
     public function reviewDocument($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
             return $this->deny('You are not allowed to review uploaded requirements.');
         }
         if (!ctype_digit((string) $id)) {
@@ -253,6 +251,13 @@ class Documents extends Base
         $document = $this->documentModel->documentById((int) $id);
         if (!$document || empty($document['trainee_id'])) {
             return $this->actionError('Trainee requirement not found.', 'manage/documents', 404);
+        }
+        if ($this->user['role'] === 'instructor' && (
+            empty($document['class_id'])
+            || $document['access_level'] === 'staff'
+            || !$this->model->row('SELECT class_id FROM training_classes WHERE class_id = ? AND instructor_id = ?', [(int) $document['class_id'], (int) $this->user['user_id']])
+        )) {
+            return $this->deny('You can only review trainee documents for your assigned classes.');
         }
 
         $this->model->execute('UPDATE trainee_documents SET review_status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE document_id = ?', [$decision, (int) $this->user['user_id'], (int) $id]);

@@ -119,8 +119,12 @@ $labels = [
                 $app_url,
             ) ?>">LSI <span>SMARTTRACK</span></a>
             <div class="intro-copy">
-                <h1>Every session,<br><em>accounted for.</em></h1>
-                <p>Real-time attendance and LSI trainee monitoring, built around the people and programs that move training forward.</p>
+                <h1><?= $page === "register"
+                    ? "Start your<br><em>training journey.</em>"
+                    : "Every session,<br><em>accounted for.</em>" ?></h1>
+                <p><?= $page === "register"
+                    ? "Create a SmartTrack trainee account to access your training records and attendance."
+                    : "Real-time attendance and LSI trainee monitoring, built around the people and programs that move training forward." ?></p>
             </div>
             <p class="intro-foot">Calapan City, Oriental Mindoro / Philippines</p>
         </section>
@@ -159,14 +163,30 @@ $labels = [
                 <?php elseif ($page === "register"): ?>
                     <form method="post" action="<?= $e(
                         $app_url,
-                    ) ?>register" class="form-stack">
+                    ) ?>register" class="form-stack register-form">
                         <input type="hidden" name="_csrf" value="<?= $e(
                             $csrf,
                         ) ?>">
-                        <label>Full name<input name="full_name" autocomplete="name" required maxlength="150"></label>
-                        <label>Username<input name="username" autocomplete="username" required minlength="4" maxlength="50"></label>
-                        <label>Password<input type="password" name="password" autocomplete="new-password" required minlength="10"></label>
-                        <label>Role<select name="role" required><option value="">Select role</option><option value="trainee">Trainee</option><option value="instructor">Instructor</option><option value="staff">Staff</option></select></label>
+                        <div class="field-row two-up">
+                            <label>Username<input name="username" autocomplete="username" required minlength="4" maxlength="50" placeholder="Username"></label>
+                            <label>Email<input type="email" name="email" autocomplete="email" placeholder="Email"></label>
+                        </div>
+                        <div class="field-row two-up">
+                            <label>Sex<select name="sex"><option value="">Select sex</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></label>
+                            <label>Date of birth<input type="date" name="date_of_birth" autocomplete="bday"></label>
+                        </div>
+                        <label>Address<input name="address" autocomplete="street-address" placeholder="Address"></label>
+                        <div class="field-row two-up">
+                            <label>Contact number<input name="contact_number" autocomplete="tel" placeholder="Contact number"></label>
+                            <label>Course / qualification<input name="course" placeholder="Course / qualification"></label>
+                        </div>
+                        <label>Training program<select name="program_id"><option value="">Not assigned yet</option><?php foreach (($programs ?? []) as $program): ?><option value="<?= (int) $program['value'] ?? (int) $program['program_id'] ?? 0 ?>"><?= $e($program['label'] ?? $program['program_name'] ?? 'Program') ?></option><?php endforeach; ?></select></label>
+                        <label>Full name<input name="full_name" autocomplete="name" required maxlength="150" placeholder="Full name"></label>
+                        <div class="field-row two-up">
+                            <label>Password<input type="password" name="password" autocomplete="new-password" required minlength="10" placeholder="Password"></label>
+                            <label>Confirm password<input type="password" name="password_confirmation" autocomplete="new-password" required minlength="10" placeholder="Confirm password"></label>
+                        </div>
+                        <label>Role<select name="role" required><option value="trainee">Trainee</option><option value="instructor">Instructor</option><option value="staff">Staff</option></select></label>
                         <button class="button primary" type="submit">Create account <span aria-hidden="true">&#8599;</span></button>
                     </form>
                     <a class="setup-link" href="<?= $e(
@@ -1459,8 +1479,7 @@ $labels = [
                                             ): ?><a class="text-button" href="<?= $e(
     $app_url,
 ) ?>documents/<?= $e($record["document_id"]) ?>">Download</a><?php if (
-    in_array($user["role"], ["administrator", "staff"], true)
-): ?><?php if (
+    in_array($user["role"], ["administrator", "staff", "instructor"], true) &&
     !empty($record["trainee_id"]) &&
     ($record["review_status"] ?? "") === "pending"
 ): ?><form method="post" action="<?= $e($app_url) ?>documents/<?= $e(
@@ -1473,7 +1492,9 @@ $labels = [
     $record["document_id"],
 ) ?>/review" data-confirm="Reject this trainee document?" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e(
     $csrf,
-) ?>"><input type="hidden" name="decision" value="rejected"><button class="text-button danger-text" type="submit">Reject</button></form><?php endif; ?><form method="post" action="<?= $e($app_url) ?>documents/<?= $e(
+) ?>"><input type="hidden" name="decision" value="rejected"><button class="text-button danger-text" type="submit">Reject</button></form><?php endif; ?><?php if (
+    in_array($user["role"], ["administrator", "staff"], true)
+): ?><form method="post" action="<?= $e($app_url) ?>documents/<?= $e(
     $record["document_id"],
 ) ?>/status" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e(
     $csrf,

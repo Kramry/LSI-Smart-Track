@@ -2,11 +2,13 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once ROOT_DIR . 'vendor/autoload.php';
+require_once APP_DIR . 'libraries/SmartTrackPdf.php';
 
 class CertificateGenerator
 {
     private $template;
     private $pdf;
+    private $page;
 
     public function __construct(array $template = [])
     {
@@ -29,26 +31,38 @@ class CertificateGenerator
             throw new RuntimeException('The saved certificate template mode is invalid.');
         }
 
-        return $this->pdf->Output('', 'S');
+        return $this->pdf->getOutPDFString();
     }
 
     private function generateFromUploadedTemplate($filePath, array $data, array $settings)
     {
         $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+        $allowedPaths = [realpath(ROOT_DIR . 'runtime/uploads/certificates')];
+        $allowedPaths = array_values(array_filter($allowedPaths, 'is_string'));
         if ($extension === 'pdf') {
-            $this->pdf = new \setasign\Fpdi\Tcpdf\Fpdi('L', 'mm', 'A4', true, 'UTF-8', false);
-            $pageCount = $this->pdf->setSourceFile($filePath);
+            $this->pdf = SmartTrackPdf::newDocument($allowedPaths);
+            $sourceId = $this->pdf->setImportSourceFile($filePath);
+            $pageCount = $this->pdf->getSourcePageCount($sourceId);
             if ($pageCount < 1) {
                 throw new RuntimeException('The uploaded certificate PDF has no pages.');
             }
-            $page = $this->pdf->importPage(1);
-            $size = $this->pdf->getTemplateSize($page);
-            $this->pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
-            $this->pdf->useTemplate($page);
+            $this->pdf->addPageFromImport($sourceId, 1);
+            $this->page = $this->pdf->page->getPage();
+            SmartTrackPdf::selectFont($this->pdf);
         } else {
-            $this->pdf = new \TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
-            $this->pdf->AddPage();
-            $this->pdf->Image($filePath, 0, 0, 297, 210, '', '', '', false, 300);
+            [$this->pdf, $this->page] = SmartTrackPdf::createWithPage('L', $allowedPaths);
+            $imageId = $this->pdf->image->add($filePath);
+            $this->pdf->page->addContent(
+                $this->pdf->image->getSetImage(
+                    $imageId,
+                    0,
+                    0,
+                    $this->page['width'],
+                    $this->page['height'],
+                    $this->page['height']
+                ),
+                $this->page['pid']
+            );
         }
 
         $this->prepareDocument($settings);
@@ -57,36 +71,66 @@ class CertificateGenerator
 
     private function generateDesignedCertificate(array $data, array $settings)
     {
-        $this->pdf = new \TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
-        $this->pdf->AddPage();
+        $allowedPaths = [realpath(ROOT_DIR . 'runtime/uploads/certificates')];
+        $allowedPaths = array_values(array_filter($allowedPaths, 'is_string'));
+        [$this->pdf, $this->page] = SmartTrackPdf::createWithPage('L', $allowedPaths);
         $this->prepareDocument($settings);
 
         $accent = $this->rgb($settings['accent_color'] ?? '#dd4814');
         $border = $settings['border_style'] ?? 'double';
         if ($border !== 'none') {
-            $this->pdf->SetDrawColor($accent[0], $accent[1], $accent[2]);
-            $this->pdf->SetLineWidth(1.6);
-            $this->pdf->Rect(10, 10, 277, 190, 'D');
+            $this->pdf->page->addContent($this->pdf->graph->getRect(
+                10,
+                10,
+                277,
+                190,
+                'D',
+                ['all' => ['lineWidth' => 1.6, 'lineColor' => $this->rgbString($accent)]
+                ]
+            ));
             if ($border === 'double') {
-                $this->pdf->SetLineWidth(0.5);
-                $this->pdf->Rect(14, 14, 269, 182, 'D');
+                $this->pdf->page->addContent($this->pdf->graph->getRect(
+                    14,
+                    14,
+                    269,
+                    182,
+                    'D',
+                    ['all' => ['lineWidth' => 0.5, 'lineColor' => $this->rgbString($accent)]
+                    ]
+                ));
             }
         }
 
         if (!empty($settings['logo_file_path']) && is_file($settings['logo_file_path'])) {
-            $this->pdf->Image($settings['logo_file_path'], 22, 22, 28, 22, '', '', '', true, 300);
+            $this->addImage($settings['logo_file_path'], 22, 22, 28, 22);
         }
 
         $font = $this->font($settings['font'] ?? 'helvetica');
-        $this->pdf->SetTextColor($accent[0], $accent[1], $accent[2]);
-        $this->pdf->SetFont($font, 'B', 22);
-        $this->pdf->SetXY(25, 30);
-        $this->pdf->MultiCell(247, 12, $this->plain($settings['institution_name'] ?? 'LSI Training Center'), 0, 'C');
+        $this->addText(
+            $this->plain($settings['institution_name'] ?? 'LSI Training Center'),
+            25,
+            30,
+            247,
+            12,
+            $font,
+            'B',
+            22,
+            $this->rgbString($accent),
+            'C'
+        );
 
-        $this->pdf->SetTextColor(45, 50, 60);
-        $this->pdf->SetFont($font, 'B', 30);
-        $this->pdf->SetXY(25, 61);
-        $this->pdf->MultiCell(247, 16, $this->plain($settings['title_text'] ?? 'Certificate of Completion'), 0, 'C');
+        $this->addText(
+            $this->plain($settings['title_text'] ?? 'Certificate of Completion'),
+            25,
+            61,
+            247,
+            16,
+            $font,
+            'B',
+            30,
+            'rgb(45,50,60)',
+            'C'
+        );
 
         $placeholders = [
             '{trainee_name}' => $data['trainee_name'] ?? '',
@@ -98,23 +142,17 @@ class CertificateGenerator
             '{verification_code}' => $data['certificate_number'] ?? '',
         ];
         $body = strtr((string) ($settings['body_text'] ?? ''), $placeholders);
-        $this->pdf->SetFont($font, '', 16);
-        $this->pdf->SetTextColor(60, 60, 60);
-        $this->pdf->SetXY(42, 91);
-        $this->pdf->MultiCell(213, 36, $this->plain($body), 0, 'C', false, 1, '', '', true, 0, false, true, 36, 'M');
-
-        $this->pdf->SetDrawColor(150, 150, 150);
-        $this->pdf->Line(88, 158, 143, 158);
-        $this->pdf->SetXY(78, 161);
-        $this->pdf->SetFont($font, 'B', 12);
-        $this->pdf->Cell(75, 7, $this->plain($settings['signatory_name'] ?? ''), 0, 1, 'C');
-        $this->pdf->SetX(78);
-        $this->pdf->SetFont($font, '', 10);
-        $this->pdf->Cell(75, 6, $this->plain($settings['signatory_title'] ?? ''), 0, 0, 'C');
-
-        $this->pdf->SetFont($font, '', 8);
-        $this->pdf->SetXY(190, 170);
-        $this->pdf->MultiCell(82, 5, 'Certificate No. ' . $this->plain($data['certificate_number'] ?? ''), 0, 'R');
+        $this->addText($this->plain($body), 42, 91, 213, 36, $font, '', 16, 'rgb(60,60,60)', 'C', 'C');
+        $this->pdf->page->addContent($this->pdf->graph->getLine(
+            88,
+            158,
+            143,
+            158,
+            ['lineWidth' => 0.3, 'lineColor' => 'rgb(150,150,150)']
+        ));
+        $this->addText($this->plain($settings['signatory_name'] ?? ''), 78, 161, 75, 7, $font, 'B', 12, 'rgb(45,50,60)', 'C');
+        $this->addText($this->plain($settings['signatory_title'] ?? ''), 78, 168, 75, 6, $font, '', 10, 'rgb(45,50,60)', 'C');
+        $this->addText('Certificate No. ' . $this->plain($data['certificate_number'] ?? ''), 190, 170, 82, 5, $font, '', 8, 'rgb(45,50,60)', 'R');
         $this->drawQrCode($data['verification_url'] ?? '', 256, 150, 24);
         $this->drawSignatures($data['signatories'] ?? []);
     }
@@ -129,8 +167,8 @@ class CertificateGenerator
             'signatory_name' => $settings['signatory_name'] ?? '',
             'verification_code' => $data['certificate_number'] ?? '',
         ];
-        $pageWidth = $this->pdf->getPageWidth();
-        $pageHeight = $this->pdf->getPageHeight();
+        $pageWidth = $this->page['width'];
+        $pageHeight = $this->page['height'];
         $accent = $this->rgb($settings['accent_color'] ?? '#000000');
         foreach (($this->template['field_layout'] ?? []) as $field => $layout) {
             if (!isset($values[$field]) || !is_array($layout)) {
@@ -148,18 +186,26 @@ class CertificateGenerator
             $width = min(170, $pageWidth);
             $left = $align === 'left' ? $x : ($align === 'right' ? $x - $width : $x - $width / 2);
             $left = max(0, min($pageWidth - $width, $left));
-            $this->pdf->SetTextColor($accent[0], $accent[1], $accent[2]);
-            $this->pdf->SetFont($this->font($settings['font'] ?? 'helvetica'), '', $fontSize);
-            $this->pdf->SetXY($left, max(0, min($pageHeight - 12, $y)));
-            $this->pdf->MultiCell($width, 8, $this->plain((string) $values[$field]), 0, strtoupper(substr($align, 0, 1)), false, 1);
+            $this->addText(
+                $this->plain((string) $values[$field]),
+                $left,
+                max(0, min($pageHeight - 12, $y)),
+                $width,
+                8,
+                $this->font($settings['font'] ?? 'helvetica'),
+                '',
+                $fontSize,
+                $this->rgbString($accent),
+                strtoupper(substr($align, 0, 1))
+            );
         }
         $this->drawSignatures($data['signatories'] ?? []);
     }
 
     private function drawSignatures(array $signatories)
     {
-        $pageWidth = $this->pdf->getPageWidth();
-        $pageHeight = $this->pdf->getPageHeight();
+        $pageWidth = $this->page['width'];
+        $pageHeight = $this->page['height'];
         $font = $this->font($this->template['settings']['font'] ?? 'helvetica');
         foreach ($signatories as $signatory) {
             $path = $signatory['signature_file_path'] ?? '';
@@ -170,34 +216,24 @@ class CertificateGenerator
             $topY = max(8, min($pageHeight - 38, (float) ($signatory['y_position'] ?? 80) * $pageHeight / 100));
             $signatureWidth = 42;
             $signatureHeight = 18;
-            $this->pdf->Image($path, $centerX - ($signatureWidth / 2), $topY, $signatureWidth, $signatureHeight, 'PNG', '', '', true, 300);
-            $this->pdf->SetTextColor(45, 50, 60);
-            $this->pdf->SetFont($font, 'B', 9);
-            $this->pdf->SetXY($centerX - 35, $topY + 18);
-            $this->pdf->MultiCell(70, 5, $this->plain($signatory['signatory_name'] ?? ''), 0, 'C');
-            $this->pdf->SetFont($font, '', 8);
-            $this->pdf->SetX($centerX - 35);
-            $this->pdf->MultiCell(70, 4, $this->plain($signatory['signatory_position'] ?? ''), 0, 'C');
-            $this->pdf->SetFont($font, '', 6);
+            $this->addImage($path, $centerX - ($signatureWidth / 2), $topY, $signatureWidth, $signatureHeight);
+            $this->addText($this->plain($signatory['signatory_name'] ?? ''), $centerX - 35, $topY + 18, 70, 5, $font, 'B', 9, 'rgb(45,50,60)', 'C');
+            $this->addText($this->plain($signatory['signatory_position'] ?? ''), $centerX - 35, $topY + 23, 70, 4, $font, '', 8, 'rgb(45,50,60)', 'C');
             $signedAt = strtotime((string) ($signatory['signed_at'] ?? ''));
             if ($signedAt) {
-                $this->pdf->SetX($centerX - 35);
-                $this->pdf->MultiCell(70, 4, 'Digitally signed on ' . date('M j, Y H:i', $signedAt), 0, 'C');
+                $this->addText('Digitally signed on ' . date('M j, Y H:i', $signedAt), $centerX - 35, $topY + 27, 70, 4, $font, '', 6, 'rgb(45,50,60)', 'C');
             } elseif (($signatory['signed_at'] ?? '') === 'PREVIEW') {
-                $this->pdf->SetX($centerX - 35);
-                $this->pdf->MultiCell(70, 4, 'Signature preview - not signed', 0, 'C');
+                $this->addText('Signature preview - not signed', $centerX - 35, $topY + 27, 70, 4, $font, '', 6, 'rgb(45,50,60)', 'C');
             }
         }
     }
 
     private function prepareDocument(array $settings)
     {
-        $this->pdf->SetCreator('LSI SmartTrack');
-        $this->pdf->SetAuthor($this->plain($settings['institution_name'] ?? 'LSI Training Center'));
-        $this->pdf->SetTitle($this->plain($settings['title_text'] ?? 'Certificate of Completion'));
-        $this->pdf->SetSubject('Training Certificate');
-        $this->pdf->SetMargins(0, 0, 0);
-        $this->pdf->SetAutoPageBreak(false, 0);
+        $this->pdf->setCreator('LSI SmartTrack');
+        $this->pdf->setAuthor($this->plain($settings['institution_name'] ?? 'LSI Training Center'));
+        $this->pdf->setTitle($this->plain($settings['title_text'] ?? 'Certificate of Completion'));
+        $this->pdf->setSubject('Training Certificate');
     }
 
     private function drawQrCode($value, $x, $y, $size)
@@ -205,20 +241,58 @@ class CertificateGenerator
         if ($value === '') {
             return;
         }
-        $this->pdf->write2DBarcode($value, 'QRCODE,M', $x, $y, $size, $size, [
-            'border' => false,
-            'vpadding' => 'auto',
-            'hpadding' => 'auto',
-            'fgcolor' => [0, 0, 0],
-            'bgcolor' => [255, 255, 255],
-            'module_width' => 2,
-            'module_height' => 2,
-        ]);
+        $this->pdf->page->addContent($this->pdf->graph->getRect(
+            $x,
+            $y,
+            $size,
+            $size,
+            'DF',
+            ['all' => ['lineWidth' => 0, 'lineColor' => 'white', 'fillColor' => 'white']]
+        ));
+        $this->pdf->page->addContent($this->pdf->getBarcode(
+            'QRCODE,H',
+            (string) $value,
+            $x,
+            $y,
+            $size,
+            $size,
+            [0, 0, 0, 0],
+            ['fillColor' => 'rgb(0,0,0)']
+        ));
     }
 
     private function font($font)
     {
-        return in_array($font, ['helvetica', 'times', 'courier'], true) ? $font : 'helvetica';
+        return match ($font) {
+            'times' => 'dejavuserif',
+            'courier' => 'dejavusansmono',
+            default => 'dejavusans',
+        };
+    }
+
+    private function addText($text, $x, $y, $width, $height, $font, $style, $size, $color, $alignment, $verticalAlignment = 'C')
+    {
+        SmartTrackPdf::selectFont($this->pdf, $font, $style, (float) $size);
+        $this->pdf->page->addContent($this->pdf->color->getPdfColor($color), $this->page['pid']);
+        $this->pdf->addTextCellXY(
+            $text,
+            $this->page['pid'],
+            (float) $x,
+            (float) $y,
+            (float) $width,
+            (float) $height,
+            valign: $verticalAlignment,
+            halign: $alignment
+        );
+    }
+
+    private function addImage($path, $x, $y, $width, $height)
+    {
+        $imageId = $this->pdf->image->add($path);
+        $this->pdf->page->addContent(
+            $this->pdf->image->getSetImage($imageId, $x, $y, $width, $height, $this->page['height']),
+            $this->page['pid']
+        );
     }
 
     private function rgb($color)
@@ -231,6 +305,11 @@ class CertificateGenerator
             hexdec(substr($color, 3, 2)),
             hexdec(substr($color, 5, 2)),
         ];
+    }
+
+    private function rgbString(array $color)
+    {
+        return sprintf('rgb(%d,%d,%d)', $color[0], $color[1], $color[2]);
     }
 
     private function formatDate($date)

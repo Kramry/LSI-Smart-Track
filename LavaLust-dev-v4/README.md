@@ -3,7 +3,7 @@
 > A lightweight, fast PHP framework built for developers who want clean MVC architecture without unnecessary complexity or performance overhead.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![PHP Version](https://img.shields.io/badge/PHP-%3E%3D7.4-8892BF)](https://www.php.net/)
+[![PHP Version](https://img.shields.io/badge/PHP-%3E%3D8.2-8892BF)](https://www.php.net/)
 [![GitHub Stars](https://img.shields.io/github/stars/ronmarasigan/lavalust?style=flat)](https://github.com/ronmarasigan/lavalust/stargazers)
 
 ---
@@ -31,9 +31,9 @@ Whether you are building a simple web application, a REST API, or a teaching pro
 
 ## Requirements
 
-- PHP 7.4 or higher
+- PHP 8.2 or higher
 - A web server with URL rewriting support (Apache `.htaccess` or Nginx config)
-- Composer (optional, for dependency management)
+- Composer (required to install dependencies and generate PDF font assets)
 
 ---
 

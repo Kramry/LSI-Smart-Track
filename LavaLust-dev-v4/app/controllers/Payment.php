@@ -2,6 +2,7 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once APP_DIR . 'controllers/Base.php';
+require_once APP_DIR . 'libraries/SmartTrackPdf.php';
 
 class Payment extends Base
 {
@@ -489,12 +490,10 @@ class Payment extends Base
             http_response_code(404);
             exit('Receipt not found.');
         }
-        require_once ROOT_DIR . 'vendor/autoload.php';
-        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
-        $pdf->SetCreator('LSI SmartTrack');
-        $pdf->SetTitle('Official Receipt ' . $payment['receipt_number']);
-        $pdf->SetMargins(20, 20, 20);
-        $pdf->AddPage();
+        $pdf = SmartTrackPdf::create('P');
+        $pdf->setCreator('LSI SmartTrack');
+        $pdf->setTitle('Official Receipt ' . $payment['receipt_number']);
+        $pdf->addPage(['format' => 'A4', 'orientation' => 'P']);
         $html = '<h1>LSI Training Center</h1><h2>Official Payment Receipt</h2>'
             . '<p><strong>Receipt No.:</strong> ' . htmlspecialchars($payment['receipt_number'], ENT_QUOTES, 'UTF-8') . '</p>'
             . '<p><strong>Date paid:</strong> ' . htmlspecialchars($payment['payment_date'], ENT_QUOTES, 'UTF-8') . '</p>'
@@ -505,8 +504,9 @@ class Payment extends Base
             . '<p><strong>Payment method:</strong> ' . htmlspecialchars(strtoupper((string) $payment['method']), ENT_QUOTES, 'UTF-8') . '</p>'
             . '<p><strong>Reference:</strong> ' . htmlspecialchars($payment['reference_number'] ?: 'N/A', ENT_QUOTES, 'UTF-8') . '</p>'
             . '<p>This receipt confirms the payment recorded in the LSI SmartTrack payment ledger.</p>';
-        $pdf->writeHTML($html, true, false, true, false, '');
-        $pdf->Output('receipt-' . preg_replace('/[^A-Za-z0-9_-]/', '_', $payment['receipt_number']) . '.pdf', 'I');
+        $pdf->setPDFFilename('receipt-' . preg_replace('/[^A-Za-z0-9_-]/', '_', $payment['receipt_number']) . '.pdf');
+        $pdf->addHTMLCell(html: $html, posx: 20, posy: 20, width: 170);
+        $pdf->renderPDF($pdf->getOutPDFString());
         exit;
     }
 
@@ -577,16 +577,16 @@ class Payment extends Base
         $outstanding = (string) ($_GET['report'] ?? '') === 'outstanding';
         $rows = $outstanding ? $this->paymentModel->outstandingReport() : $this->paymentModel->reportRows($start, $end);
         if ($format === 'pdf') {
-            require_once ROOT_DIR . 'vendor/autoload.php';
-            $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
-            $pdf->SetTitle('SmartTrack Payment Report');
-            $pdf->AddPage();
+            $pdf = SmartTrackPdf::create('L');
+            $pdf->setTitle('SmartTrack Payment Report');
+            $pdf->setPDFFilename('smarttrack-payment-report-' . $start . '-to-' . $end . '.pdf');
+            $pdf->addPage(['format' => 'A4', 'orientation' => 'L']);
             $html = '<h1>Payment Report</h1><p>' . htmlspecialchars($start . ' to ' . $end, ENT_QUOTES, 'UTF-8') . '</p><table border="1" cellpadding="4"><thead><tr><th>Date</th><th>Type</th><th>Trainee</th><th>Fee</th><th>Reference</th><th>Amount / Balance</th></tr></thead><tbody>';
             foreach ($rows as $row) {
                 $html .= '<tr><td>' . htmlspecialchars((string) ($row[$outstanding ? 'due_date' : 'report_date'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row[$outstanding ? 'fee_kind' : 'report_type'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row['trainee_name'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row['fee_name'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row[$outstanding ? 'trainee_number' : 'reference'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>PHP ' . number_format((float) ($row[$outstanding ? 'balance' : 'amount'] ?? 0), 2) . '</td></tr>';
             }
-            $pdf->writeHTML($html . '</tbody></table>', true, false, true, false, '');
-            $pdf->Output('smarttrack-payment-report-' . $start . '-to-' . $end . '.pdf', 'D');
+            $pdf->addHTMLCell(html: $html . '</tbody></table>', posx: 15, posy: 15, width: 267);
+            $pdf->downloadPDF($pdf->getOutPDFString());
             exit;
         }
         header('Content-Type: text/csv; charset=utf-8');

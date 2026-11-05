@@ -1,6 +1,7 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 require_once APP_DIR . 'controllers/Base.php';
+require_once APP_DIR . 'libraries/SmartTrackPdf.php';
 
 class SmartTrack_api extends Base
 {
@@ -226,6 +227,7 @@ class SmartTrack_api extends Base
         }
         $username = trim((string) $this->input('username'));
         $email = strtolower(trim((string) $this->input('email')));
+        $role = trim((string) $this->input('role'));
         $sex = trim((string) $this->input('sex'));
         $dateOfBirth = trim((string) $this->input('date_of_birth'));
         $address = trim((string) $this->input('address'));
@@ -244,6 +246,9 @@ class SmartTrack_api extends Base
         }
         if ($lastName === '' || strlen($lastName) > 100) {
             $errors['last_name'] = 'Enter your last name.';
+        }
+        if (!in_array($role, ['trainee', 'instructor', 'staff'], true)) {
+            $role = 'trainee';
         }
         if (!in_array($sex, ['Male', 'Female', 'Other'], true)) {
             $errors['sex'] = 'Select your sex.';
@@ -290,7 +295,7 @@ class SmartTrack_api extends Base
             $this->jsonResponse(['message' => 'That email address is already registered.', 'errors' => ['email' => 'Use another email address.']], 422);
         }
 
-        $this->userModel->createUser($name, $username, $password, 'trainee', $email);
+        $this->userModel->createUser($name, $username, $password, $role, $email);
         $account = $this->userModel->userByUsername($username);
         $this->userModel->createTraineeForUser((int) $account['user_id'], [
             'first_name' => $firstName,
@@ -528,6 +533,7 @@ class SmartTrack_api extends Base
                 && !($section === 'inquiries' && $user['role'] !== 'trainee'),
             'can_upload' => $section === 'documents' && in_array($user['role'], ['administrator', 'staff', 'instructor', 'trainee'], true),
             'can_manage_documents' => $section === 'documents' && in_array($user['role'], ['administrator', 'staff'], true),
+            'can_review_documents' => $section === 'documents' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true),
             'can_manage_requirements' => $section === 'documents' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true),
             'can_download_documents' => $section === 'documents',
             'document_requirements' => $section === 'documents'
@@ -828,12 +834,11 @@ class SmartTrack_api extends Base
 
     private function apiGeneratePDF($reportType, $data, array $filters, array $availableReports)
     {
-        require_once ROOT_DIR . 'vendor/autoload.php';
-        $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
-        $pdf->SetTitle('SmartTrack ' . $availableReports[$reportType]['name']);
-        $pdf->SetAuthor('LSI SmartTrack');
-        $pdf->SetCreator('LSI SmartTrack System');
-        $pdf->AddPage();
+        $pdf = SmartTrackPdf::create('L');
+        $pdf->setTitle('SmartTrack ' . $availableReports[$reportType]['name']);
+        $pdf->setAuthor('LSI SmartTrack');
+        $pdf->setCreator('LSI SmartTrack System');
+        $pdf->addPage(['format' => 'A4', 'orientation' => 'L']);
         $html = '<h1 style="color: #173a60;">' . htmlspecialchars($availableReports[$reportType]['name'], ENT_QUOTES, 'UTF-8') . '</h1>';
         $html .= '<p style="color: #5d6f82; font-size: 12px;">';
         $html .= 'Report Period: ' . htmlspecialchars($filters['start_date'] . ' to ' . $filters['end_date'], ENT_QUOTES, 'UTF-8') . '<br>';
@@ -859,9 +864,10 @@ class SmartTrack_api extends Base
         } else {
             $html .= '<p style="color: #c4372c;">No data found for the selected filters.</p>';
         }
-        $pdf->writeHTML($html, true, false, true, false, '');
         $filename = 'smarttrack-' . $reportType . '-report-' . $filters['start_date'] . '-to-' . $filters['end_date'] . '.pdf';
-        $pdf->Output($filename, 'D');
+        $pdf->setPDFFilename($filename);
+        $pdf->addHTMLCell(html: $html, posx: 15, posy: 15, width: 267);
+        $pdf->downloadPDF($pdf->getOutPDFString());
         exit;
     }
 

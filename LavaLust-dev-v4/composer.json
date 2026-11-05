@@ -1,7 +1,15 @@
 {
     "require": {
         "aws/aws-sdk-php": "^3.401",
-        "setasign/fpdi": "^2.6",
-        "tecnickcom/tcpdf": "^6.11"
+        "php": "^8.2",
+        "tecnickcom/tc-lib-pdf": "^8.0"
+    },
+    "scripts": {
+        "post-install-cmd": [
+            "@php vendor/tecnickcom/tc-lib-pdf-font/util/build_fonts.php"
+        ],
+        "post-update-cmd": [
+            "@php vendor/tecnickcom/tc-lib-pdf-font/util/build_fonts.php"
+        ]
     }
 }

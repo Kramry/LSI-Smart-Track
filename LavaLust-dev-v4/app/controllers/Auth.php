@@ -92,7 +92,15 @@ class Auth extends Base
 
         $name = trim((string) $this->input('full_name'));
         $username = trim((string) $this->input('username'));
+        $email = strtolower(trim((string) $this->input('email')));
+        $sex = trim((string) $this->input('sex'));
+        $dateOfBirth = trim((string) $this->input('date_of_birth'));
+        $address = trim((string) $this->input('address'));
+        $contactNumber = trim((string) $this->input('contact_number'));
+        $course = trim((string) $this->input('course'));
+        $programId = trim((string) $this->input('program_id'));
         $password = (string) $this->input('password');
+        $passwordConfirmation = (string) $this->input('password_confirmation');
         $role = trim((string) $this->input('role'));
 
         if ($name === '' || !preg_match('/^[A-Za-z0-9_.-]{4,50}$/', $username) || strlen($password) < 10) {
@@ -100,9 +108,13 @@ class Auth extends Base
             return;
         }
 
-        if (!in_array($role, ['trainee', 'instructor', 'staff'], true)) {
-            $this->render('register', ['error' => 'Select a valid role.']);
+        if ($password !== $passwordConfirmation) {
+            $this->render('register', ['error' => 'Passwords do not match.']);
             return;
+        }
+
+        if (!in_array($role, ['trainee', 'instructor', 'staff'], true)) {
+            $role = 'trainee';
         }
 
         if ($this->userModel->userByUsername($username)) {
@@ -110,7 +122,28 @@ class Auth extends Base
             return;
         }
 
-        $this->userModel->createUser($name, $username, $password, $role);
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->render('register', ['error' => 'Enter a valid email address.']);
+            return;
+        }
+
+        $this->userModel->createUser($name, $username, $password, $role, $email !== '' ? $email : null);
+        $account = $this->userModel->userByUsername($username);
+
+        if ($role === 'trainee' || $sex !== '' || $dateOfBirth !== '' || $address !== '' || $contactNumber !== '' || $course !== '' || $programId !== '') {
+            $this->userModel->createTraineeForUser((int) $account['user_id'], [
+                'first_name' => $name,
+                'last_name' => '',
+                'sex' => $sex,
+                'date_of_birth' => $dateOfBirth !== '' ? $dateOfBirth : null,
+                'address' => $address !== '' ? $address : null,
+                'email' => $email !== '' ? $email : null,
+                'contact_number' => $contactNumber !== '' ? $contactNumber : null,
+                'course' => $course !== '' ? $course : null,
+                'program_id' => $programId !== '' ? (int) $programId : null,
+            ]);
+        }
+
         $this->notice('Account created successfully. Please sign in.');
         redirect($this->url(''));
     }

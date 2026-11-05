@@ -3,6 +3,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once APP_DIR . 'controllers/Base.php';
 require_once APP_DIR . 'models/Reports_model.php';
+require_once APP_DIR . 'libraries/SmartTrackPdf.php';
 
 class Reports extends Base
 {
@@ -83,16 +84,13 @@ class Reports extends Base
 
     private function generatePDF($reportType, $data, array $filters)
     {
-        require_once ROOT_DIR . 'vendor/autoload.php';
-
         $availableReports = $this->reportsModel->availableReports();
 
-        $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
-        $pdf->SetTitle('SmartTrack ' . $availableReports[$reportType]['name']);
-        $pdf->SetAuthor('LSI SmartTrack');
-        $pdf->SetCreator('LSI SmartTrack System');
-
-        $pdf->AddPage();
+        $pdf = SmartTrackPdf::create('L');
+        $pdf->setTitle('SmartTrack ' . $availableReports[$reportType]['name']);
+        $pdf->setAuthor('LSI SmartTrack');
+        $pdf->setCreator('LSI SmartTrack System');
+        $pdf->addPage(['format' => 'A4', 'orientation' => 'L']);
 
         $html = '<h1 style="color: #173a60;">' . htmlspecialchars($availableReports[$reportType]['name'], ENT_QUOTES, 'UTF-8') . '</h1>';
         $html .= '<p style="color: #5d6f82; font-size: 12px;">';
@@ -124,10 +122,10 @@ class Reports extends Base
             $html .= '<p style="color: #c4372c;">No data found for the selected filters.</p>';
         }
 
-        $pdf->writeHTML($html, true, false, true, false, '');
-
         $filename = 'smarttrack-' . $reportType . '-report-' . $filters['start_date'] . '-to-' . $filters['end_date'] . '.pdf';
-        $pdf->Output($filename, 'D');
+        $pdf->setPDFFilename($filename);
+        $pdf->addHTMLCell(html: $html, posx: 15, posy: 15, width: 267);
+        $pdf->downloadPDF($pdf->getOutPDFString());
         exit;
     }
 
@@ -145,7 +143,13 @@ class Reports extends Base
 
         if (!empty($data)) {
             $headers = array_keys($data[0]);
-            fputcsv($output, array_map('ucwords', array_map('str_replace', $headers, ['_']))));
+            $formattedHeaders = array_map(
+                static function ($header) {
+                    return ucwords(str_replace('_', ' ', $header));
+                },
+                $headers
+            );
+            fputcsv($output, $formattedHeaders);
 
             foreach ($data as $row) {
                 fputcsv($output, array_map($safeCell, $row));

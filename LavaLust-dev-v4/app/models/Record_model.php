@@ -53,7 +53,7 @@ class Record_model extends Base_model
             return $this->rows($sql . " WHERE d.access_level <> 'staff' AND (t.user_id = ? OR (d.access_level = 'class' AND d.class_id IN (SELECT e.class_id FROM class_enrollments e JOIN trainees mine ON mine.trainee_id = e.trainee_id WHERE mine.user_id = ?)))", [$userId, $userId]);
         }
         if ($section === 'documents' && $role === 'instructor') {
-            return $this->rows($sql . " JOIN training_classes c ON c.class_id = d.class_id WHERE d.access_level = 'class' AND c.instructor_id = ?", [$userId]);
+            return $this->rows($sql . " JOIN training_classes c ON c.class_id = d.class_id WHERE d.trainee_id IS NOT NULL AND d.access_level <> 'staff' AND c.instructor_id = ?", [$userId]);
         }
         if ($section === 'announcements' && $role !== 'administrator' && $role !== 'staff') {
             return $this->rows("SELECT announcement_id, title, content, status, created_at, NULL AS author FROM announcements WHERE status = 'published' ORDER BY created_at DESC");

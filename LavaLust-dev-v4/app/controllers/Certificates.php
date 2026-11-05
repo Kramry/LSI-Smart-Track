@@ -2,6 +2,7 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once APP_DIR . 'controllers/Base.php';
+require_once APP_DIR . 'libraries/SmartTrackPdf.php';
 
 class Certificates extends Base
 {
@@ -866,13 +867,17 @@ class Certificates extends Base
             if ($signature !== '%PDF-') {
                 return ['path' => null, 'error' => 'The uploaded PDF file is invalid.'];
             }
-            require_once ROOT_DIR . 'vendor/autoload.php';
             try {
-                $validator = new \setasign\Fpdi\Tcpdf\Fpdi();
-                if ($validator->setSourceFile($upload['tmp_name']) < 1) {
+                $temporaryDirectory = realpath(dirname($upload['tmp_name']));
+                if ($temporaryDirectory === false) {
+                    return ['path' => null, 'error' => 'The uploaded PDF could not be accessed.'];
+                }
+                $validator = SmartTrackPdf::newDocument([$temporaryDirectory]);
+                $sourceId = $validator->setImportSourceFile($upload['tmp_name']);
+                if ($validator->getSourcePageCount($sourceId) < 1) {
                     return ['path' => null, 'error' => 'The uploaded PDF contains no pages.'];
                 }
-            } catch (\setasign\Fpdi\FpdiException $error) {
+            } catch (\Com\Tecnick\Pdf\Import\ImportException | \Com\Tecnick\Pdf\Encrypt\Exception $error) {
                 return ['path' => null, 'error' => 'The uploaded PDF could not be parsed.'];
             }
         } else {

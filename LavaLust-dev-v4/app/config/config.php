@@ -66,10 +66,6 @@ $config['version']                 = '4.6.0';
 */
 $config['environment'] = getenv('APP_ENV') ?: 'development';
 
-if (!defined('TCPDF_SILENCE_DEPRECATION')) {
-    define('TCPDF_SILENCE_DEPRECATION', true);
-}
-
 /*
 |--------------------------------------------------------------------------
 | Default Timezone

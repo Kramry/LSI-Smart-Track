@@ -44,8 +44,11 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 .muted { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
 .auth-form-wrap > .muted { margin-bottom: 28px; }
 .form-stack { display: grid; gap: 15px; }
+.register-form { gap: 14px; }
+.field-row { display: grid; gap: 14px; }
+.field-row.two-up { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 label { display: grid; gap: 7px; color: #344557; font-size: 12px; font-weight: 600; }
-input, select, textarea { width: 100%; min-width: 0; border: 1px solid #d5deea; border-radius: 4px; padding: 11px 12px; outline: none; color: var(--ink); background: #fff; transition: border-color .16s ease, box-shadow .16s ease; }
+input, select, textarea { width: 100%; min-width: 0; border: 1px solid #d5deea; border-radius: 6px; padding: 11px 12px; outline: none; color: var(--ink); background: rgba(255,255,255,0.72); transition: border-color .16s ease, box-shadow .16s ease; }
 input:focus, select:focus, textarea:focus { border-color: #5285b5; box-shadow: 0 0 0 3px rgba(82, 133, 181, .15); }
 input:disabled { color: #77847e; background: #f0f2ed; }
 textarea { resize: vertical; line-height: 1.5; }

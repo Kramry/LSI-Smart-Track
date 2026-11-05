@@ -583,6 +583,10 @@ class Database {
      */
     public function update($fields = [])
     {
+        if (!is_array($fields)) {
+            throw new InvalidArgumentException('Database::update() expects an associative array of column => value pairs.');
+        }
+
         $set         = '';
         $values      = [];
         $field_array = [];
@@ -610,6 +614,10 @@ class Database {
      */
     public function insert($fields = [])
     {
+        if (!is_array($fields)) {
+            throw new InvalidArgumentException('Database::insert() expects an associative array of column => value pairs.');
+        }
+
         $keys   = implode(', ', array_keys($fields));
         $values = '';
         $x      = 1;

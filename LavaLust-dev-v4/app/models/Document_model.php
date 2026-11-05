@@ -64,7 +64,7 @@ class Document_model extends Base_model
             $values[] = (int) $user['user_id'];
             $values[] = (int) $user['user_id'];
         } elseif ($user['role'] === 'instructor') {
-            $whereClauses[] = 'd.access_level = "class"';
+            $whereClauses[] = "d.trainee_id IS NOT NULL AND d.access_level <> 'staff'";
             $whereClauses[] = 'c.instructor_id = ?';
             $values[] = (int) $user['user_id'];
         }

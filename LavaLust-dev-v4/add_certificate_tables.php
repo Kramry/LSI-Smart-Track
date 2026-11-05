@@ -118,6 +118,7 @@ try {
       `assessed_by` int unsigned NOT NULL,
       `assessment_date` date NOT NULL,
       `notes` text DEFAULT NULL,
+      `time_limit_minutes` int unsigned DEFAULT NULL,
       `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
       `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (`assessment_id`),
@@ -127,6 +128,11 @@ try {
       CONSTRAINT `smarttrack_assessments_class_fk` FOREIGN KEY (`class_id`) REFERENCES `training_classes` (`class_id`) ON DELETE CASCADE ON UPDATE CASCADE,
       CONSTRAINT `smarttrack_assessments_assessor_fk` FOREIGN KEY (`assessed_by`) REFERENCES `users` (`user_id`) ON DELETE RESTRICT ON UPDATE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    if (!columnExists($pdo, 'training_assessments', 'time_limit_minutes')) {
+        $pdo->exec('ALTER TABLE `training_assessments` ADD COLUMN `time_limit_minutes` int unsigned DEFAULT NULL AFTER `notes`');
+        echo "Added time_limit_minutes to training_assessments.\n";
+    }
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS `certificate_document_requirements` (
       `requirement_id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -199,6 +205,34 @@ try {
 
     $statement = $pdo->prepare('INSERT INTO certificate_config (config_key, config_value, description) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE config_key = VALUES(config_key)');
     $statement->execute(['required_assessment_count', '1', 'Number of passed assessments required per class']);
+
+    if (tableExists($pdo, 'certificate_templates')) {
+        $check = $pdo->prepare('SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        $check->execute(['certificate_templates', 'mode']);
+        if ($check->fetchColumn() !== 'varchar') {
+            $pdo->exec('ALTER TABLE `certificate_templates` MODIFY COLUMN `mode` varchar(20) NOT NULL');
+        }
+        $pdo->exec("UPDATE certificate_templates SET mode = 'generated' WHERE mode = 'generate'");
+        echo "Updated certificate template mode compatibility.\n";
+    }
+
+    if (tableExists($pdo, 'certificate_signatures')) {
+        foreach ([
+            'user_id' => 'int unsigned DEFAULT NULL',
+            'position' => 'varchar(150) DEFAULT NULL',
+            'field_x' => 'decimal(5,2) DEFAULT NULL',
+            'field_y' => 'decimal(5,2) DEFAULT NULL',
+            'font_size' => 'smallint unsigned DEFAULT NULL',
+            'alignment' => 'char(1) DEFAULT NULL',
+        ] as $column => $definition) {
+            $check = $pdo->prepare('SELECT IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+            $check->execute(['certificate_signatures', $column]);
+            if ($check->fetchColumn() === 'NO') {
+                $pdo->exec("ALTER TABLE `certificate_signatures` MODIFY COLUMN `$column` $definition");
+            }
+        }
+        echo "Updated legacy certificate signature columns.\n";
+    }
 
     echo "\nCertificate tables created successfully!\n";
 
