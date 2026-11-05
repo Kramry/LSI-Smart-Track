@@ -203,6 +203,7 @@ $router->post('/api/certificates/{id}/sign', 'SmartTrack_api::apiSignCertificate
 $router->post('/api/certificates/{id}/reject-signature', 'SmartTrack_api::apiRejectCertificateSignature');
 $router->post('/api/certificate-config', 'SmartTrack_api::apiSaveCertificateConfig');
 $router->post('/api/certificate-templates/{id}/activate', 'SmartTrack_api::apiActivateCertificateTemplate');
+$router->post('/api/certificate-templates/{id}/delete', 'SmartTrack_api::apiDeleteCertificateTemplate');
 $router->post('/api/certificates/{id}/resubmit', 'SmartTrack_api::apiResubmitCertificateForSigning');
 $router->post('/api/certificate-signatories/save', 'SmartTrack_api::apiSaveCertificateSignatory');
 $router->post('/api/certificate-signatories/{id}/delete', 'SmartTrack_api::apiDeleteCertificateSignatory');

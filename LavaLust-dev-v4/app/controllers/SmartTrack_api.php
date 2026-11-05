@@ -975,6 +975,15 @@ class SmartTrack_api extends Base
         $certificates->activateCertificateTemplate($id);
     }
 
+    public function apiDeleteCertificateTemplate($id)
+    {
+        $this->apiRequest = true;
+        require_once APP_DIR . 'controllers/Certificates.php';
+        $certificates = new Certificates();
+        $certificates->before_action();
+        $certificates->deleteCertificateTemplate($id);
+    }
+
     public function apiCertificatesToSign()
     {
         if (!$this->requireUser() || !in_array($this->user['role'] ?? '', ['administrator', 'staff'], true)) {

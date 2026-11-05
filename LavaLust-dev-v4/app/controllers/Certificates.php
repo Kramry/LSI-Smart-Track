@@ -939,6 +939,13 @@ class Certificates extends Base
         }
 
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Deleted certificate template', 'Template version ' . $result['version']);
+        if ($this->apiRequest) {
+            return $this->jsonResponse([
+                'ok' => true,
+                'data' => ['deleted' => true, 'version' => $result['version']],
+                'message' => 'Certificate template version ' . $result['version'] . ' deleted.',
+            ]);
+        }
         $this->notice('Certificate template version ' . $result['version'] . ' deleted.');
         redirect($this->url('manage/certificate-config'));
     }
