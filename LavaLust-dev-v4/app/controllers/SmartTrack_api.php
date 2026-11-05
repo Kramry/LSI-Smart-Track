@@ -410,7 +410,10 @@ class SmartTrack_api extends Base
             $this->jsonResponse(['message' => 'You do not have access to this section.'], 403);
         }
 
-        $definition = $this->resourceDefinition($section);
+        $definition = $section === 'certificates'
+            && in_array($user['role'], ['administrator', 'staff'], true)
+                ? null
+                : $this->resourceDefinition($section);
         $records = [];
         $fields = [];
         $columns = [];

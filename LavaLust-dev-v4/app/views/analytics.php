@@ -27,7 +27,7 @@ $urls = [
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= $e($title) ?> | LSI SmartTrack</title>
-    <link rel="stylesheet" href="<?= $e($base) ?>assets/css/smarttrack.css">
+    <link rel="stylesheet" href="<?= $e($base) ?>assets/css/smarttrack.css?v=<?= (int) filemtime(dirname(__DIR__, 2) . '/public/assets/css/smarttrack.css') ?>">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
@@ -68,7 +68,7 @@ $urls = [
             <div class="page-heading">
                 <div><p class="eyebrow">SMARTTRACK / REPORTING</p><h1>Analytics</h1><p class="muted">Attendance trends and trainee monitoring by class and date range.</p></div>
                 <div class="button-group no-print">
-                    <button class="button secondary" type="button" onclick="exportToExcel()">Export Excel</button>
+                    <button class="button secondary" type="button" @click="exportToExcel">Export Excel</button>
                     <button class="button secondary" type="button" onclick="window.print()">Print PDF</button>
                 </div>
             </div>
@@ -217,7 +217,7 @@ $urls = [
         </main>
     </div>
 </div>
-<script>
+<script type="text/plain">
 (() => {
     const form = document.getElementById('analytics-filters');
     const status = document.getElementById('analytics-status');
@@ -840,7 +840,7 @@ createApp({
                 csv += `Verified,${data.value.documents.summary.verified}\n`;
                 csv += `Rejected,${data.value.documents.summary.rejected}\n`;
                 csv += `Pending,${data.value.documents.summary.pending}\n`;
-                csv += `Missing,${data.value.documents.summary.missing}\n\n';
+                csv += `Missing,${data.value.documents.summary.missing}\n\n`;
             }
 
             if (data.value.certificates) {
@@ -849,7 +849,7 @@ createApp({
                 csv += `Total Issued,${data.value.certificates.summary.total_issued}\n`;
                 csv += `Issued,${data.value.certificates.summary.issued}\n`;
                 csv += `Pending,${data.value.certificates.summary.pending}\n`;
-                csv += `Revoked,${data.value.certificates.summary.revoked}\n\n';
+                csv += `Revoked,${data.value.certificates.summary.revoked}\n\n`;
             }
 
             if (data.value.announcements) {
@@ -859,7 +859,7 @@ createApp({
                 csv += `Email Notifications,${data.value.announcements.summary.email_notifications}\n`;
                 csv += `SMS Notifications,${data.value.announcements.summary.sms_notifications}\n`;
                 csv += `Read Notifications,${data.value.announcements.summary.read_notifications}\n`;
-                csv += `Failed Notifications,${data.value.announcements.summary.failed_notifications}\n\n';
+                csv += `Failed Notifications,${data.value.announcements.summary.failed_notifications}\n\n`;
             }
 
             if (data.value.payments) {

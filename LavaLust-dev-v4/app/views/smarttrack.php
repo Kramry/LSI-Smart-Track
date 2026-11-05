@@ -36,7 +36,7 @@ $labels = [
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= $e($title ?? "LSI SmartTrack") ?> | LSI SmartTrack</title>
-    <link rel="stylesheet" href="<?= $e($app_url) ?>assets/css/smarttrack.css">
+    <link rel="stylesheet" href="<?= $e($app_url) ?>assets/css/smarttrack.css?v=<?= (int) filemtime(dirname(__DIR__, 2) . '/public/assets/css/smarttrack.css') ?>">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -117,15 +117,30 @@ $labels = [
         <section class="auth-intro">
             <a class="wordmark" href="<?= $e(
                 $app_url,
-            ) ?>">LSI <span>SMARTTRACK</span></a>
-            <div class="intro-copy">
-                <h1><?= $page === "register"
-                    ? "Start your<br><em>training journey.</em>"
-                    : "Every session,<br><em>accounted for.</em>" ?></h1>
-                <p><?= $page === "register"
-                    ? "Create a SmartTrack trainee account to access your training records and attendance."
-                    : "Real-time attendance and LSI trainee monitoring, built around the people and programs that move training forward." ?></p>
-            </div>
+            ) ?>">
+                <span class="wordmark-badge">LSI</span>
+                <span class="wordmark-text">SMARTTRACK</span>
+            </a>
+            <?php if ($page === 'login'): ?>
+                <div class="intro-copy intro-copy--statement">
+                    <div class="intro-stack">
+                        <span>LANGUAGE</span>
+                        <span>SKILLS</span>
+                        <span>INSTITUTE,</span>
+                        <span class="intro-italic">Oriental Mindoro.</span>
+                    </div>
+                    <p class="intro-tagline">Empowering Communication, Building Futures.</p>
+                </div>
+            <?php else: ?>
+                <div class="intro-copy">
+                    <h1><?= $page === "register"
+                        ? "Start your<br><em>training journey.</em>"
+                        : "Every session,<br><em>accounted for.</em>" ?></h1>
+                    <p><?= $page === "register"
+                        ? "Create a SmartTrack trainee account to access your training records and attendance."
+                        : "Real-time attendance and LSI trainee monitoring, built around the people and programs that move training forward." ?></p>
+                </div>
+            <?php endif; ?>
             <p class="intro-foot">Calapan City, Oriental Mindoro / Philippines</p>
         </section>
         <section class="auth-panel">
