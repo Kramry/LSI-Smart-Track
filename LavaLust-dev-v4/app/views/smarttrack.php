@@ -36,6 +36,7 @@ $labels = [
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= $e($title ?? "LSI SmartTrack") ?> | LSI SmartTrack</title>
+
     <link rel="stylesheet" href="<?= $e($app_url) ?>assets/css/smarttrack.css?v=<?= (int) filemtime(dirname(__DIR__, 2) . '/public/assets/css/smarttrack.css') ?>">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>

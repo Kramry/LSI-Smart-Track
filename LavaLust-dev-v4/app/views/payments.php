@@ -26,6 +26,7 @@ $navigationUrls = ['dashboard' => 'dashboard', 'my_payments' => 'my-payments', '
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= $e($title ?? 'Payments') ?> | LSI SmartTrack</title>
+
     <link rel="stylesheet" href="<?= $e($base) ?>assets/css/smarttrack.css?v=<?= (int) filemtime(dirname(__DIR__, 2) . '/public/assets/css/smarttrack.css') ?>">
     <style>
         .payment-nav,.payment-actions,.inline-fields{display:flex;flex-wrap:wrap;gap:.65rem;align-items:center}

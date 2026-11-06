@@ -152,6 +152,7 @@ $router->post('/api/refresh', 'SmartTrack_api::apiRefresh');
 $router->post('/api/logout', 'SmartTrack_api::apiLogout');
 $router->get('/api/dashboard', 'SmartTrack_api::apiDashboard');
 $router->get('/api/analytics', 'Analytics::data');
+$router->get('/api/analytics/posthog', 'Analytics::posthogData');
 $router->get('/api/classes', 'Classes::apiIndex');
 $router->get('/api/classes/{id}', 'Classes::apiDetail');
 $router->post('/api/classes/save', 'Classes::apiSave');

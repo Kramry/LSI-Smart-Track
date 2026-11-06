@@ -64,6 +64,42 @@ class Analytics extends Base
         return $this->jsonResponse($this->analyticsModel->analytics($user, $result['filters']));
     }
 
+    public function posthogData()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
+        $user = $this->user;
+        if (!$user) {
+            $token = $this->apiLibrary()->require_jwt();
+            $user = $token['custom_data'] ?? [];
+        }
+        if (($user['role'] ?? '') !== 'administrator') {
+            return $this->jsonResponse(['message' => 'PostHog reporting is available to administrators only.'], 403);
+        }
+
+        $result = $this->validatedFilters($_GET);
+        if (!$result['success']) {
+            return $this->jsonResponse(['message' => $result['message']], 422);
+        }
+
+        require_once APP_DIR . 'libraries/PosthogAnalytics.php';
+        try {
+            $report = (new PosthogAnalytics())->report(
+                $result['filters']['start_date'],
+                $result['filters']['end_date']
+            );
+            return $this->jsonResponse(['posthog' => $report]);
+        } catch (PosthogAnalyticsConfigurationException $error) {
+            return $this->jsonResponse(['message' => $error->getMessage()], 503);
+        } catch (InvalidArgumentException $error) {
+            return $this->jsonResponse(['message' => $error->getMessage()], 422);
+        } catch (Throwable $error) {
+            error_log('PostHog analytics request failed: ' . $error->getMessage());
+            return $this->jsonResponse(['message' => 'PostHog analytics could not be loaded. Check the server-side project configuration and Query Read permission.'], 502);
+        }
+    }
+
     private function canViewAnalytics(array $user)
     {
         return in_array($user['role'] ?? '', ['administrator', 'staff', 'instructor'], true);
