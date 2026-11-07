@@ -74,8 +74,8 @@ class Analytics extends Base
             $token = $this->apiLibrary()->require_jwt();
             $user = $token['custom_data'] ?? [];
         }
-        if (($user['role'] ?? '') !== 'administrator') {
-            return $this->jsonResponse(['message' => 'PostHog reporting is available to administrators only.'], 403);
+        if (!$this->canViewAnalytics($user)) {
+            return $this->jsonResponse(['message' => 'Analytics is available to administrator, staff, and instructor accounts.'], 403);
         }
 
         $result = $this->validatedFilters($_GET);
@@ -84,19 +84,24 @@ class Analytics extends Base
         }
 
         require_once APP_DIR . 'libraries/PosthogAnalytics.php';
+        require_once APP_DIR . 'libraries/WebsiteAnalyticsService.php';
         try {
-            $report = (new PosthogAnalytics())->report(
+            $report = (new WebsiteAnalyticsService(new PosthogAnalytics()))->report(
                 $result['filters']['start_date'],
                 $result['filters']['end_date']
             );
-            return $this->jsonResponse(['posthog' => $report]);
-        } catch (PosthogAnalyticsConfigurationException $error) {
-            return $this->jsonResponse(['message' => $error->getMessage()], 503);
+            return $this->jsonResponse([
+                'website_analytics' => $report,
+                'visitors' => $report['current']['unique_visitors'],
+                'pageViews' => $report['current']['page_views'],
+                'sessions' => $report['current']['sessions'],
+            ]);
         } catch (InvalidArgumentException $error) {
             return $this->jsonResponse(['message' => $error->getMessage()], 422);
         } catch (Throwable $error) {
             error_log('PostHog analytics request failed: ' . $error->getMessage());
-            return $this->jsonResponse(['message' => 'PostHog analytics could not be loaded. Check the server-side project configuration and Query Read permission.'], 502);
+            $status = $error instanceof PosthogAnalyticsConfigurationException ? 503 : 502;
+            return $this->jsonResponse(['message' => 'Website analytics are temporarily unavailable.'], $status);
         }
     }
 

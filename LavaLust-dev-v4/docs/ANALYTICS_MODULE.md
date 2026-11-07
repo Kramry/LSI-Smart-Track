@@ -11,6 +11,34 @@ The Analytics Module provides administrators, staff, and instructors with real-t
 - Certificate issuance and eligibility
 - Payment collections and revenue
 - Announcement engagement and notifications
+- Website visitor behavior, powered by PostHog and kept separate from SmartTrack records
+
+## Website analytics setup
+
+Website analytics are requested by the backend from PostHog through `/api/analytics/posthog`.
+Set `POSTHOG_API_KEY` to a server-side Personal API Key with Query Read permission,
+`POSTHOG_PROJECT_ID` to the numeric project ID, and `POSTHOG_API_HOST` to the PostHog
+region host (defaults to `https://us.posthog.com`). The key is never sent to the browser.
+Reports are cached on the server for five minutes. If PostHog is unavailable, the rest
+of the SmartTrack dashboard remains available.
+
+For browser event capture, set `POSTHOG_PROJECT_API_KEY` to the public PostHog project
+key and `POSTHOG_INGESTION_HOST` to the project's ingestion host (defaults to
+`https://us.i.posthog.com`). Browser capture loads only after the visitor accepts the
+consent prompt. The project key is safe to expose; never put the Personal API Key in
+browser configuration. For existing configuration, a `phc_` value in `POSTHOG_API_KEY`
+is accepted as a public project key, but should be moved to `POSTHOG_PROJECT_API_KEY`
+and replaced in `POSTHOG_API_KEY` with a Personal API Key for dashboard reports.
+
+The analytics endpoint also returns `visitors`, `pageViews`, and `sessions` convenience
+fields alongside the complete `website_analytics` report. Page-view reports include
+PostHog's standard `$pageview` event and the legacy `page_view` event.
+
+Website analytics include visitors, page views, sessions, average session duration,
+returning visitors, daily trends, top pages, and traffic sources. The comparison period
+is the same length as the selected date range immediately before it.
+
+Training, compliance, and financial metrics continue to come from SmartTrack records.
 
 ## Features
 

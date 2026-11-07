@@ -1,13 +1,20 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
+require_once APP_DIR . 'libraries/AnalyticsProviderInterface.php';
+
 class PosthogAnalyticsConfigurationException extends RuntimeException
 {
 }
 
-class PosthogAnalytics
+class PosthogAnalytics implements AnalyticsProviderInterface
 {
+    private const PAGE_VIEW_EVENT_FILTER = "event IN ('\$pageview', 'page_view')";
+
     private const TRACKED_EVENTS = [
+        '$pageview',
+        '$pageleave',
+        '$session_start',
         'page_view',
         'user_logged_in',
         'user_logged_out',
@@ -39,8 +46,8 @@ class PosthogAnalytics
     public function __construct()
     {
         $this->host = rtrim(trim((string) (getenv('POSTHOG_API_HOST') ?: 'https://us.posthog.com')), '/');
-        $this->projectId = trim((string) (getenv('POSTHOG_PROJECT_ID') ?: ''));
-        $this->apiKey = trim((string) (getenv('POSTHOG_PERSONAL_API_KEY') ?: ''));
+        $this->projectId = trim((string) (getenv('POSTHOG_PROJECT_ID') ?: '714923'));
+        $this->apiKey = trim((string) (getenv('POSTHOG_API_KEY') ?: getenv('POSTHOG_PERSONAL_API_KEY') ?: ''));
 
         $hostParts = parse_url($this->host);
         if (!is_array($hostParts)
@@ -57,7 +64,10 @@ class PosthogAnalytics
             throw new PosthogAnalyticsConfigurationException('Set POSTHOG_PROJECT_ID to the numeric ID of your PostHog project.');
         }
         if ($this->apiKey === '' || preg_match('/[\r\n]/', $this->apiKey)) {
-            throw new PosthogAnalyticsConfigurationException('Set POSTHOG_PERSONAL_API_KEY to a PostHog personal API key with Query Read permission.');
+            throw new PosthogAnalyticsConfigurationException('Set POSTHOG_API_KEY to a PostHog personal API key with Query Read permission.');
+        }
+        if (str_starts_with($this->apiKey, 'phc_')) {
+            throw new PosthogAnalyticsConfigurationException('POSTHOG_API_KEY is a PostHog project/client key. Use a Personal API Key with Query Read permission instead.');
         }
         if (!function_exists('curl_init')) {
             throw new PosthogAnalyticsConfigurationException('Enable the PHP cURL extension to query PostHog analytics.');
@@ -67,6 +77,13 @@ class PosthogAnalytics
     public function report($startDate, $endDate)
     {
         $dateRange = $this->dateRange($startDate, $endDate);
+        $periodDays = (int) (new DateTimeImmutable($dateRange['start']))->diff(
+            new DateTimeImmutable($dateRange['end'])
+        )->format('%a');
+        $previousEnd = (new DateTimeImmutable($dateRange['start']))->modify('-1 day')->format('Y-m-d');
+        $previousStart = (new DateTimeImmutable($previousEnd))->modify('-' . ($periodDays - 1) . ' days')->format('Y-m-d');
+        $current = $this->periodSummary($dateRange['start'], $dateRange['end']);
+        $previous = $this->periodSummary($previousStart, $dateRange['start']);
         $where = "timestamp >= toDateTime('{$dateRange['start']} 00:00:00') AND timestamp < toDateTime('{$dateRange['end']} 00:00:00')";
         $eventList = implode(', ', array_map(
             static function ($event) {
@@ -75,14 +92,14 @@ class PosthogAnalytics
             self::TRACKED_EVENTS
         ));
 
-        $summary = $this->query(
-            "SELECT uniq(distinct_id) AS active_users, uniq(properties.\$session_id) AS sessions, count() AS page_views FROM events WHERE event = 'page_view' AND {$where}"
-        );
         $daily = $this->query(
-            "SELECT toString(toDate(timestamp)) AS date, count() AS page_views, uniq(distinct_id) AS active_users, uniq(properties.\$session_id) AS sessions FROM events WHERE event = 'page_view' AND {$where} GROUP BY date ORDER BY date LIMIT 400"
+            "SELECT toString(toDate(timestamp)) AS date, count() AS page_views, uniq(person_id) AS active_users, uniq(properties.\$session_id) AS sessions FROM events WHERE " . self::PAGE_VIEW_EVENT_FILTER . " AND {$where} GROUP BY date ORDER BY date LIMIT 400"
         );
         $topPages = $this->query(
-            "SELECT properties.page_path AS page_path, count() AS page_views FROM events WHERE event = 'page_view' AND {$where} AND properties.page_path IS NOT NULL GROUP BY page_path ORDER BY page_views DESC LIMIT 10"
+            "SELECT coalesce(nullIf(properties.\$pathname, ''), nullIf(properties.page_path, ''), nullIf(properties.\$current_url, ''), 'Unknown page') AS page_path, count() AS page_views FROM events WHERE " . self::PAGE_VIEW_EVENT_FILTER . " AND {$where} GROUP BY page_path ORDER BY page_views DESC LIMIT 10"
+        );
+        $trafficSources = $this->query(
+            "SELECT coalesce(nullIf(properties.utm_source, ''), nullIf(properties.\$referring_domain, ''), 'Direct / unknown') AS source, count() AS page_views FROM events WHERE " . self::PAGE_VIEW_EVENT_FILTER . " AND {$where} GROUP BY source ORDER BY page_views DESC LIMIT 8"
         );
         $eventTrends = $this->query(
             "SELECT toString(toDate(timestamp)) AS date, event AS event_name, count() AS event_count FROM events WHERE event IN ({$eventList}) AND {$where} GROUP BY date, event_name ORDER BY date, event_name LIMIT 10000"
@@ -102,27 +119,54 @@ class PosthogAnalytics
             return $right['event_count'] <=> $left['event_count'];
         });
 
+        $dailyByDate = [];
+        foreach ($daily as $row) {
+            $dailyByDate[$row['date']] = [
+                'date' => (string) $row['date'],
+                'label' => (string) $row['date'],
+                'active_users' => (int) $row['active_users'],
+                'sessions' => (int) $row['sessions'],
+                'page_views' => (int) $row['page_views'],
+            ];
+        }
+        $dailyRows = [];
+        $dailyPeriod = new DatePeriod(
+            new DateTimeImmutable($dateRange['start']),
+            new DateInterval('P1D'),
+            new DateTimeImmutable($dateRange['end'])
+        );
+        foreach ($dailyPeriod as $date) {
+            $key = $date->format('Y-m-d');
+            $dailyRows[] = $dailyByDate[$key] ?? [
+                'date' => $key,
+                'label' => $key,
+                'active_users' => 0,
+                'sessions' => 0,
+                'page_views' => 0,
+            ];
+        }
+
         return [
             'summary' => [
-                'active_users' => (int) ($summary[0]['active_users'] ?? 0),
-                'sessions' => (int) ($summary[0]['sessions'] ?? 0),
-                'page_views' => (int) ($summary[0]['page_views'] ?? 0),
+                'active_users' => $current['unique_visitors'],
+                'sessions' => $current['sessions'],
+                'page_views' => $current['page_views'],
             ],
-            'daily' => array_map(static function ($row) {
-                return [
-                    'date' => (string) $row['date'],
-                    'label' => (string) $row['date'],
-                    'active_users' => (int) $row['active_users'],
-                    'sessions' => (int) $row['sessions'],
-                    'page_views' => (int) $row['page_views'],
-                ];
-            }, $daily),
+            'current' => $current,
+            'previous' => $previous,
+            'daily' => $dailyRows,
             'top_pages' => array_map(static function ($row) {
                 return [
                     'page_path' => (string) $row['page_path'],
                     'page_views' => (int) $row['page_views'],
                 ];
             }, $topPages),
+            'traffic_sources' => array_map(static function ($row) {
+                return [
+                    'source' => (string) $row['source'],
+                    'page_views' => (int) $row['page_views'],
+                ];
+            }, $trafficSources),
             'feature_usage' => $featureRows,
             'event_trends' => array_map(static function ($row) {
                 return [
@@ -131,6 +175,33 @@ class PosthogAnalytics
                     'event_count' => (int) $row['event_count'],
                 ];
             }, $eventTrends),
+        ];
+    }
+
+    public function cacheNamespace()
+    {
+        return $this->host . '|' . $this->projectId;
+    }
+
+    private function periodSummary($startDate, $endExclusive)
+    {
+        $where = "timestamp >= toDateTime('{$startDate} 00:00:00') AND timestamp < toDateTime('{$endExclusive} 00:00:00')";
+        $summary = $this->query(
+            "SELECT uniq(person_id) AS unique_visitors, count() AS page_views, uniq(properties.\$session_id) AS sessions FROM events WHERE " . self::PAGE_VIEW_EVENT_FILTER . " AND {$where}"
+        );
+        $duration = $this->query(
+            "SELECT avg(session_duration) AS average_session_duration FROM (SELECT properties.\$session_id AS session_id, dateDiff('second', min(timestamp), max(timestamp)) AS session_duration FROM events WHERE " . self::PAGE_VIEW_EVENT_FILTER . " AND {$where} AND properties.\$session_id IS NOT NULL GROUP BY session_id)"
+        );
+        $returning = $this->query(
+            "SELECT count() AS returning_visitors FROM (SELECT person_id FROM events WHERE " . self::PAGE_VIEW_EVENT_FILTER . " AND timestamp < toDateTime('{$endExclusive} 00:00:00') GROUP BY person_id HAVING min(timestamp) < toDateTime('{$startDate} 00:00:00') AND max(timestamp) >= toDateTime('{$startDate} 00:00:00'))"
+        );
+
+        return [
+            'unique_visitors' => (int) ($summary[0]['unique_visitors'] ?? 0),
+            'page_views' => (int) ($summary[0]['page_views'] ?? 0),
+            'sessions' => (int) ($summary[0]['sessions'] ?? 0),
+            'average_session_duration' => (float) ($duration[0]['average_session_duration'] ?? 0),
+            'returning_visitors' => (int) ($returning[0]['returning_visitors'] ?? 0),
         ];
     }
 
@@ -189,7 +260,11 @@ class PosthogAnalytics
             throw new RuntimeException('PostHog analytics request failed: ' . $requestError);
         }
         if ($status < 200 || $status >= 300) {
-            throw new RuntimeException('PostHog analytics returned HTTP ' . $status . '.');
+            $apiMessage = $this->apiErrorMessage($responseBody);
+            throw new RuntimeException(
+                'PostHog analytics returned HTTP ' . $status
+                . ($apiMessage !== '' ? ': ' . $apiMessage : '.')
+            );
         }
 
         $response = json_decode($responseBody, true);
@@ -208,5 +283,25 @@ class PosthogAnalytics
             $rows[] = array_combine($response['columns'], $values);
         }
         return $rows;
+    }
+
+    private function apiErrorMessage($responseBody)
+    {
+        $response = json_decode($responseBody, true);
+        if (!is_array($response)) {
+            return '';
+        }
+        foreach (['detail', 'error', 'message'] as $field) {
+            if (!isset($response[$field]) || !is_scalar($response[$field])) {
+                continue;
+            }
+            $message = (string) $response[$field];
+            if ($this->apiKey !== '') {
+                $message = str_replace($this->apiKey, '[redacted]', $message);
+            }
+            $message = preg_replace('/[\x00-\x1F\x7F]+/', ' ', $message);
+            return trim(substr($message, 0, 500));
+        }
+        return '';
     }
 }

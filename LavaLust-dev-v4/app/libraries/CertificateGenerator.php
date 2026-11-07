@@ -282,7 +282,8 @@ class CertificateGenerator
             (float) $width,
             (float) $height,
             valign: $verticalAlignment,
-            halign: $alignment
+            halign: $alignment,
+            drawcell: false
         );
     }
 
