@@ -47,7 +47,7 @@ class PosthogAnalytics implements AnalyticsProviderInterface
     {
         $this->host = rtrim(trim((string) (getenv('POSTHOG_API_HOST') ?: 'https://us.posthog.com')), '/');
         $this->projectId = trim((string) (getenv('POSTHOG_PROJECT_ID') ?: '714923'));
-        $this->apiKey = trim((string) (getenv('POSTHOG_API_KEY') ?: getenv('POSTHOG_PERSONAL_API_KEY') ?: ''));
+        $this->apiKey = trim((string) (getenv('POSTHOG_API_KEY') ?: ''));
 
         $hostParts = parse_url($this->host);
         if (!is_array($hostParts)
