@@ -42,7 +42,7 @@ class Analytics extends Base
     public function data()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         $user = $this->user;
         if (!$user) {
@@ -66,7 +66,7 @@ class Analytics extends Base
     public function aiInsights()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         $user = $this->user;
         if (!$user) {

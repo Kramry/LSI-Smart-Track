@@ -147,7 +147,7 @@ class SmartTrack_api extends Base
     public function apiLogin()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         if (!$this->validCsrf()) {
             $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
@@ -211,7 +211,7 @@ class SmartTrack_api extends Base
     public function apiRegister()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         if (!$this->validCsrf()) {
             $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
@@ -318,7 +318,7 @@ class SmartTrack_api extends Base
     public function apiLogout()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         if (!$this->requireUser()) {
             return;
@@ -362,7 +362,7 @@ class SmartTrack_api extends Base
     public function apiDashboard()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         $user = $this->authenticatedApiUser();
         if (!$user) {
@@ -397,7 +397,7 @@ class SmartTrack_api extends Base
     public function apiModule($section)
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         $user = $this->authenticatedApiUser();
         if (!$user) {
@@ -702,7 +702,7 @@ class SmartTrack_api extends Base
     public function apiAttendanceClasses()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         if (!$this->requireAttendanceStaff()) {
             return;
@@ -716,7 +716,7 @@ class SmartTrack_api extends Base
     public function apiAttendanceSchedules($classId)
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         if (!$this->requireAttendanceStaff()) {
             return;
@@ -740,7 +740,7 @@ class SmartTrack_api extends Base
     public function apiTodayAttendance()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         if (!$this->requireAttendanceStaff()) {
             return;
@@ -774,7 +774,7 @@ class SmartTrack_api extends Base
     public function apiReports()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         $user = $this->authenticatedApiUser();
         if (!$user) {
@@ -795,7 +795,7 @@ class SmartTrack_api extends Base
     public function apiGenerateReport()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         $user = $this->authenticatedApiUser();
         if (!$user) {
