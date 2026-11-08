@@ -53,7 +53,12 @@ class Base extends Controller
                 header('Content-Type: application/json; charset=UTF-8');
                 echo json_encode([
                     'ok' => false,
-                    'message' => 'The server encountered an internal error.',
+                    'message' => sprintf(
+                        'The server encountered an internal PHP error: %s (%s:%d).',
+                        $message,
+                        basename(str_replace('\\', '/', $file)),
+                        $line
+                    ),
                 ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                 exit;
             });
