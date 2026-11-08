@@ -17,6 +17,32 @@ class Base extends Controller
         $this->apiRequest = is_string($requestPath)
             && preg_match('#(?:^|/)api(?:/|$)#', $requestPath) === 1;
 
+        if ($this->apiRequest) {
+            ini_set('display_errors', '0');
+            set_error_handler(function ($severity, $message, $file, $line) {
+                if (!(error_reporting() & $severity)) {
+                    return true;
+                }
+                error_log(sprintf(
+                    'API PHP error (%s) at %s:%d: %s',
+                    $severity,
+                    $file,
+                    $line,
+                    $message
+                ));
+                while (ob_get_level() > 0) {
+                    ob_end_clean();
+                }
+                http_response_code(500);
+                header('Content-Type: application/json; charset=UTF-8');
+                echo json_encode([
+                    'ok' => false,
+                    'message' => 'The server encountered an internal error.',
+                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                exit;
+            });
+        }
+
         require_once APP_DIR . 'models/Base_model.php';
         require_once APP_DIR . 'models/User_model.php';
         require_once APP_DIR . 'models/Record_model.php';

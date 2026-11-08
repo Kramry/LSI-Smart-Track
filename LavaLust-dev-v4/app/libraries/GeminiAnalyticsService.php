@@ -130,12 +130,17 @@ class GeminiAnalyticsService
     private function privacySafeAnalytics(array $analytics)
     {
         unset($analytics['class_options']);
-        foreach ($analytics['trainees'] ?? [] as &$trainee) {
+        $trainees = is_array($analytics['trainees'] ?? null) ? $analytics['trainees'] : [];
+        foreach ($trainees as &$trainee) {
+            if (!is_array($trainee)) {
+                continue;
+            }
             unset($trainee['trainee_id'], $trainee['trainee_name']);
             $trainee['trainee_label'] = 'Trainee-' . str_pad((string) (((int) ($trainee['ordinal'] ?? 0)) + 1), 3, '0', STR_PAD_LEFT);
             unset($trainee['ordinal']);
         }
         unset($trainee);
+        $analytics['trainees'] = $trainees;
 
         if (!empty($analytics['trainees']) && is_array($analytics['trainees'])) {
             foreach (array_keys($analytics['trainees']) as $index) {

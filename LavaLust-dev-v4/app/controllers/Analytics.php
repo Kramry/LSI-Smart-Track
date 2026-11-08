@@ -46,8 +46,7 @@ class Analytics extends Base
         }
         $user = $this->user;
         if (!$user) {
-            $token = $this->apiLibrary()->require_jwt();
-            $user = $token['custom_data'] ?? [];
+            $user = $this->authenticatedApiUser();
         }
         if (!$this->canViewAnalytics($user)) {
             return $this->jsonResponse(['message' => 'Analytics is available to administrator, staff, and instructor accounts.'], 403);
@@ -71,8 +70,7 @@ class Analytics extends Base
         }
         $user = $this->user;
         if (!$user) {
-            $token = $this->apiLibrary()->require_jwt();
-            $user = $token['custom_data'] ?? [];
+            $user = $this->authenticatedApiUser();
         }
         if (!$this->canViewAnalytics($user)) {
             return $this->jsonResponse(['message' => 'Analytics is available to administrator, staff, and instructor accounts.'], 403);
@@ -106,8 +104,7 @@ class Analytics extends Base
         }
         $user = $this->user;
         if (!$user) {
-            $token = $this->apiLibrary()->require_jwt();
-            $user = $token['custom_data'] ?? [];
+            $user = $this->authenticatedApiUser();
         }
         if (!$this->canViewAnalytics($user)) {
             return $this->jsonResponse(['message' => 'Analytics is available to administrator, staff, and instructor accounts.'], 403);
@@ -121,11 +118,17 @@ class Analytics extends Base
         require_once APP_DIR . 'libraries/GeminiAnalyticsService.php';
         try {
             $key = 'gemini-generation:' . (int) $user['user_id'] . ':' . date('YmdHi');
-            $count = (int) (@file_get_contents($this->geminiRateLimitFile($key)) ?: 0);
+            $rateLimitFile = $this->geminiRateLimitFile($key);
+            $count = is_file($rateLimitFile) && is_readable($rateLimitFile)
+                ? (int) file_get_contents($rateLimitFile)
+                : 0;
             if ($count >= 5) {
                 return $this->jsonResponse(['message' => 'Gemini insight generation limit reached. Try again in a minute.'], 429);
             }
-            @file_put_contents($this->geminiRateLimitFile($key), (string) ($count + 1));
+            if (file_put_contents($rateLimitFile, (string) ($count + 1), LOCK_EX) === false) {
+                error_log('Gemini analytics rate limit could not be written.');
+                return $this->jsonResponse(['message' => 'Unable to start Gemini insight generation. Please try again.'], 503);
+            }
 
             $analytics = $this->analyticsModel->analytics($user, $result['filters']);
             $insights = (new GeminiAnalyticsService())->generate($analytics);
@@ -151,9 +154,24 @@ class Analytics extends Base
     {
         $directory = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'cache' . DIRECTORY_SEPARATOR . 'gemini-rate-limit';
         if (!is_dir($directory)) {
-            @mkdir($directory, 0775, true);
+            if (!mkdir($directory, 0775, true) && !is_dir($directory)) {
+                throw new RuntimeException('Gemini analytics rate limit directory could not be created.');
+            }
         }
         return $directory . DIRECTORY_SEPARATOR . hash('sha256', $key) . '.txt';
+    }
+
+    private function authenticatedApiUser()
+    {
+        $token = $this->apiLibrary()->require_jwt();
+        $customData = is_array($token['custom_data'] ?? null) ? $token['custom_data'] : [];
+
+        return [
+            'user_id' => isset($customData['user_id']) ? (int) $customData['user_id'] : (int) ($token['sub'] ?? 0),
+            'role' => isset($customData['role']) && is_string($customData['role'])
+                ? $customData['role']
+                : (string) ($token['role'] ?? ''),
+        ];
     }
 
     private function canViewAnalytics(array $user)
