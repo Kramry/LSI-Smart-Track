@@ -904,13 +904,9 @@ createApp({
                     headers: { Accept: 'application/json' },
                     credentials: 'same-origin',
                 });
-                const contentType = response.headers.get('content-type') || '';
-                if (!contentType.toLowerCase().includes('application/json')) {
-                    throw new Error(`The website analytics server returned HTTP ${response.status} in an unsupported response format.`);
-                }
                 let payload;
                 try {
-                    payload = await response.json();
+                    payload = JSON.parse(await response.text());
                 } catch (jsonError) {
                     throw new Error(`The website analytics server returned invalid JSON for HTTP ${response.status}.`);
                 }
