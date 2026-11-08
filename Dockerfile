@@ -1,5 +1,10 @@
 ARG PHP_VERSION=8.5
 
+FROM composer:2 AS vendor
+WORKDIR /app
+COPY LavaLust-dev-v4/ /app/
+RUN composer install --no-dev --optimize-autoloader --no-interaction
+
 FROM php:${PHP_VERSION}-apache
 
 RUN docker-php-ext-install pdo pdo_mysql
@@ -13,6 +18,7 @@ RUN a2enmod rewrite headers
 RUN sed -ri 's!^(\s*AllowOverride)\s+None!\1 All!g' /etc/apache2/apache2.conf
 
 COPY LavaLust-dev-v4/ /var/www/html/
+COPY --from=vendor /app/vendor/ /var/www/html/vendor/
 
 COPY LavaLust-dev-v4/docker/apache-smarttrack.conf /etc/apache2/sites-available/000-default.conf
 COPY LavaLust-dev-v4/docker/php-smarttrack.ini /usr/local/etc/php/conf.d/zz-smarttrack.ini
