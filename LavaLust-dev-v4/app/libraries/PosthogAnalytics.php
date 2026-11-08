@@ -267,7 +267,16 @@ class PosthogAnalytics implements AnalyticsProviderInterface
             );
         }
 
-        $response = json_decode($responseBody, true);
+        try {
+            $response = json_decode($responseBody, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $error) {
+            throw new RuntimeException(
+                'PostHog returned non-JSON analytics data: '
+                . $this->responseDescription($responseBody),
+                0,
+                $error
+            );
+        }
         if (!is_array($response)
             || !isset($response['columns'], $response['results'])
             || !is_array($response['columns'])
@@ -303,5 +312,14 @@ class PosthogAnalytics implements AnalyticsProviderInterface
             return trim(substr($message, 0, 500));
         }
         return '';
+    }
+
+    private function responseDescription($responseBody)
+    {
+        $preview = preg_replace('/[\x00-\x1F\x7F]+/', ' ', trim((string) $responseBody));
+        if ($preview === '') {
+            return 'empty body';
+        }
+        return 'body starts with "' . substr($preview, 0, 80) . '"';
     }
 }

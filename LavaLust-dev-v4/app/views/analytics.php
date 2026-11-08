@@ -904,7 +904,16 @@ createApp({
                     headers: { Accept: 'application/json' },
                     credentials: 'same-origin',
                 });
-                const payload = await response.json();
+                const contentType = response.headers.get('content-type') || '';
+                if (!contentType.toLowerCase().includes('application/json')) {
+                    throw new Error(`The website analytics server returned HTTP ${response.status} in an unsupported response format.`);
+                }
+                let payload;
+                try {
+                    payload = await response.json();
+                } catch (jsonError) {
+                    throw new Error(`The website analytics server returned invalid JSON for HTTP ${response.status}.`);
+                }
                 if (!response.ok) throw new Error(payload.message || `Request failed (${response.status}).`);
                 const report = payload.data?.website_analytics;
                 if (!report || typeof report !== 'object') throw new Error('The website analytics response was incomplete.');
@@ -915,7 +924,9 @@ createApp({
             } catch (requestError) {
                 ['websiteVisitors', 'websitePageViews', 'websiteTopPages', 'websiteTrafficSources'].forEach(destroyChart);
                 websiteData.value = null;
-                websiteError.value = 'Website analytics are temporarily unavailable.';
+                websiteError.value = requestError instanceof Error
+                    ? requestError.message
+                    : 'Website analytics are temporarily unavailable.';
                 console.error('Website analytics request failed.', requestError);
             } finally {
                 websiteLoading.value = false;
