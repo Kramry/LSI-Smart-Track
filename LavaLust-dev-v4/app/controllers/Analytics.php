@@ -64,7 +64,7 @@ class Analytics extends Base
         return $this->jsonResponse($this->analyticsModel->analytics($user, $result['filters']));
     }
 
-    public function posthogData()
+    public function aiInsights()
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
             $this->jsonResponse(['message' => 'Method not allowed.'], 405);
@@ -82,27 +82,78 @@ class Analytics extends Base
         if (!$result['success']) {
             return $this->jsonResponse(['message' => $result['message']], 422);
         }
-
-        require_once APP_DIR . 'libraries/PosthogAnalytics.php';
-        require_once APP_DIR . 'libraries/WebsiteAnalyticsService.php';
         try {
-            $report = (new WebsiteAnalyticsService(new PosthogAnalytics()))->report(
-                $result['filters']['start_date'],
-                $result['filters']['end_date']
-            );
-            return $this->jsonResponse([
-                'website_analytics' => $report,
-                'visitors' => $report['current']['unique_visitors'],
-                'pageViews' => $report['current']['page_views'],
-                'sessions' => $report['current']['sessions'],
-            ]);
+            require_once APP_DIR . 'libraries/GeminiAnalyticsService.php';
+            $analytics = $this->analyticsModel->analytics($user, $result['filters']);
+            $service = new GeminiAnalyticsService();
+            $insights = $service->cachedInsight($analytics);
+            return $this->jsonResponse(['insights' => $insights]);
         } catch (InvalidArgumentException $error) {
             return $this->jsonResponse(['message' => $error->getMessage()], 422);
         } catch (Throwable $error) {
-            error_log('PostHog analytics request failed: ' . $error->getMessage());
-            $status = $error instanceof PosthogAnalyticsConfigurationException ? 503 : 502;
-            return $this->jsonResponse(['message' => 'Website analytics are temporarily unavailable.'], $status);
+            error_log('Gemini analytics cache read failed: ' . $error->getMessage());
+            if ($error instanceof GeminiAnalyticsConfigurationException && trim((string) getenv('GEMINI_API_KEY')) === '') {
+                return $this->jsonResponse(['insights' => null]);
+            }
+            return $this->geminiErrorResponse($error);
         }
+    }
+
+    public function generateAiInsights()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
+        $user = $this->user;
+        if (!$user) {
+            $token = $this->apiLibrary()->require_jwt();
+            $user = $token['custom_data'] ?? [];
+        }
+        if (!$this->canViewAnalytics($user)) {
+            return $this->jsonResponse(['message' => 'Analytics is available to administrator, staff, and instructor accounts.'], 403);
+        }
+
+        $result = $this->validatedFilters($_GET);
+        if (!$result['success']) {
+            return $this->jsonResponse(['message' => $result['message']], 422);
+        }
+
+        require_once APP_DIR . 'libraries/GeminiAnalyticsService.php';
+        try {
+            $key = 'gemini-generation:' . (int) $user['user_id'] . ':' . date('YmdHi');
+            $count = (int) (@file_get_contents($this->geminiRateLimitFile($key)) ?: 0);
+            if ($count >= 5) {
+                return $this->jsonResponse(['message' => 'Gemini insight generation limit reached. Try again in a minute.'], 429);
+            }
+            @file_put_contents($this->geminiRateLimitFile($key), (string) ($count + 1));
+
+            $analytics = $this->analyticsModel->analytics($user, $result['filters']);
+            $insights = (new GeminiAnalyticsService())->generate($analytics);
+            return $this->jsonResponse(['insights' => $insights]);
+        } catch (InvalidArgumentException $error) {
+            return $this->jsonResponse(['message' => $error->getMessage()], 422);
+        } catch (Throwable $error) {
+            error_log('Gemini analytics request failed: ' . $error->getMessage());
+            return $this->geminiErrorResponse($error);
+        }
+    }
+
+    private function geminiErrorResponse(Throwable $error)
+    {
+        $status = $error instanceof GeminiAnalyticsConfigurationException ? 503 : 502;
+        if ($error instanceof GeminiAnalyticsConfigurationException && getenv('GEMINI_API_KEY') === false) {
+            return $this->jsonResponse(['message' => 'AI insights are not configured on this server.'], $status);
+        }
+        return $this->jsonResponse(['message' => 'Gemini insights could not be generated. Please try again.'], $status);
+    }
+
+    private function geminiRateLimitFile($key)
+    {
+        $directory = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'cache' . DIRECTORY_SEPARATOR . 'gemini-rate-limit';
+        if (!is_dir($directory)) {
+            @mkdir($directory, 0775, true);
+        }
+        return $directory . DIRECTORY_SEPARATOR . hash('sha256', $key) . '.txt';
     }
 
     private function canViewAnalytics(array $user)

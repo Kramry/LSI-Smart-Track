@@ -72,13 +72,12 @@ textarea { resize: vertical; line-height: 1.5; }
 .notice.error { border: 1px solid #efc5b6; color: #8b3826; background: var(--rust-pale); }
 .notice.success { border: 1px solid #c9df9b; color: #355522; background: #f2f8df; }
 
-.posthog-consent[hidden] { display: none; }
-.posthog-consent { position: fixed; z-index: 1000; right: 20px; bottom: 20px; left: 20px; display: flex; align-items: center; justify-content: space-between; gap: 20px; max-width: 980px; margin: 0 auto; border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; background: #fff; box-shadow: 0 12px 40px rgba(29,43,56,.2); }
-.posthog-consent-copy { max-width: 620px; }
-.posthog-consent-copy strong { display: block; margin-bottom: 4px; font-size: 14px; }
-.posthog-consent-copy p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
-.posthog-consent-actions { display: flex; flex: 0 0 auto; gap: 8px; }
-.posthog-privacy-settings { position: fixed; z-index: 999; right: 12px; bottom: 12px; border: 1px solid var(--line); border-radius: 4px; padding: 7px 10px; color: var(--green-deep); background: #fff; box-shadow: 0 3px 12px rgba(29,43,56,.12); cursor: pointer; font-size: 10px; font-weight: 700; }
+.ai-insight-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.ai-insight-grid article { border: 1px solid var(--line); border-radius: 8px; padding: 16px; background: #fff; }
+.ai-insight-grid h3 { margin-top: 0; }
+.ai-insight-grid ul, .ai-insight-grid ol { margin-bottom: 0; padding-left: 20px; }
+.ai-recommendations { grid-column: 1 / -1; }
+.ai-recommendations li span { display: block; color: var(--muted); margin-top: 2px; }
 
 .portal-shell { min-height: 100vh; }
 .topbar { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); padding: 0 clamp(20px, 4vw, 54px); background: #fbfcfe; }
@@ -458,6 +457,5 @@ tbody tr:hover { background: #fbfcf8; }
     .certificate-template-preview-panel { position: static; }
 }
 @media (max-width: 600px) {
-    .posthog-consent { right: 10px; bottom: 58px; left: 10px; align-items: stretch; flex-direction: column; gap: 12px; padding: 15px; }
-    .posthog-consent-actions { justify-content: flex-end; }
+    .ai-insight-grid { grid-template-columns: 1fr; }
 }

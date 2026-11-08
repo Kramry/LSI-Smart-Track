@@ -1859,6 +1859,5 @@ $labels = [
     </script>
     <?php endif; ?>
 <?php endif; ?>
-<?php require APP_DIR . 'views/partials/posthog_consent.php'; ?>
 </body>
 </html>

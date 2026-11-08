@@ -70,7 +70,7 @@ $urls = [
         </nav>
         <main class="workspace">
             <div class="page-heading">
-                <div><p class="eyebrow">SMARTTRACK / REPORTING</p><h1>Analytics</h1><p class="muted">SmartTrack training and finance metrics with separate PostHog website analytics.</p></div>
+                <div><p class="eyebrow">SMARTTRACK / REPORTING</p><h1>Analytics</h1><p class="muted">SmartTrack training, finance, trainee, and assessment metrics with Gemini-powered interpretation.</p></div>
                 <div class="button-group no-print">
                     <button class="button secondary" type="button" @click="exportToExcel">Export Excel</button>
                     <button class="button secondary" type="button" onclick="window.print()">Print PDF</button>
@@ -86,7 +86,7 @@ $urls = [
                             <option v-for="cls in classOptions" :key="cls.class_id" :value="cls.class_id">{{ cls.class_name }}</option>
                         </select>
                     </label>
-                    <button class="button primary" type="submit" :disabled="loading || websiteLoading">Apply filters</button>
+                    <button class="button primary" type="submit" :disabled="loading">Apply filters</button>
                 </form>
                 <p class="analytics-status" :class="{ error: !!error }" role="status" aria-live="polite">{{ loading ? 'Loading analytics…' : (error || `Showing results from ${filters.start_date} through ${filters.end_date}.`) }}</p>
             </section>
@@ -148,44 +148,24 @@ $urls = [
                 <div class="analytics-table-wrap"><table class="analytics-table"><thead><tr><th>Trainee</th><th>Class(es)</th><th>Present</th><th>Late</th><th>Absent</th><th>Rate</th><th>Last attendance</th></tr></thead><tbody><tr v-if="!data.trainees?.length"><td colspan="7">No attendance records for these filters.</td></tr><tr v-for="trainee in data.trainees" :key="trainee.trainee_id"><td>{{ trainee.trainee_name }}</td><td>{{ trainee.classes }}</td><td>{{ formatNumber(trainee.present_records) }}</td><td>{{ formatNumber(trainee.late_records) }}</td><td>{{ formatNumber(trainee.absent_records) }}</td><td>{{ formatNumber(trainee.attendance_rate) }}%</td><td>{{ trainee.last_attendance }}</td></tr></tbody></table></div>
             </section>
 
-            <section class="analytics-section" aria-label="Website analytics">
+            <section class="panel analytics-section ai-insights" aria-label="AI-generated analytics insights">
                 <div class="page-heading">
-                    <div><p class="eyebrow">WEBSITE / POSTHOG</p><h2>Website analytics</h2><p class="muted">Website behavior is provided by PostHog and is separate from SmartTrack records.</p></div>
-                    <a class="button secondary no-print" href="https://us.posthog.com/" target="_blank" rel="noopener noreferrer">Open PostHog</a>
+                    <div><p class="eyebrow">AI / GEMINI</p><h2>Smart analytics insights</h2><p class="muted">Gemini interprets MySQL-calculated statistics. No trainee names or payment references are sent.</p></div>
+                    <button type="button" class="button primary no-print" :disabled="aiLoading" @click="generateAiInsights">
+                        {{ aiLoading ? 'Generating…' : 'Generate insights' }}
+                    </button>
                 </div>
-                <p v-if="websiteLoading" class="analytics-status" role="status" aria-live="polite">Loading website analytics…</p>
-                <p v-else-if="websiteError" class="website-unavailable" role="status" aria-live="polite">{{ websiteError }}</p>
-                <div v-else-if="websiteData">
-                    <p class="muted">Website metrics from {{ filters.start_date }} through {{ filters.end_date }}. Changes compare with the immediately preceding period of equal length.</p>
-                    <section class="analytics-kpis" aria-label="Website analytics summary">
-                        <article class="analytics-kpi">
-                            <span>Unique Visitors</span><strong>{{ formatNumber(websiteData.current?.unique_visitors) }}</strong>
-                            <div class="trend" :class="websiteTrendClass('unique_visitors')">{{ websiteChangeLabel('unique_visitors') }}<small>Previous: {{ formatNumber(websiteData.previous?.unique_visitors) }}</small></div>
-                        </article>
-                        <article class="analytics-kpi">
-                            <span>Page Views</span><strong>{{ formatNumber(websiteData.current?.page_views) }}</strong>
-                            <div class="trend" :class="websiteTrendClass('page_views')">{{ websiteChangeLabel('page_views') }}<small>Previous: {{ formatNumber(websiteData.previous?.page_views) }}</small></div>
-                        </article>
-                        <article class="analytics-kpi">
-                            <span>Sessions</span><strong>{{ formatNumber(websiteData.current?.sessions) }}</strong>
-                            <div class="trend" :class="websiteTrendClass('sessions')">{{ websiteChangeLabel('sessions') }}<small>Previous: {{ formatNumber(websiteData.previous?.sessions) }}</small></div>
-                        </article>
-                        <article class="analytics-kpi">
-                            <span>Average Session Duration</span><strong>{{ formatDuration(websiteData.current?.average_session_duration) }}</strong>
-                            <div class="trend" :class="websiteTrendClass('average_session_duration')">{{ websiteChangeLabel('average_session_duration') }}<small>Previous: {{ formatDuration(websiteData.previous?.average_session_duration) }}</small></div>
-                        </article>
-                        <article class="analytics-kpi">
-                            <span>Returning Visitors</span><strong>{{ formatNumber(websiteData.current?.returning_visitors) }}</strong>
-                            <div class="trend" :class="websiteTrendClass('returning_visitors')">{{ websiteChangeLabel('returning_visitors') }}<small>Previous: {{ formatNumber(websiteData.previous?.returning_visitors) }}</small></div>
-                        </article>
-                    </section>
-                    <section class="analytics-charts">
-                        <article class="panel analytics-chart"><h3>Visitors Over Time · Daily Visitor Counts</h3><canvas id="website-visitors" aria-label="Daily unique visitors"></canvas></article>
-                        <article class="panel analytics-chart"><h3>Page Views Over Time</h3><canvas id="website-page-views" aria-label="Daily page views"></canvas></article>
-                        <article class="panel analytics-chart"><h3>Top Pages</h3><canvas id="website-top-pages" aria-label="Most viewed website pages"></canvas></article>
-                        <article class="panel analytics-chart"><h3>Traffic Sources</h3><canvas id="website-traffic-sources" aria-label="Website traffic sources"></canvas></article>
-                    </section>
+                <p v-if="aiLoading" class="analytics-status" role="status">Gemini is analyzing the current analytics summary…</p>
+                <p v-else-if="aiError" class="website-unavailable" role="alert">{{ aiError }}</p>
+                <div v-else-if="aiInsights" class="ai-insight-grid">
+                    <article><h3>Overview</h3><p>{{ aiInsights.overview }}</p><small v-if="aiInsights.generated_at">Generated {{ aiInsights.generated_at }}</small></article>
+                    <article><h3>Key observations</h3><ul><li v-for="item in aiInsights.key_observations" :key="item">{{ item }}</li></ul></article>
+                    <article><h3>Positive trends</h3><ul><li v-for="item in aiInsights.positive_trends" :key="item">{{ item }}</li></ul></article>
+                    <article><h3>Concerns</h3><ul><li v-for="item in aiInsights.concerns" :key="item">{{ item }}</li></ul></article>
+                    <article class="ai-recommendations"><h3>Recommendations</h3><ol><li v-for="(item, index) in aiInsights.recommendations" :key="index"><strong>{{ item.priority }} priority:</strong> {{ item.action }} <span>{{ item.reason }}</span></li></ol></article>
+                    <article><h3>Data limitations</h3><ul><li v-for="item in aiInsights.data_limitations" :key="item">{{ item }}</li></ul></article>
                 </div>
+                <p v-else class="analytics-status">Generate insights to identify trends and recommendations from this report.</p>
             </section>
 
             <?php if ($canViewPayments): ?>
@@ -215,6 +195,20 @@ $urls = [
                     <section class="analytics-charts">
                         <article class="panel analytics-chart"><h3>Monthly enrollment trends</h3><canvas id="training-trend" aria-label="Monthly enrollment trends"></canvas></article>
                         <article class="panel analytics-chart"><h3>Program popularity</h3><canvas id="training-programs" aria-label="Program popularity"></canvas></article>
+                    </section>
+
+                    <section class="analytics-section" aria-label="Assessment analytics">
+                        <div class="page-heading"><div><p class="eyebrow">ASSESSMENTS / PERFORMANCE</p><h2>Assessment analytics</h2><p class="muted">Pass and fail outcomes recorded in training assessments.</p></div></div>
+                        <section class="analytics-kpis">
+                            <article class="analytics-kpi"><span>Total assessments</span><strong>{{ formatNumber(data.assessments?.summary?.total_assessments) }}</strong></article>
+                            <article class="analytics-kpi"><span>Passed</span><strong>{{ formatNumber(data.assessments?.summary?.passed) }}</strong></article>
+                            <article class="analytics-kpi"><span>Failed</span><strong>{{ formatNumber(data.assessments?.summary?.failed) }}</strong></article>
+                            <article class="analytics-kpi"><span>Pass rate</span><strong>{{ formatNumber(data.assessments?.summary?.pass_rate) }}%</strong></article>
+                        </section>
+                        <section class="panel analytics-section">
+                            <div class="panel-heading"><div><p class="eyebrow">PROGRAM PERFORMANCE</p><h3>Assessment outcomes by program</h3></div></div>
+                            <div class="analytics-table-wrap"><table class="analytics-table"><thead><tr><th>Program</th><th>Total</th><th>Passed</th><th>Failed</th><th>Pass rate</th></tr></thead><tbody><tr v-if="!data.assessments?.by_program?.length"><td colspan="5">No assessment data for these filters.</td></tr><tr v-for="program in data.assessments?.by_program" :key="program.program_id"><td>{{ program.program_name }}</td><td>{{ formatNumber(program.total) }}</td><td>{{ formatNumber(program.passed) }}</td><td>{{ formatNumber(program.failed) }}</td><td>{{ formatNumber(program.pass_rate) }}%</td></tr></tbody></table></div>
+                        </section>
                     </section>
                     <section class="panel analytics-section">
                         <div class="panel-heading"><div><p class="eyebrow">CLASS ENROLLMENT</p><h3>Trainees per training batch</h3></div></div>
@@ -258,7 +252,7 @@ $urls = [
                     </section>
                 </section>
             <?php endif; ?>
-            <footer class="analytics-section muted">Website analytics are provided by PostHog. Training, compliance, and financial metrics are sourced from SmartTrack records.</footer>
+            <footer class="analytics-section muted">Training, compliance, financial, and AI analytics are sourced from SmartTrack records.</footer>
         </main>
     </div>
 </div>
@@ -657,9 +651,9 @@ createApp({
         const loading = ref(true);
         const error = ref(null);
         const data = ref({});
-        const websiteLoading = ref(true);
-        const websiteError = ref('');
-        const websiteData = ref(null);
+        const aiLoading = ref(false);
+        const aiError = ref('');
+        const aiInsights = ref(null);
         const filters = ref({
             start_date: '<?= $e($filters['start_date']) ?>',
             end_date: '<?= $e($filters['end_date']) ?>',
@@ -667,31 +661,13 @@ createApp({
         });
         const classOptions = ref(<?= json_encode($classes, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>);
         const endpoint = '<?= $e($base) ?>api/analytics';
-        const websiteEndpoint = '<?= $e($base) ?>api/analytics/posthog';
+        const aiInsightsEndpoint = '<?= $e($base) ?>api/analytics/ai-insights';
+        const generateAiInsightsEndpoint = '<?= $e($base) ?>api/analytics/ai-insights/generate';
 
         let charts = {};
 
         const formatNumber = (value) => Number(value || 0).toLocaleString();
         const formatMoney = (value) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'PHP' }).format(Number(value || 0));
-        const formatDuration = (value) => {
-            const seconds = Math.max(0, Math.round(Number(value || 0)));
-            const minutes = Math.floor(seconds / 60);
-            const remainder = seconds % 60;
-            return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
-        };
-        const websiteChangeLabel = (key) => {
-            const current = Number(websiteData.value?.current?.[key] || 0);
-            const previous = Number(websiteData.value?.previous?.[key] || 0);
-            if (previous === 0) return current === 0 ? '→ 0% vs previous period' : '↑ New vs previous period';
-            const change = ((current - previous) / Math.abs(previous)) * 100;
-            const indicator = change > 0 ? '↑ ' : (change < 0 ? '↓ ' : '→ ');
-            return `${indicator}${change > 0 ? '+' : ''}${change.toFixed(1)}% vs previous period`;
-        };
-        const websiteTrendClass = (key) => {
-            const current = Number(websiteData.value?.current?.[key] || 0);
-            const previous = Number(websiteData.value?.previous?.[key] || 0);
-            return current > previous ? 'up' : (current < previous ? 'down' : 'flat');
-        };
 
         const destroyChart = (key) => {
             if (charts[key]) {
@@ -846,43 +822,6 @@ createApp({
             });
         };
 
-        const updateWebsiteCharts = (report) => {
-            if (!window.Chart) return;
-            const daily = report.daily || [];
-            createChart('websiteVisitors', 'website-visitors', {
-                type: 'line',
-                data: {
-                    labels: daily.map(item => item.label),
-                    datasets: [{ label: 'Unique visitors', data: daily.map(item => item.active_users), borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,.12)', fill: true, tension: .25 }],
-                },
-                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
-            });
-            createChart('websitePageViews', 'website-page-views', {
-                type: 'line',
-                data: {
-                    labels: daily.map(item => item.label),
-                    datasets: [{ label: 'Page views', data: daily.map(item => item.page_views), borderColor: '#1d563c', backgroundColor: 'rgba(29,86,60,.12)', fill: true, tension: .25 }],
-                },
-                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
-            });
-            createChart('websiteTopPages', 'website-top-pages', {
-                type: 'bar',
-                data: {
-                    labels: (report.top_pages || []).map(item => item.page_path),
-                    datasets: [{ label: 'Page views', data: (report.top_pages || []).map(item => item.page_views), backgroundColor: '#0d6efd' }],
-                },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } },
-            });
-            createChart('websiteTrafficSources', 'website-traffic-sources', {
-                type: 'doughnut',
-                data: {
-                    labels: (report.traffic_sources || []).map(item => item.source),
-                    datasets: [{ data: (report.traffic_sources || []).map(item => item.page_views), backgroundColor: ['#1d563c', '#0d6efd', '#e5a000', '#6610f2', '#dc3545', '#20c997', '#fd7e14', '#6c757d'] }],
-                },
-                options: { responsive: true, maintainAspectRatio: false },
-            });
-        };
-
         const updateAllCharts = () => {
             updateAttendanceCharts();
             updatePaymentCharts();
@@ -892,47 +831,56 @@ createApp({
             updateAnnouncementCharts();
         };
 
-        const loadWebsiteAnalytics = async () => {
-            websiteLoading.value = true;
-            websiteError.value = '';
+        const parseApiPayload = async (response) => {
+            const text = await response.text();
             try {
-                const query = new URLSearchParams({
-                    start_date: filters.value.start_date,
-                    end_date: filters.value.end_date,
-                });
-                const response = await fetch(`${websiteEndpoint}?${query.toString()}`, {
+                return JSON.parse(text);
+            } catch (jsonError) {
+                throw new Error(`The analytics server returned invalid JSON for HTTP ${response.status}.`);
+            }
+        };
+
+        const loadAiInsights = async () => {
+            aiError.value = '';
+            try {
+                const query = new URLSearchParams(filters.value);
+                const response = await fetch(`${aiInsightsEndpoint}?${query.toString()}`, {
                     headers: { Accept: 'application/json' },
                     credentials: 'same-origin',
                 });
-                let payload;
-                try {
-                    payload = JSON.parse(await response.text());
-                } catch (jsonError) {
-                    throw new Error(`The website analytics server returned invalid JSON for HTTP ${response.status}.`);
-                }
+                const payload = await parseApiPayload(response);
                 if (!response.ok) throw new Error(payload.message || `Request failed (${response.status}).`);
-                const report = payload.data?.website_analytics;
-                if (!report || typeof report !== 'object') throw new Error('The website analytics response was incomplete.');
-                websiteData.value = report;
-                websiteLoading.value = false;
-                await nextTick();
-                updateWebsiteCharts(report);
+                aiInsights.value = payload.data?.insights || payload.insights || null;
             } catch (requestError) {
-                ['websiteVisitors', 'websitePageViews', 'websiteTopPages', 'websiteTrafficSources'].forEach(destroyChart);
-                websiteData.value = null;
-                websiteError.value = requestError instanceof Error
-                    ? requestError.message
-                    : 'Website analytics are temporarily unavailable.';
-                console.error('Website analytics request failed.', requestError);
+                aiInsights.value = null;
+                aiError.value = requestError instanceof Error ? requestError.message : 'Cached AI insights could not be loaded.';
+            }
+        };
+
+        const generateAiInsights = async () => {
+            aiLoading.value = true;
+            aiError.value = '';
+            try {
+                const query = new URLSearchParams(filters.value);
+                const response = await fetch(`${generateAiInsightsEndpoint}?${query.toString()}`, {
+                    method: 'POST',
+                    headers: { Accept: 'application/json' },
+                    credentials: 'same-origin',
+                });
+                const payload = await parseApiPayload(response);
+                if (!response.ok) throw new Error(payload.message || `Request failed (${response.status}).`);
+                aiInsights.value = payload.data?.insights || payload.insights || null;
+                if (!aiInsights.value) throw new Error('Gemini returned no insights.');
+            } catch (requestError) {
+                aiError.value = requestError instanceof Error ? requestError.message : 'Gemini insights could not be generated.';
             } finally {
-                websiteLoading.value = false;
+                aiLoading.value = false;
             }
         };
 
         const loadAnalytics = async () => {
             loading.value = true;
             error.value = null;
-            loadWebsiteAnalytics();
             try {
                 const query = new URLSearchParams(filters.value);
                 const response = await fetch(`${endpoint}?${query.toString()}`, {
@@ -943,6 +891,7 @@ createApp({
                 if (!response.ok) throw new Error(payload.message || `Request failed (${response.status}).`);
                 data.value = payload.data && typeof payload.data === 'object' ? payload.data : payload;
                 updateAllCharts();
+                await loadAiInsights();
             } catch (err) {
                 error.value = err.message || 'Analytics could not be loaded.';
             } finally {
@@ -1032,22 +981,19 @@ createApp({
             loading,
             error,
             data,
-            websiteLoading,
-            websiteError,
-            websiteData,
+            aiLoading,
+            aiError,
+            aiInsights,
             filters,
             classOptions,
             formatNumber,
             formatMoney,
-            formatDuration,
-            websiteChangeLabel,
-            websiteTrendClass,
             loadAnalytics,
+            generateAiInsights,
             exportToExcel
         };
     }
 }).mount('.portal-body');
 </script>
-<?php require APP_DIR . 'views/partials/posthog_consent.php'; ?>
 </body>
 </html>

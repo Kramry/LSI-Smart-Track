@@ -214,11 +214,68 @@ class Analytics_model extends Base_model
         if (in_array($user['role'] ?? '', ['administrator', 'staff'], true)) {
             $result['payments'] = $this->paymentAnalytics($filters);
             $result['training'] = $this->trainingAnalytics($filters);
+            $result['assessments'] = $this->assessmentAnalytics($filters);
             $result['documents'] = $this->documentAnalytics($filters);
             $result['certificates'] = $this->certificateAnalytics($filters);
             $result['announcements'] = $this->announcementAnalytics($filters);
         }
         return $result;
+    }
+
+    private function assessmentAnalytics(array $filters)
+    {
+        $classScope = '';
+        $values = [$filters['start_date'], $filters['end_date']];
+        if (!empty($filters['class_id'])) {
+            $classScope = ' AND a.class_id = ?';
+            $values[] = (int) $filters['class_id'];
+        }
+
+        $summary = $this->row(
+            "SELECT COUNT(*) AS total,
+                    SUM(LOWER(a.outcome) = 'pass') AS passed,
+                    SUM(LOWER(a.outcome) = 'fail') AS failed
+             FROM training_assessments a
+             JOIN training_classes c ON c.class_id = a.class_id
+             WHERE a.assessment_date BETWEEN ? AND ? {$classScope}",
+            $values
+        ) ?: [];
+
+        $byProgram = $this->rows(
+            "SELECT p.program_id, p.program_name,
+                    COUNT(*) AS total,
+                    SUM(LOWER(a.outcome) = 'pass') AS passed,
+                    SUM(LOWER(a.outcome) = 'fail') AS failed
+             FROM training_assessments a
+             JOIN training_classes c ON c.class_id = a.class_id
+             JOIN training_programs p ON p.program_id = c.program_id
+             WHERE a.assessment_date BETWEEN ? AND ? {$classScope}
+             GROUP BY p.program_id, p.program_name
+             ORDER BY p.program_name",
+            $values
+        );
+        foreach ($byProgram as &$program) {
+            $program['program_id'] = (int) $program['program_id'];
+            $program['total'] = (int) $program['total'];
+            $program['passed'] = (int) ($program['passed'] ?? 0);
+            $program['failed'] = (int) ($program['failed'] ?? 0);
+            $program['pass_rate'] = $program['total'] > 0 ? round(($program['passed'] / $program['total']) * 100, 1) : 0;
+        }
+        unset($program);
+
+        $total = (int) ($summary['total'] ?? 0);
+        $passed = (int) ($summary['passed'] ?? 0);
+        $failed = (int) ($summary['failed'] ?? 0);
+        return [
+            'summary' => [
+                'total_assessments' => $total,
+                'passed' => $passed,
+                'failed' => $failed,
+                'other_outcomes' => max(0, $total - $passed - $failed),
+                'pass_rate' => $total > 0 ? round(($passed / $total) * 100, 1) : 0,
+            ],
+            'by_program' => $byProgram,
+        ];
     }
 
     private function paymentAnalytics(array $filters)
