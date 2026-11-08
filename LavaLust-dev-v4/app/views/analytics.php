@@ -836,7 +836,8 @@ createApp({
             try {
                 return JSON.parse(text);
             } catch (jsonError) {
-                throw new Error(`The analytics server returned invalid JSON for HTTP ${response.status}.`);
+                const preview = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+                throw new Error(`The analytics server returned invalid JSON for HTTP ${response.status}${preview ? `: ${preview}` : '.'}`);
             }
         };
 

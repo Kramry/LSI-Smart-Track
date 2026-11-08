@@ -97,7 +97,12 @@ class GeminiAnalyticsService
         if (!is_string($text) || trim($text) === '') {
             throw new RuntimeException('Gemini returned an invalid or empty response.');
         }
-        $analysis = json_decode(trim($text), true);
+        $analysisJson = trim($text);
+        if (strncmp($analysisJson, '```', 3) === 0) {
+            $analysisJson = preg_replace('/^```(?:json)?\s*/i', '', $analysisJson);
+            $analysisJson = preg_replace('/\s*```$/', '', $analysisJson);
+        }
+        $analysis = json_decode(trim($analysisJson), true);
         if (!is_array($analysis)) {
             throw new RuntimeException('Gemini returned an invalid JSON insight.');
         }
