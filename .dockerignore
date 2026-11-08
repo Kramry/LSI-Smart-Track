@@ -1,0 +1,12 @@
+.git
+.gitignore
+.idea/
+.vscode/
+
+LavaLust-dev-v4/node_modules/
+LavaLust-dev-v4/runtime/
+LavaLust-dev-v4/.env
+LavaLust-dev-v4/.env.*
+!LavaLust-dev-v4/.env.example
+
+*.log

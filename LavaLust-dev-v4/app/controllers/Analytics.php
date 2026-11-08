@@ -158,6 +158,9 @@ class Analytics extends Base
                 throw new RuntimeException('Gemini analytics rate limit directory could not be created.');
             }
         }
+        if (!is_writable($directory)) {
+            throw new RuntimeException('Gemini analytics rate limit directory is not writable.');
+        }
         return $directory . DIRECTORY_SEPARATOR . hash('sha256', $key) . '.txt';
     }
 
