@@ -90,7 +90,6 @@ class Reports extends Base
         $pdf->setTitle('SmartTrack ' . $availableReports[$reportType]['name']);
         $pdf->setAuthor('LSI SmartTrack');
         $pdf->setCreator('LSI SmartTrack System');
-        $pdf->addPage(['format' => 'A4', 'orientation' => 'L']);
 
         $html = '<h1 style="color: #173a60;">' . htmlspecialchars($availableReports[$reportType]['name'], ENT_QUOTES, 'UTF-8') . '</h1>';
         $html .= '<p style="color: #5d6f82; font-size: 12px;">';

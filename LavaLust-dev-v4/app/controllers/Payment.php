@@ -493,7 +493,6 @@ class Payment extends Base
         $pdf = SmartTrackPdf::create('P');
         $pdf->setCreator('LSI SmartTrack');
         $pdf->setTitle('Official Receipt ' . $payment['receipt_number']);
-        $pdf->addPage(['format' => 'A4', 'orientation' => 'P']);
         $html = '<h1>LSI Training Center</h1><h2>Official Payment Receipt</h2>'
             . '<p><strong>Receipt No.:</strong> ' . htmlspecialchars($payment['receipt_number'], ENT_QUOTES, 'UTF-8') . '</p>'
             . '<p><strong>Date paid:</strong> ' . htmlspecialchars($payment['payment_date'], ENT_QUOTES, 'UTF-8') . '</p>'
@@ -580,7 +579,6 @@ class Payment extends Base
             $pdf = SmartTrackPdf::create('L');
             $pdf->setTitle('SmartTrack Payment Report');
             $pdf->setPDFFilename('smarttrack-payment-report-' . $start . '-to-' . $end . '.pdf');
-            $pdf->addPage(['format' => 'A4', 'orientation' => 'L']);
             $html = '<h1>Payment Report</h1><p>' . htmlspecialchars($start . ' to ' . $end, ENT_QUOTES, 'UTF-8') . '</p><table border="1" cellpadding="4"><thead><tr><th>Date</th><th>Type</th><th>Trainee</th><th>Fee</th><th>Reference</th><th>Amount / Balance</th></tr></thead><tbody>';
             foreach ($rows as $row) {
                 $html .= '<tr><td>' . htmlspecialchars((string) ($row[$outstanding ? 'due_date' : 'report_date'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row[$outstanding ? 'fee_kind' : 'report_type'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row['trainee_name'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row['fee_name'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row[$outstanding ? 'trainee_number' : 'reference'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>PHP ' . number_format((float) ($row[$outstanding ? 'balance' : 'amount'] ?? 0), 2) . '</td></tr>';
