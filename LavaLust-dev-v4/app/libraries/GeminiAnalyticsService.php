@@ -83,7 +83,6 @@ class GeminiAnalyticsService
         $responseBody = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
         $requestError = curl_error($handle);
-        curl_close($handle);
 
         if ($responseBody === false) {
             throw new RuntimeException('Gemini request failed: ' . ($requestError ?: 'connection error'));
