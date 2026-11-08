@@ -4,6 +4,8 @@ FROM composer:2 AS vendor
 WORKDIR /app
 COPY LavaLust-dev-v4/ /app/
 RUN composer install --no-dev --optimize-autoloader --no-interaction
+RUN php vendor/tecnickcom/tc-lib-pdf-font/util/build_fonts.php
+RUN test -d vendor/tecnickcom/tc-lib-pdf-font/target/fonts
 
 FROM php:${PHP_VERSION}-apache
 
