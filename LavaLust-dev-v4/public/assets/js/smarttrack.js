@@ -1,4 +1,52 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const portalShell = document.querySelector('.portal-shell');
+    const navToggle = portalShell?.querySelector('[data-nav-toggle]');
+    const navBackdrop = portalShell?.querySelector('[data-nav-backdrop]');
+    const sectionNav = portalShell?.querySelector('.section-nav');
+
+    if (portalShell && navToggle && navBackdrop && sectionNav) {
+        const drawerBreakpoint = window.matchMedia('(max-width: 1023px)');
+        const closeNavigation = ({ restoreFocus = false } = {}) => {
+            portalShell.classList.remove('nav-open');
+            document.body.classList.remove('nav-drawer-open');
+            navToggle.setAttribute('aria-expanded', 'false');
+            navToggle.setAttribute('aria-label', 'Open navigation menu');
+            navBackdrop.hidden = true;
+            if (restoreFocus) navToggle.focus();
+        };
+
+        navToggle.addEventListener('click', () => {
+            const isOpen = portalShell.classList.toggle('nav-open');
+            document.body.classList.toggle('nav-drawer-open', isOpen);
+            navToggle.setAttribute('aria-expanded', String(isOpen));
+            navToggle.setAttribute('aria-label', isOpen ? 'Close navigation menu' : 'Open navigation menu');
+            navBackdrop.hidden = !isOpen;
+            if (isOpen) sectionNav.querySelector('a')?.focus();
+        });
+
+        navBackdrop.addEventListener('click', () => closeNavigation({ restoreFocus: true }));
+        document.addEventListener('click', (event) => {
+            if (
+                portalShell.classList.contains('nav-open')
+                && !sectionNav.contains(event.target)
+                && !navToggle.contains(event.target)
+            ) {
+                closeNavigation();
+            }
+        });
+        sectionNav.addEventListener('click', (event) => {
+            if (event.target.closest('a')) closeNavigation();
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && portalShell.classList.contains('nav-open')) {
+                closeNavigation({ restoreFocus: true });
+            }
+        });
+        drawerBreakpoint.addEventListener('change', (event) => {
+            if (!event.matches) closeNavigation();
+        });
+    }
+
     document.addEventListener('submit', (event) => {
         const form = event.target.closest('[data-confirm]');
         if (form && !window.confirm(form.dataset.confirm || 'Continue with this action?')) {

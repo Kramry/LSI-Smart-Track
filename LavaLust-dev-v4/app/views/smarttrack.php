@@ -238,6 +238,9 @@ $labels = [
             <a class="wordmark dark" href="<?= $e(
                 $app_url,
             ) ?>dashboard">LSI <span>SMARTTRACK</span></a>
+            <button class="nav-toggle" type="button" data-nav-toggle aria-controls="main-navigation" aria-expanded="false" aria-label="Open navigation menu">
+                <span></span><span></span><span></span>
+            </button>
             <div class="account-chip">
                 <span class="avatar"><?= $e(
                     strtoupper(substr($user["full_name"] ?? "U", 0, 1)),
@@ -255,8 +258,9 @@ $labels = [
 ) ?>"><button class="text-button" type="submit">Sign out</button></form>
             </div>
         </header>
+        <button class="nav-backdrop" type="button" data-nav-backdrop aria-label="Close navigation menu" tabindex="-1" hidden></button>
         <div class="portal-body">
-            <nav class="section-nav" aria-label="Main navigation">
+            <nav class="section-nav" id="main-navigation" aria-label="Main navigation">
                 <?php foreach ($navigation as $item): ?>
                     <?php $href =
                         $item === "dashboard"
