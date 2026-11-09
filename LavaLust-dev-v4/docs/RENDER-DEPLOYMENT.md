@@ -66,10 +66,14 @@ PostgreSQL compatible.
 
 ## Xendit payment URLs
 
-The hosted checkout return URLs are built from `SMARTTRACK_FRONTEND_URL`; they
-return to `/payments` with a reference ID. The frontend only asks the
-authenticated backend to refresh that payment. It never marks a payment paid
-from the query string.
+The hosted checkout return URLs are built from the backend environment variable
+`SMARTTRACK_FRONTEND_URL` (frontend origin only). Set it to
+`https://lsi-vue-frontend.onrender.com`. Success returns to
+`https://lsi-vue-frontend.onrender.com/payments?payment=success` with an
+additional `reference_id` query parameter so the signed-in frontend can ask
+the backend to verify that specific payment. Cancellation returns to
+`https://lsi-vue-frontend.onrender.com/payments?payment=cancel`. The query
+string never marks a payment paid.
 
 In the Xendit Dashboard, configure the webhook separately as
 `https://lsi-smart-track.onrender.com/api/payments/xendit/webhook` and set the

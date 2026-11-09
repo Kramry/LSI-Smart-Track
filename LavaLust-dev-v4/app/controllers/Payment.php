@@ -22,8 +22,16 @@ class Payment extends Base
         $frontendUrl = rtrim(trim((string) getenv('SMARTTRACK_FRONTEND_URL')), '/');
         $frontendParts = parse_url($frontendUrl);
         if ($frontendUrl === '' || !filter_var($frontendUrl, FILTER_VALIDATE_URL)
-            || !in_array(strtolower((string) ($frontendParts['scheme'] ?? '')), ['http', 'https'], true)) {
-            return $this->jsonResponse(['message' => 'The payment return URL is not configured.'], 503);
+            || !in_array(strtolower((string) ($frontendParts['scheme'] ?? '')), ['http', 'https'], true)
+            || empty($frontendParts['host'])
+            || isset($frontendParts['user'])
+            || isset($frontendParts['pass'])
+            || isset($frontendParts['query'])
+            || isset($frontendParts['fragment'])
+            || !in_array($frontendParts['path'] ?? '', ['', '/'], true)) {
+            return $this->jsonResponse([
+                'message' => 'Payment checkout is not configured: set SMARTTRACK_FRONTEND_URL to the frontend origin (for example, https://lsi-vue-frontend.onrender.com) in the PHP backend environment.',
+            ], 503);
         }
         require_once APP_DIR . 'libraries/XenditService.php';
         $reference = 'ST-' . $feeId . '-' . bin2hex(random_bytes(8));
@@ -36,7 +44,7 @@ class Payment extends Base
             'currency' => 'PHP',
             'amount' => (float) $fee['balance'],
             'success_return_url' => $frontendUrl . '/payments?payment=success&' . $returnQuery,
-            'failure_return_url' => $frontendUrl . '/payments?payment=failed&' . $returnQuery,
+            'failure_return_url' => $frontendUrl . '/payments?payment=cancel',
             'items' => [
                 [
                     'reference_id' => 'fee-' . $feeId,
