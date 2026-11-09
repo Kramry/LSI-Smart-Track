@@ -200,8 +200,7 @@ class Classes extends Base
                 $savedId = $classId;
                 $this->recordModel->logActivity((int) $this->user['user_id'], 'Updated class', 'Class #' . $savedId);
             } else {
-                $this->db->table('training_classes')->insert($data);
-                $savedId = $this->db->insert_id();
+                $savedId = $this->db->table('training_classes')->insert($data);
                 $this->recordModel->logActivity((int) $this->user['user_id'], 'Created class', 'Class #' . $savedId);
             }
 
@@ -298,8 +297,7 @@ class Classes extends Base
                 $savedId = $classId;
                 $this->recordModel->logActivity((int) $this->user['user_id'], 'Updated class', 'Class #' . $savedId);
             } else {
-                $this->db->table('training_classes')->insert($data);
-                $savedId = $this->db->insert_id();
+                $savedId = $this->db->table('training_classes')->insert($data);
                 $this->recordModel->logActivity((int) $this->user['user_id'], 'Created class', 'Class #' . $savedId);
             }
 

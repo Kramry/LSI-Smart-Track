@@ -29,7 +29,7 @@ class BrevoService
         $raw = curl_exec($curl);
         $error = curl_error($curl);
         $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        curl_close($curl);
+
         if ($raw === false || $error !== '') {
             return ['ok' => false, 'error' => $error ?: 'Brevo request failed.'];
         }
