@@ -5,25 +5,46 @@ class XenditService
 {
     public function createPaymentSession(array $payload)
     {
+        return $this->request('POST', '/sessions', $payload);
+    }
+
+    public function retrievePaymentSession($sessionId)
+    {
+        return $this->request('GET', '/sessions/' . rawurlencode((string) $sessionId));
+    }
+
+    public function retrievePaymentRequest($paymentRequestId)
+    {
+        return $this->request('GET', '/v3/payment_requests/' . rawurlencode((string) $paymentRequestId));
+    }
+
+    private function request($method, $path, ?array $payload = null)
+    {
         $secretKey = trim((string) getenv('XENDIT_SECRET_KEY'));
         if ($secretKey === '') {
             return ['ok' => false, 'error' => 'Xendit is not configured.'];
         }
 
-        $body = json_encode($payload);
-        $curl = curl_init('https://api.xendit.co/sessions');
-        curl_setopt_array($curl, [
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $body,
+        $curl = curl_init('https://api.xendit.co' . $path);
+        $options = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_TIMEOUT => 30,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Basic ' . base64_encode($secretKey . ':'),
-                'Content-Type: application/json',
                 'Accept: application/json',
             ],
-        ]);
+        ];
+        if ($method === 'POST') {
+            $body = json_encode($payload);
+            if ($body === false) {
+                return ['ok' => false, 'error' => 'Unable to encode the Xendit request.'];
+            }
+            $options[CURLOPT_POST] = true;
+            $options[CURLOPT_POSTFIELDS] = $body;
+            $options[CURLOPT_HTTPHEADER][] = 'Content-Type: application/json';
+        }
+        curl_setopt_array($curl, $options);
         $raw = curl_exec($curl);
         $error = curl_error($curl);
         $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
@@ -34,7 +55,7 @@ class XenditService
         $response = json_decode($raw, true);
         if ($status < 200 || $status >= 300 || !is_array($response)) {
             $message = is_array($response) ? ($response['message'] ?? $response['error_code'] ?? '') : '';
-            return ['ok' => false, 'error' => 'Xendit rejected the payment session (HTTP ' . $status . '). ' . substr((string) $message, 0, 300)];
+            return ['ok' => false, 'error' => 'Xendit request failed (HTTP ' . $status . '). ' . substr((string) $message, 0, 300)];
         }
         return ['ok' => true, 'data' => $response];
     }

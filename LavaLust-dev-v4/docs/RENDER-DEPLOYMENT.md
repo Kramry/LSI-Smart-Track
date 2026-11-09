@@ -52,11 +52,45 @@ Set these in **Render → Environment** (they are not read from a file):
 | `DB_NAME` | database name |
 | `DB_CHARSET` | `utf8mb4` |
 | `BASE_URL` | `https://lsi-smart-track.onrender.com` |
+| `SMARTTRACK_FRONTEND_URL` | `https://lsi-vue-frontend.onrender.com` |
+| `SMARTTRACK_FRONTEND_ORIGIN` | `https://lsi-vue-frontend.onrender.com` |
+| `SESSION_COOKIE_SAMESITE` | `None` |
+| `SESSION_COOKIE_SECURE` | `true` |
+| `XENDIT_SECRET_KEY` | Xendit secret API key (backend environment only) |
+| `XENDIT_WEBHOOK_TOKEN` | Callback verification token configured for the Xendit webhook |
 
 Render does not offer a managed MySQL service, so point `DB_*` at an external
 MySQL 8 host (Aiven, PlanetScale, DigitalOcean, or a private server). The
 schema in `lsi_smarttrack-database.sql` is MySQL specific and is not
 PostgreSQL compatible.
+
+## Xendit payment URLs
+
+The hosted checkout return URLs are built from `SMARTTRACK_FRONTEND_URL`; they
+return to `/payments` with a reference ID. The frontend only asks the
+authenticated backend to refresh that payment. It never marks a payment paid
+from the query string.
+
+In the Xendit Dashboard, configure the webhook separately as
+`https://lsi-smart-track.onrender.com/api/payments/xendit/webhook` and set the
+same callback token in Render's `XENDIT_WEBHOOK_TOKEN`. The backend retrieves
+the session and its payment request from Xendit and validates reference,
+amount, currency, and successful status before recording a payment. Duplicate
+callbacks are safe to retry.
+
+For local development, set `SMARTTRACK_FRONTEND_URL=http://localhost:5176` in
+the backend `.env` and set `SMARTTRACK_FRONTEND_ORIGIN=http://localhost:5176`.
+Set `API_PROXY_TARGET=http://localhost:8000` in the Vue `.env.development`.
+Start the PHP backend on port `8000` and the Vue dev server. Run
+`ngrok http 8000` and temporarily configure
+`https://<current-ngrok-host>/api/payments/xendit/webhook` in the Xendit
+Dashboard. Replace the callback URL whenever ngrok assigns a new host; do not
+put a temporary ngrok hostname in source or production configuration. The
+Xendit secret key and callback token belong only in the backend environment.
+
+Before deploying this payment update to an existing database, run
+`xendit-payment-upgrade.sql` once to add the nullable unique provider
+transaction ID column without deleting existing payment records.
 
 ## Database
 

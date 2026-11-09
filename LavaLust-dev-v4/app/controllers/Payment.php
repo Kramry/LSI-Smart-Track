@@ -19,8 +19,15 @@ class Payment extends Base
             || !in_array($flow, ['invoice', 'payment-link'], true)) {
             return $this->jsonResponse(['message' => 'Choose one of your outstanding fees and a valid Xendit payment session option.'], 422);
         }
+        $frontendUrl = rtrim(trim((string) getenv('SMARTTRACK_FRONTEND_URL')), '/');
+        $frontendParts = parse_url($frontendUrl);
+        if ($frontendUrl === '' || !filter_var($frontendUrl, FILTER_VALIDATE_URL)
+            || !in_array(strtolower((string) ($frontendParts['scheme'] ?? '')), ['http', 'https'], true)) {
+            return $this->jsonResponse(['message' => 'The payment return URL is not configured.'], 503);
+        }
         require_once APP_DIR . 'libraries/XenditService.php';
         $reference = 'ST-' . $feeId . '-' . bin2hex(random_bytes(8));
+        $returnQuery = http_build_query(['reference_id' => $reference], '', '&', PHP_QUERY_RFC3986);
         $payload = [
             'reference_id' => $reference,
             'session_type' => 'PAY',
@@ -28,8 +35,8 @@ class Payment extends Base
             'country' => 'PH',
             'currency' => 'PHP',
             'amount' => (float) $fee['balance'],
-            'success_return_url' => getenv('XENDIT_SUCCESS_URL') ?: rtrim(getenv('SMARTTRACK_PUBLIC_URL') ?: '/', '/') . '/payments?payment=success',
-            'failure_return_url' => getenv('XENDIT_FAILURE_URL') ?: rtrim(getenv('SMARTTRACK_PUBLIC_URL') ?: '/', '/') . '/payments?payment=failed',
+            'success_return_url' => $frontendUrl . '/payments?payment=success&' . $returnQuery,
+            'failure_return_url' => $frontendUrl . '/payments?payment=failed&' . $returnQuery,
             'items' => [
                 [
                     'reference_id' => 'fee-' . $feeId,
@@ -49,7 +56,8 @@ class Payment extends Base
         }
         $response = $result['data'];
         $checkoutUrl = $this->xenditCheckoutUrl($response);
-        if ($checkoutUrl === '') {
+        $sessionId = trim((string) ($response['payment_session_id'] ?? ''));
+        if ($checkoutUrl === '' || $sessionId === '') {
             return $this->jsonResponse(['message' => 'Xendit did not return a checkout URL.'], 502);
         }
         $this->paymentModel->createXenditPayment([
@@ -57,7 +65,7 @@ class Payment extends Base
             'user_id' => (int) $this->user['user_id'],
             'flow' => $flow,
             'reference_id' => $reference,
-            'provider_id' => $response['payment_session_id'] ?? null,
+            'provider_id' => $sessionId,
             'amount' => $payload['amount'],
             'checkout_url' => $checkoutUrl,
             'raw_response' => json_encode($response),
@@ -73,34 +81,116 @@ class Payment extends Base
             return $this->jsonResponse(['message' => 'Invalid webhook token.'], 401);
         }
         $payload = json_decode((string) file_get_contents('php://input'), true);
-        $reference = trim((string) ($payload['reference_id'] ?? $payload['data']['reference_id'] ?? ''));
-        $status = strtoupper((string) ($payload['status'] ?? $payload['data']['status'] ?? ''));
-        if ($reference === '') {
+        if (!is_array($payload)) {
+            return $this->jsonResponse(['message' => 'Invalid webhook payload.'], 400);
+        }
+        $eventData = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
+        $reference = trim((string) ($eventData['reference_id'] ?? $payload['reference_id'] ?? ''));
+        $sessionId = trim((string) ($eventData['payment_session_id'] ?? $payload['payment_session_id'] ?? ''));
+        if ($reference === '' && $sessionId === '') {
             return $this->jsonResponse(['message' => 'Payment reference not found.'], 404);
         }
-        $payment = $this->paymentModel->xenditPaymentByReference($reference);
+        $payment = $reference !== ''
+            ? $this->paymentModel->xenditPaymentByReference($reference)
+            : $this->paymentModel->xenditPaymentByProviderId($sessionId);
         if (!$payment) {
             return $this->jsonResponse(['message' => 'Payment reference not found.'], 404);
         }
-        $normalized = in_array($status, ['SUCCEEDED', 'COMPLETED', 'PAID'], true) ? 'paid' : (in_array($status, ['FAILED', 'EXPIRED'], true) ? 'failed' : 'pending');
-        if ($normalized === 'paid' && $payment['status'] !== 'paid') {
-            $result = $this->paymentModel->recordPayment([
-                'trainee_fee_id' => (int) $payment['trainee_fee_id'],
-                'amount' => $payment['amount'],
-                'method' => 'xendit',
-                'reference_number' => $reference,
-                'payment_date' => date('Y-m-d'),
-                'remarks' => 'Xendit online payment',
-                'recorded_by' => null,
-            ]);
-            if (!$result['success']) {
-                return $this->jsonResponse(['message' => $result['message']], 422);
-            }
-            $this->paymentModel->updateXenditPayment((int) $payment['id'], 'paid', json_encode($payload), true);
-        } else {
-            $this->paymentModel->updateXenditPayment((int) $payment['id'], $normalized, json_encode($payload));
+        $result = $this->verifyAndReconcileXenditPayment($payment);
+        if (!$result['ok']) {
+            return $this->jsonResponse(['message' => $result['message']], $result['http_status']);
         }
         $this->jsonResponse(['message' => 'Webhook received.']);
+    }
+
+    public function apiXenditPaymentStatus()
+    {
+        if (!$this->requireUser() || ($this->user['role'] ?? '') !== 'trainee') {
+            return $this->jsonResponse(['message' => 'Only trainees can check their online payments.'], 403);
+        }
+        $reference = trim((string) ($_GET['reference_id'] ?? ''));
+        if ($reference === '') {
+            return $this->jsonResponse(['message' => 'Payment reference is required.'], 422);
+        }
+        $payment = $this->paymentModel->xenditPaymentByReference($reference);
+        if (!$payment || (int) $payment['user_id'] !== (int) $this->user['user_id']) {
+            return $this->jsonResponse(['message' => 'Payment reference not found.'], 404);
+        }
+        $result = $this->verifyAndReconcileXenditPayment($payment);
+        if (!$result['ok']) {
+            return $this->jsonResponse(['message' => $result['message']], $result['http_status']);
+        }
+        $this->jsonResponse(['status' => $result['status']]);
+    }
+
+    private function verifyAndReconcileXenditPayment(array $payment)
+    {
+        require_once APP_DIR . 'libraries/XenditService.php';
+        $service = new XenditService();
+        $sessionId = trim((string) ($payment['provider_id'] ?? ''));
+        if ($sessionId === '') {
+            return ['ok' => false, 'http_status' => 502, 'message' => 'The Xendit payment session ID is missing.'];
+        }
+        $sessionResult = $service->retrievePaymentSession($sessionId);
+        if (!$sessionResult['ok']) {
+            return ['ok' => false, 'http_status' => 502, 'message' => 'Unable to verify the payment session with Xendit.'];
+        }
+        $session = $sessionResult['data'];
+        if (($session['payment_session_id'] ?? '') !== $sessionId
+            || ($session['reference_id'] ?? '') !== $payment['reference_id']
+            || !$this->xenditAmountMatches($session['amount'] ?? null, $payment['amount'])
+            || strtoupper((string) ($session['currency'] ?? '')) !== 'PHP'
+            || strtoupper((string) ($session['session_type'] ?? '')) !== 'PAY') {
+            return ['ok' => false, 'http_status' => 422, 'message' => 'The Xendit session does not match this payment.'];
+        }
+
+        $sessionStatus = strtoupper((string) ($session['status'] ?? ''));
+        $verifiedStatus = in_array($sessionStatus, ['EXPIRED', 'CANCELED'], true)
+            ? 'failed'
+            : 'pending';
+        $transactionId = '';
+        $verifiedResponse = ['session' => $session];
+        if ($sessionStatus === 'COMPLETED') {
+            $transactionId = trim((string) ($session['payment_request_id'] ?? ''));
+            if ($transactionId === '') {
+                return ['ok' => false, 'http_status' => 502, 'message' => 'Xendit completed the session without a payment request ID.'];
+            }
+            $requestResult = $service->retrievePaymentRequest($transactionId);
+            if (!$requestResult['ok']) {
+                return ['ok' => false, 'http_status' => 502, 'message' => 'Unable to verify the completed payment with Xendit.'];
+            }
+            $request = $requestResult['data'];
+            if (($request['payment_request_id'] ?? '') !== $transactionId
+                || ($request['reference_id'] ?? '') !== $payment['reference_id']
+                || !$this->xenditAmountMatches($request['amount'] ?? null, $payment['amount'])
+                || strtoupper((string) ($request['currency'] ?? '')) !== 'PHP') {
+                return ['ok' => false, 'http_status' => 422, 'message' => 'The Xendit transaction does not match this payment.'];
+            }
+            $verifiedResponse['payment_request'] = $request;
+            $requestStatus = strtoupper((string) ($request['status'] ?? ''));
+            if ($requestStatus === 'SUCCEEDED') {
+                $verifiedStatus = 'paid';
+            } elseif (in_array($requestStatus, ['FAILED', 'EXPIRED', 'CANCELED'], true)) {
+                $verifiedStatus = 'failed';
+            }
+        }
+
+        $result = $this->paymentModel->reconcileXenditPayment(
+            (int) $payment['id'],
+            $verifiedStatus,
+            $transactionId,
+            json_encode($verifiedResponse, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+        );
+        if (!$result['success']) {
+            return ['ok' => false, 'http_status' => 422, 'message' => $result['message']];
+        }
+        return ['ok' => true, 'status' => $result['status']];
+    }
+
+    private function xenditAmountMatches($providerAmount, $expectedAmount)
+    {
+        return is_numeric($providerAmount)
+            && (int) round((float) $providerAmount * 100) === (int) round((float) $expectedAmount * 100);
     }
 
     private function xenditCheckoutUrl(array $response)

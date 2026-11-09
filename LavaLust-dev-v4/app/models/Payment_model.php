@@ -160,18 +160,60 @@ class Payment_model extends Base_model
         return $this->row('SELECT * FROM xendit_payments WHERE reference_id = ?', [(string) $reference]);
     }
 
-    public function updateXenditPayment($id, $status, $rawResponse, $paid = false)
+    public function xenditPaymentByProviderId($providerId)
     {
-        if ($paid) {
-            return $this->execute(
-                'UPDATE xendit_payments SET status = ?, paid_at = NOW(), raw_response = ? WHERE id = ?',
-                [$status, $rawResponse, (int) $id]
-            );
+        return $this->row('SELECT * FROM xendit_payments WHERE provider_id = ?', [(string) $providerId]);
+    }
+
+    public function reconcileXenditPayment($id, $verifiedStatus, $transactionId, $rawResponse)
+    {
+        $this->db->transaction();
+        try {
+            $payment = $this->row('SELECT * FROM xendit_payments WHERE id = ? FOR UPDATE', [(int) $id]);
+            if (!$payment) {
+                $this->db->roll_back();
+                return ['success' => false, 'message' => 'The Xendit payment record was not found.'];
+            }
+            if ($payment['status'] === 'paid') {
+                $this->db->commit();
+                return ['success' => true, 'status' => 'paid'];
+            }
+
+            if ($verifiedStatus === 'paid') {
+                $result = $this->recordPaymentInTransaction([
+                    'trainee_fee_id' => (int) $payment['trainee_fee_id'],
+                    'amount' => $payment['amount'],
+                    'method' => 'xendit',
+                    'reference_number' => $payment['reference_id'],
+                    'payment_date' => date('Y-m-d'),
+                    'remarks' => 'Xendit online payment',
+                    'recorded_by' => null,
+                ]);
+                if (!$result['success']) {
+                    $this->db->roll_back();
+                    return $result;
+                }
+                $this->execute(
+                    "UPDATE xendit_payments SET status = 'paid', provider_transaction_id = ?, paid_at = NOW(), raw_response = ? WHERE id = ?",
+                    [(string) $transactionId, $rawResponse, (int) $id]
+                );
+            } elseif ($verifiedStatus === 'failed' && $payment['status'] === 'pending') {
+                $this->execute(
+                    "UPDATE xendit_payments SET status = 'failed', raw_response = ? WHERE id = ?",
+                    [$rawResponse, (int) $id]
+                );
+            } else {
+                $this->execute(
+                    'UPDATE xendit_payments SET raw_response = ? WHERE id = ?',
+                    [$rawResponse, (int) $id]
+                );
+            }
+            $this->db->commit();
+            return ['success' => true, 'status' => $verifiedStatus];
+        } catch (Throwable $error) {
+            $this->db->roll_back();
+            throw $error;
         }
-        return $this->execute(
-            'UPDATE xendit_payments SET status = ?, raw_response = ? WHERE id = ?',
-            [$status, $rawResponse, (int) $id]
-        );
     }
 
     public function pendingProofs()
@@ -243,7 +285,7 @@ class Payment_model extends Base_model
         }
         $this->execute("INSERT INTO bond_transactions (trainee_fee_id, transaction_type, amount, payment_id, transaction_date, method, reference_number, remarks, performed_by) VALUES (?, 'deposit', ?, ?, ?, ?, ?, ?, ?)", [
             (int) $feeId, $data['amount'], (int) $paymentId, $data['payment_date'], $data['method'],
-            $data['reference_number'] ?: null, 'Bond deposit received.', (int) $data['recorded_by'],
+            $data['reference_number'] ?: null, 'Bond deposit received.', $data['recorded_by'] ?? null,
         ]);
         $total = (float) ($this->row("SELECT COALESCE(SUM(CASE WHEN transaction_type = 'deposit' THEN amount WHEN transaction_type IN ('refund', 'forfeit', 'reversal') THEN -amount ELSE 0 END), 0) AS held FROM bond_transactions WHERE trainee_fee_id = ?", [(int) $feeId])['held'] ?? 0);
         if ($total + 0.00001 >= (float) $fee['amount_due']) {

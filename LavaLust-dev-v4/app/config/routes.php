@@ -159,6 +159,7 @@ $router->get('/api/classes/{id}', 'Classes::apiDetail');
 $router->post('/api/classes/save', 'Classes::apiSave');
 $router->post('/api/classes/delete/{id}', 'Classes::apiDelete');
 $router->get('/api/payments', 'Payment::apiData');
+$router->get('/api/payments/xendit/status', 'Payment::apiXenditPaymentStatus');
 $router->post('/api/payments/xendit', 'Payment::apiCreateXenditPayment');
 $router->post('/api/payments/xendit/webhook', 'Payment::apiXenditWebhook');
 $router->get('/api/payments/proof/{id}', 'Payment::proofFile');

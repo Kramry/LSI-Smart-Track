@@ -1126,6 +1126,7 @@ CREATE TABLE `xendit_payments` (
   `flow` enum('invoice','payment-link') NOT NULL,
   `reference_id` varchar(100) NOT NULL,
   `provider_id` varchar(150) DEFAULT NULL,
+  `provider_transaction_id` varchar(150) DEFAULT NULL,
   `amount` decimal(12,2) NOT NULL,
   `status` enum('pending','paid','failed') NOT NULL DEFAULT 'pending',
   `checkout_url` varchar(1000) NOT NULL,
@@ -1425,6 +1426,7 @@ ALTER TABLE `users`
 ALTER TABLE `xendit_payments`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `uq_xendit_reference` (`reference_id`),
+  ADD UNIQUE KEY `uq_xendit_provider_transaction` (`provider_transaction_id`),
   ADD KEY `idx_xendit_fee_status` (`trainee_fee_id`,`status`),
   ADD KEY `fk_xendit_payment_user` (`user_id`);
 
