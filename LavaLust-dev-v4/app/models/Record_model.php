@@ -5,6 +5,166 @@ require_once APP_DIR . 'models/Base_model.php';
 
 class Record_model extends Base_model
 {
+    private const RECORD_KEYS = [
+        'users' => 'user_id',
+        'trainees' => 'trainee_id',
+        'training_programs' => 'program_id',
+        'training_classes' => 'class_id',
+        'training_schedules' => 'schedule_id',
+        'class_enrollments' => 'enrollment_id',
+        'attendance_records' => 'attendance_id',
+        'trainee_documents' => 'document_id',
+        'certificates' => 'certificate_id',
+        'certificate_eligibility' => 'eligibility_id',
+        'announcements' => 'announcement_id',
+        'inquiries' => 'inquiry_id',
+        'activity_logs' => 'log_id',
+    ];
+
+    public function transactional(callable $operation)
+    {
+        if (!$this->db->transaction()) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Record transaction initialization cleanup failed (' . get_class($rollbackError) . ').');
+            }
+            throw new RuntimeException('Unable to start the record transaction.');
+        }
+
+        try {
+            $result = $operation();
+            if (!$this->db->commit()) {
+                throw new RuntimeException('Unable to commit the record transaction.');
+            }
+            return $result;
+        } catch (Throwable $error) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Record transaction rollback failed (' . get_class($rollbackError) . ').');
+            }
+            throw $error;
+        }
+    }
+
+    public function findRecord($table, $key, $id)
+    {
+        $this->assertRecordKey($table, $key);
+        return $this->row("SELECT * FROM `{$table}` WHERE `{$key}` = ? LIMIT 1", [(int) $id]);
+    }
+
+    public function findRecordScoped($table, $key, $id, array $user)
+    {
+        $this->assertRecordKey($table, $key);
+        $role = $user['role'] ?? '';
+        $userId = (int) ($user['user_id'] ?? 0);
+        $scope = '1 = 0';
+        $values = [(int) $id];
+
+        if (in_array($role, ['administrator', 'staff'], true)) {
+            $scope = '1 = 1';
+        } elseif ($role === 'instructor') {
+            switch ($table) {
+                case 'trainees':
+                    $scope = 'EXISTS (SELECT 1 FROM class_enrollments e JOIN training_classes c ON c.class_id = e.class_id WHERE e.trainee_id = r.trainee_id AND c.instructor_id = ?)';
+                    $values[] = $userId;
+                    break;
+                case 'training_classes':
+                    $scope = 'r.instructor_id = ?';
+                    $values[] = $userId;
+                    break;
+                case 'training_schedules':
+                case 'class_enrollments':
+                case 'attendance_records':
+                    $scope = 'EXISTS (SELECT 1 FROM training_classes c WHERE c.class_id = r.class_id AND c.instructor_id = ?)';
+                    $values[] = $userId;
+                    break;
+                case 'trainee_documents':
+                    $scope = "r.trainee_id IS NOT NULL AND r.access_level <> 'staff' AND EXISTS (SELECT 1 FROM training_classes c WHERE c.class_id = r.class_id AND c.instructor_id = ?)";
+                    $values[] = $userId;
+                    break;
+                case 'inquiries':
+                    $scope = 'EXISTS (SELECT 1 FROM class_enrollments e JOIN training_classes c ON c.class_id = e.class_id WHERE e.trainee_id = r.trainee_id AND c.instructor_id = ?)';
+                    $values[] = $userId;
+                    break;
+                case 'announcements':
+                    $scope = 'r.user_id = ?';
+                    $values[] = $userId;
+                    break;
+            }
+        } elseif ($role === 'trainee') {
+            switch ($table) {
+                case 'trainees':
+                    $scope = 'r.user_id = ?';
+                    $values[] = $userId;
+                    break;
+                case 'training_classes':
+                    $scope = 'EXISTS (SELECT 1 FROM class_enrollments e JOIN trainees t ON t.trainee_id = e.trainee_id WHERE e.class_id = r.class_id AND t.user_id = ?)';
+                    $values[] = $userId;
+                    break;
+                case 'training_schedules':
+                    $scope = 'EXISTS (SELECT 1 FROM class_enrollments e JOIN trainees t ON t.trainee_id = e.trainee_id WHERE e.class_id = r.class_id AND t.user_id = ?)';
+                    $values[] = $userId;
+                    break;
+                case 'class_enrollments':
+                case 'attendance_records':
+                    $scope = 'r.trainee_id IN (SELECT t.trainee_id FROM trainees t WHERE t.user_id = ?)';
+                    $values[] = $userId;
+                    break;
+                case 'trainee_documents':
+                    $scope = "r.access_level <> 'staff' AND (r.trainee_id IN (SELECT t.trainee_id FROM trainees t WHERE t.user_id = ?) OR (r.access_level = 'class' AND r.class_id IN (SELECT e.class_id FROM class_enrollments e JOIN trainees t ON t.trainee_id = e.trainee_id WHERE t.user_id = ?)))";
+                    $values[] = $userId;
+                    $values[] = $userId;
+                    break;
+                case 'inquiries':
+                    $scope = 'r.trainee_id IN (SELECT t.trainee_id FROM trainees t WHERE t.user_id = ?)';
+                    $values[] = $userId;
+                    break;
+            }
+        }
+
+        return $this->row("SELECT r.* FROM `{$table}` r WHERE r.`{$key}` = ? AND ({$scope}) LIMIT 1", $values);
+    }
+
+    public function saveRecord($table, $key, array $data, $id = null)
+    {
+        $this->assertRecordKey($table, $key);
+        if (!$data) {
+            throw new InvalidArgumentException('Cannot save a record without fields.');
+        }
+        unset($data[$key]);
+        foreach (array_keys($data) as $field) {
+            if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $field)) {
+                throw new InvalidArgumentException('Invalid record field.');
+            }
+        }
+
+        if ($id !== null) {
+            $this->db->table($table)->where($key, (int) $id)->update($data);
+            return (int) $id;
+        }
+
+        $this->db->table($table)->insert($data);
+        return (int) $this->db->last_id();
+    }
+
+    public function deleteRecord($table, $key, $id, $deactivate = false)
+    {
+        $this->assertRecordKey($table, $key);
+        if ($deactivate && in_array($table, ['users', 'trainees'], true)) {
+            return $this->db->table($table)->where($key, (int) $id)->update(['status' => 'inactive']);
+        }
+        return $this->db->table($table)->where($key, (int) $id)->delete();
+    }
+
+    private function assertRecordKey($table, $key)
+    {
+        if (!isset(self::RECORD_KEYS[$table]) || self::RECORD_KEYS[$table] !== $key) {
+            throw new InvalidArgumentException('Unsupported record table or key.');
+        }
+    }
+
     public function records($section, array $user)
     {
         $userId = (int) $user['user_id'];
@@ -140,6 +300,12 @@ class Record_model extends Base_model
         }
 
         if ($section === 'inquiries') {
+            if ($role === 'instructor') {
+                return $this->addTraineeName($this->rows(
+                    'SELECT i.inquiry_id, i.trainee_id, t.first_name, t.last_name, i.subject, i.message, i.reply, i.status, i.created_at FROM inquiries i JOIN trainees t ON t.trainee_id = i.trainee_id WHERE EXISTS (SELECT 1 FROM class_enrollments e JOIN training_classes c ON c.class_id = e.class_id WHERE e.trainee_id = i.trainee_id AND c.instructor_id = ?)',
+                    [$userId]
+                ));
+            }
             $query = $this->db->table('inquiries')
                 ->select('inquiries.inquiry_id, inquiries.trainee_id, trainees.first_name, trainees.last_name, inquiries.subject, inquiries.message, inquiries.reply, inquiries.status, inquiries.created_at')
                 ->join('trainees', 'trainees.trainee_id = inquiries.trainee_id');

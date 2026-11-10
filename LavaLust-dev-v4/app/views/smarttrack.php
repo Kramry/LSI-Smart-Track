@@ -1074,7 +1074,7 @@ $labels = [
 ): ?><a class="button secondary" href="<?= $e(
     $app_url,
 ) ?>manage/assessments">Cancel edit</a><?php endif; ?></div>
-                            <p class="muted">Authorized staff record the institution's Pass or Fail outcome. Re-entering the same trainee, class, and assessment name updates that result.</p>
+                            <p class="muted">Authorized staff record the institution's Pass or Fail outcome. Use the same trainee, class, and assessment name only when editing an existing result; duplicate records are rejected.</p>
                             <form method="post" action="<?= $e(
                                 $app_url,
                             ) ?>assessments/save" class="upload-form">

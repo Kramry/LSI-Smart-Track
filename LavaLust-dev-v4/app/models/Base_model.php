@@ -25,4 +25,13 @@ class Base_model
     {
         return $this->db->raw($sql, $values)->rowCount();
     }
+
+    public function logActivity($userId, $action, $details)
+    {
+        return $this->db->table('activity_logs')->insert([
+            'user_id' => (int) $userId,
+            'action' => (string) $action,
+            'details' => (string) $details,
+        ]);
+    }
 }

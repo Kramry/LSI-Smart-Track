@@ -9,21 +9,205 @@ class Attendance extends Base
         if (!$this->requireUser()) {
             return;
         }
-        if (!$this->validCsrf()) {
-            $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
-        }
-        if (!in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to record attendance.');
         }
-        $qrCode = trim((string) $this->input('qr_code'));
-        $action = (string) $this->input('scan_action');
-        $classIdInput = trim((string) $this->input('class_id'));
-        $scheduleIdInput = trim((string) $this->input('schedule_id'));
-        $classId = filter_var($classIdInput, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-        $scheduleId = $scheduleIdInput === ''
-            ? 0
-            : filter_var($scheduleIdInput, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if (!$this->validCsrf()) {
+            if ($this->apiRequest) {
+                return $this->jsonResponse([
+                    'message' => 'Your session expired. Refresh and try again.',
+                    'errors' => [],
+                ], 403);
+            }
+            return $this->actionError('Your session expired. Refresh and try again.', 'manage/attendance', 403);
+        }
+
+        $qrCode = $this->input('qr_code');
+        $action = $this->input('scan_action');
+        $classIdInput = $this->input('class_id');
+        $scheduleIdInput = $this->input('schedule_id');
+        $errors = $this->validateScanInput($qrCode, $action, $classIdInput, $scheduleIdInput, $classId, $scheduleId);
+        try {
+            $limit = getenv('ATTENDANCE_SCAN_LIMIT');
+            $windowSeconds = getenv('ATTENDANCE_SCAN_WINDOW_SECONDS');
+            $rateLimit = $this->attendanceModel->consumeScanRateLimit(
+                $this->user,
+                (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'),
+                $limit === false ? 12 : (int) $limit,
+                $windowSeconds === false ? 60 : (int) $windowSeconds
+            );
+        } catch (Throwable $error) {
+            error_log('Attendance scan rate limiter failed (' . get_class($error) . '): ' . $error->getMessage());
+            return $this->attendanceError('Attendance scanning is temporarily unavailable.', 500);
+        }
+        if (!$rateLimit['allowed']) {
+            header('Retry-After: ' . (int) $rateLimit['retry_after']);
+            return $this->jsonResponse([
+                'message' => 'Too many attendance scans. Please wait before trying again.',
+                'errors' => [],
+            ], 429);
+        }
+
+        if ($errors) {
+            if ($this->apiRequest) {
+                return $this->jsonResponse([
+                    'message' => 'Check the scan details and try again.',
+                    'errors' => $errors,
+                ], 422);
+            }
+            return $this->actionError('Enter a QR ID and choose time-in or time-out.', 'manage/attendance', 422);
+        }
+
+        $recalculate = function ($traineeId, $selectedClassId) {
+            try {
+                $this->recalculateEligibilityPair($traineeId, $selectedClassId);
+                return true;
+            } catch (Throwable $error) {
+                $this->logAttendanceFailure('Attendance eligibility recalculation failed (' . get_class($error) . '): ' . $error->getMessage());
+                return false;
+            }
+        };
+
+        try {
+            $result = $this->attendanceModel->scanAttendance(
+                $qrCode,
+                $action,
+                $classId,
+                $scheduleId,
+                $this->user,
+                $recalculate
+            );
+        } catch (Throwable $error) {
+            $this->logAttendanceFailure('Attendance scan failed (' . get_class($error) . '): ' . $error->getMessage());
+            return $this->attendanceError('The attendance scan could not be completed.', 500);
+        }
+
+        if (!$result['ok']) {
+            if ($this->apiRequest) {
+                return $this->jsonResponse([
+                    'message' => $result['message'],
+                    'errors' => $result['errors'],
+                ], (int) $result['status_code']);
+            }
+            return $this->actionError($result['message'], 'manage/attendance', (int) $result['status_code']);
+        }
+
+        try {
+            $this->recordModel->logActivity(
+                (int) $this->user['user_id'],
+                'Recorded attendance',
+                $result['message']
+            );
+        } catch (Throwable $error) {
+            $this->logAttendanceFailure('Attendance activity logging failed (' . get_class($error) . '): ' . $error->getMessage());
+        }
+
+        if ($this->apiRequest) {
+            return $this->jsonResponse([
+                'ok' => true,
+                'data' => [
+                    'trainee' => $result['data']['trainee'],
+                    'status' => $result['data']['status'],
+                    'scan_action' => $result['data']['action'],
+                ],
+                'message' => $result['message'],
+            ]);
+        }
+
+        $this->notice($result['message']);
+        redirect($this->url('manage/attendance'));
+        exit;
+    }
+
+    public function exportReport($period)
+    {
+        if (!$this->requireUser()) {
+            return;
+        }
+        if (!$this->inRoleGroup('teaching_staff')) {
+            return $this->deny('You are not allowed to export attendance reports.');
+        }
+        if (!in_array($period, ['daily', 'weekly', 'monthly'], true)) {
+            return $this->actionError('That report is not available.', 'manage/attendance', 404);
+        }
+
+        $today = new DateTimeImmutable('today');
+        if ($period === 'weekly') {
+            $start = $today->modify('monday this week');
+            $end = $start->modify('+6 days');
+        } elseif ($period === 'monthly') {
+            $start = $today->modify('first day of this month');
+            $end = $today->modify('last day of this month');
+        } else {
+            $start = $today;
+            $end = $today;
+        }
+
+        try {
+            $records = $this->attendanceModel->attendanceReport(
+                $start->format('Y-m-d'),
+                $end->format('Y-m-d'),
+                $this->user,
+                10000
+            );
+        } catch (Throwable $error) {
+            error_log('Attendance CSV export query failed (' . get_class($error) . '): ' . $error->getMessage());
+            return $this->attendanceError('The attendance report could not be generated.', 500);
+        }
+        while (ob_get_level() > 0) {
+            if (!ob_end_clean()) {
+                if (!ob_clean()) {
+                    error_log('Attendance CSV export could not clear the output buffer.');
+                    http_response_code(500);
+                    exit;
+                }
+                break;
+            }
+        }
+        if (headers_sent($file, $line)) {
+            error_log('Attendance CSV export aborted because output was sent before headers at ' . $file . ':' . $line . '.');
+            http_response_code(500);
+            exit;
+        }
+
+        $output = fopen('php://output', 'w');
+        if ($output === false) {
+            error_log('Attendance CSV export could not open the output stream.');
+            http_response_code(500);
+            exit;
+        }
+        $filename = 'smarttrack-' . $period . '-report-' . $today->format('Y-m-d') . '.csv';
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        fputcsv($output, ['Date', 'Trainee', 'Program', 'Class', 'Time in', 'Time out', 'Status', 'Remarks'], ',', '"', '');
+        foreach ($records as $record) {
+            fputcsv($output, [
+                $this->safeCsvText($record['attendance_date'] ?? ''),
+                $this->safeCsvText(trim((string) ($record['first_name'] ?? '') . ' ' . (string) ($record['last_name'] ?? ''))),
+                $this->safeCsvText($record['program_name'] ?? ''),
+                $this->safeCsvText($record['class_name'] ?? ''),
+                $this->safeCsvText($record['time_in'] ?? ''),
+                $this->safeCsvText($record['time_out'] ?? ''),
+                $this->safeCsvText($record['status'] ?? ''),
+                $this->safeCsvText($record['remarks'] ?? ''),
+            ], ',', '"', '');
+        }
+        fclose($output);
+        exit;
+    }
+
+    private function validateScanInput($qrCodeInput, $actionInput, $classIdInput, $scheduleIdInput, &$classId, &$scheduleId)
+    {
         $errors = [];
+        $qrCode = is_scalar($qrCodeInput) ? trim((string) $qrCodeInput) : '';
+        $action = is_scalar($actionInput) ? (string) $actionInput : '';
+        $classValue = is_scalar($classIdInput) ? trim((string) $classIdInput) : '';
+        $scheduleValue = is_scalar($scheduleIdInput) ? trim((string) $scheduleIdInput) : '';
+        $classId = filter_var($classValue, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $scheduleId = $scheduleValue === ''
+            ? 0
+            : filter_var($scheduleValue, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
         if ($qrCode === '' || strlen($qrCode) > 100) {
             $errors['qr_code'] = 'Enter a QR code of 1 to 100 characters.';
         }
@@ -36,96 +220,40 @@ class Attendance extends Base
         if ($scheduleId === false) {
             $errors['schedule_id'] = 'Choose a valid session.';
         }
-        if ($errors) {
-            if ($this->apiRequest) {
-                $this->jsonResponse([
-                    'message' => 'Check the scan details and try again.',
-                    'errors' => $errors,
-                ], 422);
-            }
-            return $this->actionError('Enter a QR ID and choose time-in or time-out.', 'manage/attendance');
+        if (!is_scalar($qrCodeInput) || !is_scalar($actionInput)
+            || !is_scalar($classIdInput) || !is_scalar($scheduleIdInput)) {
+            $errors['scan'] = 'Scan details must be scalar values.';
         }
-        $class = $this->attendanceModel->attendanceClass((int) $classId, $this->user);
-        if (!$class) {
-            if (!$this->apiRequest) {
-                return $this->actionError('That class is not available to your account.', 'manage/attendance', 404);
-            }
-            $this->jsonResponse(['message' => 'That class is not available to your account.'], 404);
-        }
-        $qrTrainee = $this->attendanceModel->activeTraineeByQrCode($qrCode);
-        $enrolled = $qrTrainee
-            ? $this->attendanceModel->enrollmentForClass((int) $classId, (int) $qrTrainee['trainee_id'])
-            : null;
-        if (!$enrolled) {
-            if ($this->apiRequest) {
-                $this->jsonResponse([
-                    'message' => 'That trainee is not enrolled in the selected class.',
-                    'errors' => ['qr_code' => 'No active enrolled trainee matches this code.'],
-                ], 422);
-            }
-            return $this->actionError('That trainee is not enrolled in the selected class.', 'manage/attendance');
-        }
-        if ($scheduleId && !$this->attendanceModel->scheduleForToday((int) $scheduleId, (int) $classId)) {
-            if ($this->apiRequest) {
-                $this->jsonResponse([
-                    'message' => 'Choose a session scheduled for this class today.',
-                    'errors' => ['schedule_id' => 'This session is not scheduled for the selected class today.'],
-                ], 422);
-            }
-            return $this->actionError('Choose a session scheduled for this class today.', 'manage/attendance');
-        }
-        $result = $this->attendanceModel->scanAttendance($qrCode, $action, (int) $classId, (int) $scheduleId, (int) $this->user['user_id']);
-        if (isset($result['success'])) {
-            $this->recalculateEligibilityPair($qrTrainee['trainee_id'], $classId);
-            $this->model->logActivity((int) $this->user['user_id'], 'Recorded attendance', $result['success']);
-        }
-        if ($this->apiRequest) {
-            if (isset($result['error'])) {
-                $this->jsonResponse([
-                    'message' => $result['error'],
-                    'errors' => ['scan_action' => $result['error']],
-                ], 422);
-            }
-            $this->jsonResponse([
-                'ok' => true,
-                'data' => [
-                    'trainee' => $result['trainee'],
-                    'status' => $result['status'],
-                    'scan_action' => $result['action'],
-                ],
-                'message' => $result['success'],
-            ]);
-        }
-        $this->notice($result['success'] ?? $result['error']);
-        redirect($this->url('manage/attendance'));
+
+        $classId = $classId === false ? 0 : (int) $classId;
+        $scheduleId = $scheduleId === false ? 0 : (int) $scheduleId;
+        return $errors;
     }
 
-    public function exportReport($period)
+    private function attendanceError($message, $status)
     {
-        if (!$this->requireUser() || !in_array($period, ['daily', 'weekly', 'monthly'], true)) {
-            return $this->deny('That report is not available.');
+        if ($this->apiRequest) {
+            return $this->jsonResponse(['message' => $message, 'errors' => []], (int) $status);
         }
-        $today = new DateTimeImmutable('today');
-        if ($period === 'weekly') {
-            $start = $today->modify('monday this week');
-            $end = $start->modify('+6 days');
-        } elseif ($period === 'monthly') {
-            $start = $today->modify('first day of this month');
-            $end = $today->modify('last day of this month');
-        } else {
-            $start = $today;
-            $end = $today;
+        return $this->actionError($message, 'manage/attendance', (int) $status);
+    }
+
+    private function safeCsvText($value): string
+    {
+        $text = (string) $value;
+        if (preg_match('/^[\s\x00-\x20]*[=+\-@]/u', $text) === 1) {
+            return "'" . $text;
         }
-        $records = $this->model->attendanceReport($start->format('Y-m-d'), $end->format('Y-m-d'), $this->user);
-        $filename = 'smarttrack-' . $period . '-report-' . $today->format('Y-m-d') . '.csv';
-        header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename="' . $filename . '"');
-        $output = fopen('php://output', 'w');
-        fputcsv($output, ['Date', 'Trainee', 'Program', 'Class', 'Time in', 'Time out', 'Status', 'Remarks']);
-        foreach ($records as $record) {
-            fputcsv($output, [$record['attendance_date'], $record['first_name'] . ' ' . $record['last_name'], $record['program_name'], $record['class_name'], $record['time_in'], $record['time_out'], $record['status'], $record['remarks']]);
+        return $text;
+    }
+
+    private function logAttendanceFailure($message)
+    {
+        try {
+            error_log($message);
+        } catch (Throwable $loggingError) {
+            return false;
         }
-        fclose($output);
-        exit;
+        return true;
     }
 }

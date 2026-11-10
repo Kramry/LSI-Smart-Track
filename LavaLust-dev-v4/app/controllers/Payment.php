@@ -78,11 +78,12 @@ class Payment extends Base
             'checkout_url' => $checkoutUrl,
             'raw_response' => json_encode($response),
         ]);
-        $this->jsonResponse(['message' => 'Xendit payment session created.', 'checkout_url' => $checkoutUrl]);
+        return $this->jsonResponse(['message' => 'Xendit payment session created.', 'checkout_url' => $checkoutUrl]);
     }
 
     public function apiXenditWebhook()
     {
+        // Xendit authenticates callbacks with x-callback-token; it does not define an HMAC signature header here.
         $expected = trim((string) getenv('XENDIT_WEBHOOK_TOKEN'));
         $provided = (string) ($_SERVER['HTTP_X_CALLBACK_TOKEN'] ?? '');
         if ($expected === '' || !hash_equals($expected, $provided)) {
@@ -104,11 +105,13 @@ class Payment extends Base
         if (!$payment) {
             return $this->jsonResponse(['message' => 'Payment reference not found.'], 404);
         }
-        $result = $this->verifyAndReconcileXenditPayment($payment);
+        $result = $this->verifyAndReconcileXenditPayment($payment, true);
         if (!$result['ok']) {
             return $this->jsonResponse(['message' => $result['message']], $result['http_status']);
         }
-        $this->jsonResponse(['message' => 'Webhook received.']);
+        return $this->jsonResponse([
+            'message' => !empty($result['already_processed']) ? 'Webhook already processed.' : 'Webhook received.',
+        ]);
     }
 
     public function apiXenditPaymentStatus()
@@ -132,7 +135,7 @@ class Payment extends Base
         $this->jsonResponse(['status' => $result['status']]);
     }
 
-    private function verifyAndReconcileXenditPayment(array $payment)
+    private function verifyAndReconcileXenditPayment(array $payment, bool $skipSameStatus = false)
     {
         require_once APP_DIR . 'libraries/XenditService.php';
         $service = new XenditService();
@@ -184,16 +187,28 @@ class Payment extends Base
             }
         }
 
-        $result = $this->paymentModel->reconcileXenditPayment(
-            (int) $payment['id'],
-            $verifiedStatus,
-            $transactionId,
-            json_encode($verifiedResponse, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-        );
+        if ($skipSameStatus && ($payment['status'] ?? null) === $verifiedStatus) {
+            return ['ok' => true, 'status' => $verifiedStatus, 'already_processed' => true];
+        }
+        try {
+            $result = $this->paymentModel->reconcileXenditPayment(
+                (int) $payment['id'],
+                $verifiedStatus,
+                $transactionId,
+                json_encode($verifiedResponse, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            );
+        } catch (Throwable $error) {
+            error_log('Xendit payment reconciliation failed for payment #' . (int) $payment['id'] . ': ' . $error->getMessage());
+            return ['ok' => false, 'http_status' => 500, 'message' => 'Payment reconciliation failed.'];
+        }
         if (!$result['success']) {
             return ['ok' => false, 'http_status' => 422, 'message' => $result['message']];
         }
-        return ['ok' => true, 'status' => $result['status']];
+        return [
+            'ok' => true,
+            'status' => $result['status'],
+            'already_processed' => !empty($result['already_processed']),
+        ];
     }
 
     private function xenditAmountMatches($providerAmount, $expectedAmount)
@@ -274,7 +289,7 @@ class Payment extends Base
 
     private function isPaymentStaff()
     {
-        return in_array($this->user['role'] ?? '', ['administrator', 'staff'], true);
+        return $this->inRoleGroup('administrative_staff');
     }
 
     public function payments()
@@ -460,6 +475,9 @@ class Payment extends Base
         $trainee = $this->userModel->traineeForUser((int) $this->user['user_id']);
         $feeId = (int) $this->input('trainee_fee_id');
         $fee = $this->paymentModel->feeDetails($feeId);
+        if ($trainee && $fee && (int) $fee['trainee_id'] === (int) $trainee['trainee_id'] && (float) $fee['balance'] <= 0.01) {
+            return $this->actionError('This fee is already fully paid.', 'my-payments');
+        }
         $amount = $this->validAmount($this->input('amount'));
         $method = (string) $this->input('method');
         $reference = trim((string) $this->input('reference_number'));
@@ -606,6 +624,9 @@ class Payment extends Base
             . '<p>This receipt confirms the payment recorded in the LSI SmartTrack payment ledger.</p>';
         $pdf->setPDFFilename('receipt-' . preg_replace('/[^A-Za-z0-9_-]/', '_', $payment['receipt_number']) . '.pdf');
         $pdf->addHTMLCell(html: $html, posx: 20, posy: 20, width: 170);
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
         $pdf->renderPDF($pdf->getOutPDFString());
         exit;
     }
@@ -686,6 +707,9 @@ class Payment extends Base
                 $html .= '<tr><td>' . htmlspecialchars((string) ($row[$outstanding ? 'due_date' : 'report_date'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row[$outstanding ? 'fee_kind' : 'report_type'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row['trainee_name'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row['fee_name'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>' . htmlspecialchars((string) ($row[$outstanding ? 'trainee_number' : 'reference'] ?? ''), ENT_QUOTES, 'UTF-8') . '</td><td>PHP ' . number_format((float) ($row[$outstanding ? 'balance' : 'amount'] ?? 0), 2) . '</td></tr>';
             }
             $pdf->addHTMLCell(html: $html . '</tbody></table>', posx: 15, posy: 15, width: 267);
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
             $pdf->downloadPDF($pdf->getOutPDFString());
             exit;
         }
@@ -713,7 +737,6 @@ class Payment extends Base
 
     public function apiExportReport()
     {
-        $this->apiRequest = true;
         return $this->exportReport();
     }
 

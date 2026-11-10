@@ -13,7 +13,7 @@ class SmartTrack_api extends Base
 
     public function apiSession()
     {
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'ok' => true,
             'data' => [
                 'authenticated' => (bool) $this->user,
@@ -26,11 +26,11 @@ class SmartTrack_api extends Base
 
     public function apiNotificationHistory()
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return;
         }
         $service = $this->notificationService();
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'history' => $service->history([
                 'channel' => is_scalar($this->queryParams()['channel'] ?? null) ? trim((string) $this->queryParams()['channel']) : '',
                 'status' => is_scalar($this->queryParams()['status'] ?? null) ? trim((string) $this->queryParams()['status']) : '',
@@ -52,20 +52,38 @@ class SmartTrack_api extends Base
         $channels = $this->input('channels');
         $channels = is_array($channels) ? array_values(array_intersect($channels, ['email'])) : [];
         $traineeIds = $this->input('trainee_ids');
-        $traineeIds = is_array($traineeIds) ? $traineeIds : [];
+        $traineeIds = is_array($traineeIds)
+            ? array_values(array_filter($traineeIds, 'is_scalar'))
+            : [];
         if (!$announcementId || !$channels || !in_array($mode, ['all', 'batch', 'selected'], true)) {
             return $this->jsonResponse(['message' => 'Choose an announcement, recipients, and notification channel.'], 422);
         }
-        $announcement = $this->recordModel->announcementForNotifications($announcementId);
+        $announcement = $this->recordModel->findRecordScoped('announcements', 'announcement_id', $announcementId, $this->user);
         if (!$announcement || $announcement['status'] !== 'published') {
             return $this->jsonResponse(['message' => 'Only published announcements can be sent.'], 422);
+        }
+        if ($mode === 'batch' && !$this->recordModel->findRecordScoped('training_classes', 'class_id', $classId, $this->user)) {
+            return $this->jsonResponse(['message' => 'Choose a class available to your account.', 'errors' => ['class_id' => 'Choose a valid class.']], 422);
+        }
+        if ($mode === 'selected') {
+            $traineeIds = array_values(array_unique(array_filter(array_map('intval', $traineeIds), static function ($id) {
+                return $id > 0;
+            })));
+            if (!$traineeIds) {
+                return $this->jsonResponse(['message' => 'Choose at least one recipient.', 'errors' => ['trainee_ids' => 'Choose at least one recipient.']], 422);
+            }
+            foreach ($traineeIds as $traineeId) {
+                if (!$this->recordModel->findRecordScoped('trainees', 'trainee_id', $traineeId, $this->user)) {
+                    return $this->jsonResponse(['message' => 'One or more recipients are not available to your account.'], 403);
+                }
+            }
         }
         $service = $this->notificationService();
         $recipients = $service->recipients($mode, $classId, $traineeIds);
         $queued = $service->queue($announcement, $recipients, $channels);
         $result = $service->processAnnouncement($announcementId);
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Sent announcement notifications', $announcement['title']);
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'message' => 'Notification processing completed.',
             'data' => ['recipients' => count($recipients), 'queued' => $queued['queued'], 'skipped' => $queued['skipped']] + $result,
         ]);
@@ -76,13 +94,18 @@ class SmartTrack_api extends Base
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can retry notifications.'], 403);
         }
-        $notification = $this->recordModel->failedNotification((int) $id);
-        if (!$notification) {
+        $notificationId = filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $notification = $notificationId === false ? null : $this->recordModel->failedNotification($notificationId);
+        if (!$notification || !$this->recordModel->findRecordScoped('announcements', 'announcement_id', (int) $notification['announcement_id'], $this->user)) {
             return $this->jsonResponse(['message' => 'Only failed notifications can be retried.'], 404);
+        }
+        $announcement = $this->recordModel->announcementForNotifications((int) $notification['announcement_id']);
+        if (!$announcement || $announcement['status'] !== 'published') {
+            return $this->jsonResponse(['message' => 'Only notifications for published announcements can be retried.'], 422);
         }
         $this->recordModel->retryNotification((int) $id);
         $result = $this->notificationService()->processAnnouncement((int) $notification['announcement_id']);
-        $this->jsonResponse(['message' => 'Notification retry completed.', 'data' => $result]);
+        return $this->jsonResponse(['message' => 'Notification retry completed.', 'data' => $result]);
     }
 
     public function apiDeleteNotification($id)
@@ -95,7 +118,7 @@ class SmartTrack_api extends Base
             return $this->jsonResponse(['message' => 'Notification history record not found.'], 404);
         }
         $this->recordModel->deleteNotification((int) $id);
-        $this->jsonResponse(['message' => 'Notification history record deleted.']);
+        return $this->jsonResponse(['message' => 'Notification history record deleted.']);
     }
 
     public function apiSaveNotificationSettings()
@@ -105,7 +128,7 @@ class SmartTrack_api extends Base
         }
         $email = $this->input('email_enabled') ? 1 : 0;
         $this->recordModel->saveNotificationSettings($email);
-        $this->jsonResponse(['message' => 'Notification settings saved.']);
+        return $this->jsonResponse(['message' => 'Notification settings saved.']);
     }
 
     public function apiTestNotification()
@@ -123,7 +146,7 @@ class SmartTrack_api extends Base
         if (!$result['ok']) {
             return $this->jsonResponse(['message' => $result['error'] ?? 'Provider test failed.'], 422);
         }
-        $this->jsonResponse(['message' => 'Provider accepted the test notification.']);
+        return $this->jsonResponse(['message' => 'Provider accepted the test notification.']);
     }
 
     public function apiStorageStatus()
@@ -134,7 +157,7 @@ class SmartTrack_api extends Base
         $this->call->library('CloudStorage');
         $storage = new CloudStorage();
         $enabled = $storage->isEnabled();
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'enabled' => $enabled,
             'provider' => $enabled ? (getenv('CLOUD_STORAGE_PROVIDER') ?: 'cloud') : 'local',
             'fallback_available' => true,
@@ -147,7 +170,7 @@ class SmartTrack_api extends Base
             return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         if (!$this->validCsrf()) {
-            $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
+            return $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
         }
 
         $username = trim((string) $this->input('username'));
@@ -162,7 +185,7 @@ class SmartTrack_api extends Base
             $errors['password'] = 'Enter a password of 1 to 255 characters.';
         }
         if ($errors) {
-            $this->jsonResponse([
+            return $this->jsonResponse([
                 'message' => 'Check the highlighted fields.',
                 'errors' => $errors,
             ], 422);
@@ -173,7 +196,7 @@ class SmartTrack_api extends Base
         $account = $username !== '' ? $this->userModel->userByUsername($username) : null;
 
         if (!$account || $account['status'] !== 'active' || !password_verify($password, $account['password'])) {
-            $this->jsonResponse(['message' => 'The username or password is incorrect.'], 401);
+            return $this->jsonResponse(['message' => 'The username or password is incorrect.'], 401);
         }
 
         $user = [
@@ -192,7 +215,7 @@ class SmartTrack_api extends Base
         ]);
         $this->setRefreshTokenCookie($tokens['refresh_token']);
 
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'ok' => true,
             'data' => [
                 'authenticated' => true,
@@ -208,7 +231,7 @@ class SmartTrack_api extends Base
 
     public function apiRegistrationOptions()
     {
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'programs' => $this->recordModel->options('programs'),
         ]);
     }
@@ -219,7 +242,7 @@ class SmartTrack_api extends Base
             return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
         if (!$this->validCsrf()) {
-            $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
+            return $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
         }
 
         $name = trim((string) $this->input('full_name'));
@@ -243,13 +266,13 @@ class SmartTrack_api extends Base
         $passwordConfirmation = (string) $this->input('password_confirmation');
         $errors = [];
 
-        if ($name === '' || strlen($name) > 150) {
+        if ($name === '' || mb_strlen($name) > 150) {
             $errors['full_name'] = 'Enter your full name.';
         }
-        if ($firstName === '' || strlen($firstName) > 100) {
+        if ($firstName === '' || mb_strlen($firstName) > 100) {
             $errors['first_name'] = 'Enter your first name.';
         }
-        if ($lastName === '' || strlen($lastName) > 100) {
+        if ($lastName === '' || mb_strlen($lastName) > 100) {
             $errors['last_name'] = 'Enter your last name.';
         }
         if ($requestedRole !== '' && $requestedRole !== 'trainee') {
@@ -259,15 +282,14 @@ class SmartTrack_api extends Base
             $errors['sex'] = 'Select your sex.';
         }
         if ($dateOfBirth !== '') {
-            $date = DateTime::createFromFormat('!Y-m-d', $dateOfBirth);
-            if (!$date || $date->format('Y-m-d') !== $dateOfBirth) {
+            if (!$this->isValidApiDate($dateOfBirth)) {
                 $errors['date_of_birth'] = 'Enter a valid date of birth.';
             }
         }
-        if ($contactNumber === '' || strlen($contactNumber) > 20) {
+        if (!$this->isValidContactNumber($contactNumber)) {
             $errors['contact_number'] = 'Enter your contact number.';
         }
-        if ($course === '' || strlen($course) > 100) {
+        if ($course === '' || mb_strlen($course) > 100) {
             $errors['course'] = 'Enter your course or qualification.';
         }
         if (!preg_match('/^[A-Za-z0-9_.-]{4,50}$/', $username)) {
@@ -281,23 +303,23 @@ class SmartTrack_api extends Base
         } elseif ($programId !== '' && !$this->recordModel->isActiveProgram((int) $programId)) {
             $errors['program_id'] = 'Select a valid training program.';
         }
-        if (strlen($password) < 10 || strlen($password) > 255) {
+        if (mb_strlen($password) < 10 || mb_strlen($password) > 255) {
             $errors['password'] = 'Passwords must be 10-255 characters.';
         }
         if ($password !== $passwordConfirmation) {
             $errors['password_confirmation'] = 'Passwords do not match.';
         }
         if ($errors) {
-            $this->jsonResponse([
+            return $this->jsonResponse([
                 'message' => 'Check the highlighted fields.',
                 'errors' => $errors,
             ], 422);
         }
         if ($this->userModel->userByUsername($username)) {
-            $this->jsonResponse(['message' => 'That username is already taken.', 'errors' => ['username' => 'Choose another username.']], 422);
+            return $this->jsonResponse(['message' => 'That username is already taken.', 'errors' => ['username' => 'Choose another username.']], 422);
         }
         if ($this->userModel->userByEmail($email)) {
-            $this->jsonResponse(['message' => 'That email address is already registered.', 'errors' => ['email' => 'Use another email address.']], 422);
+            return $this->jsonResponse(['message' => 'That email address is already registered.', 'errors' => ['email' => 'Use another email address.']], 422);
         }
 
         $this->userModel->createUser($name, $username, $password, 'trainee', $email);
@@ -313,7 +335,7 @@ class SmartTrack_api extends Base
             'course' => $course,
             'program_id' => $programId,
         ]);
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'ok' => true,
             'data' => ['registered' => true],
             'message' => 'Account created successfully. Please sign in.',
@@ -329,7 +351,7 @@ class SmartTrack_api extends Base
             return;
         }
         if (!$this->validCsrf()) {
-            $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
+            return $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
         }
 
         $refreshToken = (string) ($_COOKIE['smarttrack_refresh'] ?? '');
@@ -338,7 +360,7 @@ class SmartTrack_api extends Base
         }
         $this->clearRefreshTokenCookie();
         $this->session->sess_destroy();
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'ok' => true,
             'data' => ['authenticated' => false],
             'message' => '',
@@ -383,7 +405,7 @@ class SmartTrack_api extends Base
         }
 
         $this->setRefreshTokenCookie($result['refresh_token']);
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'access_token' => $result['access_token'],
             'expires_in' => $result['expires_in'],
             'token_type' => $result['token_type'],
@@ -397,7 +419,7 @@ class SmartTrack_api extends Base
         }
         $user = $this->authenticatedApiUser();
         if (!$user) {
-            $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
+            return $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
         }
 
         $data = [
@@ -406,23 +428,23 @@ class SmartTrack_api extends Base
             'announcements' => $this->dashboardModel->announcements(),
         ];
 
-        if (in_array($user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if ($this->inRoleGroup('teaching_staff', $user)) {
             $data['charts'] = $this->dashboardModel->dashboardChartData($user);
         }
 
-        $this->jsonResponse($data);
+        return $this->jsonResponse($data);
     }
 
     public function getTrainees()
     {
         if (!$this->user) {
-            $this->jsonResponse(['message' => 'Sign in to view trainees.'], 401);
+            return $this->jsonResponse(['message' => 'Sign in to view trainees.'], 401);
         }
         if (!$this->canAccess('trainees')) {
-            $this->jsonResponse(['message' => 'You do not have access to trainees.'], 403);
+            return $this->jsonResponse(['message' => 'You do not have access to trainees.'], 403);
         }
 
-        $this->jsonResponse(['trainees' => $this->model->records('trainees', $this->user)]);
+        return $this->jsonResponse(['trainees' => $this->model->records('trainees', $this->user)]);
     }
 
     public function apiModule($section)
@@ -432,19 +454,30 @@ class SmartTrack_api extends Base
         }
         $user = $this->authenticatedApiUser();
         if (!$user) {
-            $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
+            return $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
         }
 
         $canAccessProfile = $section === 'profile';
         $canAccessMyCertificates = $section === 'my_certificates' && $user['role'] === 'trainee';
         if (!$this->canAccess($section) && !$canAccessProfile && !$canAccessMyCertificates) {
-            $this->jsonResponse(['message' => 'You do not have access to this section.'], 403);
+            return $this->jsonResponse(['message' => 'You do not have access to this section.'], 403);
         }
 
+        try {
+            return $this->buildApiModuleResponse($section, $user);
+        } catch (Throwable $error) {
+            error_log('API module load failed for section ' . preg_replace('/[^A-Za-z0-9_-]/', '', (string) $section) . ' (' . get_class($error) . '): ' . $error->getMessage());
+            return $this->jsonResponse(['message' => 'The requested section could not be loaded.'], 500);
+        }
+    }
+
+    private function buildApiModuleResponse($section, array $user)
+    {
         $definition = $section === 'certificates'
-            && in_array($user['role'], ['administrator', 'staff'], true)
+            && $this->inRoleGroup('administrative_staff', $user)
                 ? null
                 : $this->resourceDefinition($section);
+        $sectionData = $definition ? null : $this->apiModuleSectionData($section, $user);
         $records = [];
         $fields = [];
         $columns = [];
@@ -469,82 +502,18 @@ class SmartTrack_api extends Base
                 unset($record);
             }
             $fields = $canManage ? $this->fieldsFor($section) : [];
-        } elseif ($section === 'certificates' && in_array($user['role'], ['administrator', 'staff'], true)) {
-            $this->eligibilityModel->refreshEligibilityRecords();
-            $records = $this->certificateModel->getCertificates([]);
-            $columns = ['trainee_name', 'program_name', 'class_name', 'certificate_number', 'issue_date', 'status'];
-            $key = 'certificate_id';
-        } elseif ($section === 'eligibility' && in_array($user['role'], ['administrator', 'staff'], true)) {
-            $records = $this->eligibilityModel->getEligibilityRecords([]);
-            $columns = ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'attendance_percentage', 'documents_approved', 'assessments_completed', 'is_eligible', 'approval_status', 'ineligibility_reasons'];
-            $key = 'eligibility_id';
-        } elseif ($section === 'assessments' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true)) {
-            $records = $this->assessmentModel->assessmentRecords();
-            $columns = ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'];
-            $key = 'assessment_id';
-            $fields = [
-                ['name' => 'trainee_id', 'label' => 'Trainee', 'type' => 'options', 'options' => 'trainees', 'required' => true],
-                ['name' => 'class_id', 'label' => 'Class', 'type' => 'options', 'options' => 'classes', 'required' => true],
-                ['name' => 'assessment_name', 'label' => 'Assessment name', 'required' => true],
-                ['name' => 'outcome', 'label' => 'Outcome', 'type' => 'select', 'values' => ['pass', 'fail'], 'required' => true],
-                ['name' => 'assessment_date', 'label' => 'Assessment date', 'type' => 'date', 'required' => true],
-                ['name' => 'notes', 'label' => 'Notes', 'type' => 'textarea'],
-            ];
-        } elseif ($section === 'my_certificates' && $user['role'] === 'trainee') {
-            $trainee = $this->certificateModel->traineeForUser((int) $user['user_id']);
-            if ($trainee) {
-                $records = $this->certificateModel->traineeCertificates((int) $trainee['trainee_id']);
-                $eligibilityRecords = $this->certificateModel->traineeEligibilityRecords((int) $trainee['trainee_id']);
-            }
-            $columns = ['certificate_number', 'program_name', 'class_name', 'issue_date', 'status'];
-            $key = 'certificate_id';
-        } elseif ($section === 'certificate_config' && in_array($user['role'], ['administrator', 'staff'], true)) {
-            $configs = [];
-            foreach ([
-                'min_attendance_percentage', 'require_documents', 'require_assessments',
-                'required_assessment_count',
-            ] as $configKey) {
-                $configs[$configKey] = $this->configModel->getConfig($configKey, '');
-            }
-            $template = $this->certificateModel->getLatestTemplate() ?: $this->certificateModel->legacyTemplate();
-            $this->jsonResponse([
-                'title' => 'Certificate Settings',
-                'section' => 'certificate_config',
-                'configs' => $configs,
-                'certificate_template' => $template,
-                'certificate_template_versions' => $this->certificateModel->getTemplateVersions(),
-                'document_requirements' => $this->documentModel->documentRequirements(),
-                'signatories' => $this->certificateModel->signatories(),
-                'signatory_accounts' => $this->certificateModel->signatoryAccounts(),
-                'certificate_classes' => $this->recordModel->certificateClassOptions(),
-                'can_configure_certificates' => true,
-                'can_manage' => false,
-                'records' => [],
-                'fields' => [],
-                'columns' => [],
-                'primary_key' => '',
-            ]);
+        } elseif ($sectionData !== null) {
+            $records = $sectionData['records'];
+            $columns = $sectionData['columns'];
+            $key = $sectionData['key'];
+            $fields = $sectionData['fields'];
+            $eligibilityRecords = $sectionData['eligibility'];
+        } elseif ($section === 'certificate_config' && $this->inRoleGroup('administrative_staff', $user)) {
+            return $this->certificateConfigModuleResponse();
         } elseif ($section === 'profile') {
-            $trainee = $user['role'] === 'trainee'
-                ? $this->userModel->traineeForUser((int) $user['user_id'])
-                : null;
-            $this->jsonResponse([
-                'title' => 'My Profile',
-                'section' => 'profile',
-                'user' => $user,
-                'trainee' => $trainee,
-                'can_manage' => false,
-                'records' => [],
-                'fields' => [],
-                'columns' => [],
-                'primary_key' => '',
-            ]);
-        } elseif ($section === 'documents') {
-            $records = $this->model->records('documents', $user);
-            $columns = ['trainee_name', 'document_name', 'upload_date', 'status', 'access_level'];
-            $key = 'document_id';
+            return $this->profileModuleResponse($user);
         } else {
-            $this->jsonResponse(['message' => 'This section is not available in the Vue interface.'], 404);
+            return $this->jsonResponse(['message' => 'This section is not available in the Vue interface.'], 404);
         }
 
         foreach ($fields as &$field) {
@@ -554,7 +523,7 @@ class SmartTrack_api extends Base
         }
         unset($field);
 
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'title' => $definition['title'] ?? ucfirst(str_replace('_', ' ', $section)),
             'section' => $section,
             'records' => $records,
@@ -565,13 +534,13 @@ class SmartTrack_api extends Base
             'can_manage' => $section === 'documents' ? false : $canManage,
             'can_create' => $canManage && !in_array($section, ['activity', 'documents'], true)
                 && !($section === 'inquiries' && $user['role'] !== 'trainee'),
-            'can_upload' => $section === 'documents' && in_array($user['role'], ['administrator', 'staff', 'instructor', 'trainee'], true),
-            'can_manage_documents' => $section === 'documents' && in_array($user['role'], ['administrator', 'staff'], true),
-            'can_review_documents' => $section === 'documents' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true),
-            'can_manage_requirements' => $section === 'documents' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true),
+            'can_upload' => $section === 'documents' && $this->inRoleGroup('all_accounts', $user),
+            'can_manage_documents' => $section === 'documents' && $this->inRoleGroup('administrative_staff', $user),
+            'can_review_documents' => $section === 'documents' && $this->inRoleGroup('teaching_staff', $user),
+            'can_manage_requirements' => $section === 'documents' && $this->inRoleGroup('teaching_staff', $user),
             'can_download_documents' => $section === 'documents',
             'document_requirements' => $section === 'documents'
-                ? (in_array($user['role'], ['administrator', 'staff', 'instructor'], true)
+                ? ($this->inRoleGroup('teaching_staff', $user)
                     ? $this->documentModel->documentRequirements()
                     : ($user['role'] === 'trainee'
                         ? $this->documentModel->requirementsForTrainee((int) $user['user_id'])
@@ -580,16 +549,16 @@ class SmartTrack_api extends Base
             'trainee_classes' => $section === 'documents' && $user['role'] === 'trainee'
                 ? $this->documentModel->classesForTrainee((int) $user['user_id'])
                 : [],
-            'can_assess' => $section === 'assessments' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true),
+            'can_assess' => $section === 'assessments' && $this->inRoleGroup('teaching_staff', $user),
             'can_review_certificates' => in_array($section, ['certificates', 'eligibility'], true)
-                && in_array($user['role'], ['administrator', 'staff'], true),
+                && $this->inRoleGroup('administrative_staff', $user),
             'can_configure_certificates' => $section === 'certificate_config' && $user['role'] === 'administrator',
-            'can_scan_attendance' => $section === 'attendance' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true),
+            'can_scan_attendance' => $section === 'attendance' && $this->inRoleGroup('teaching_staff', $user),
             'attendance_options' => $section === 'attendance' ? [
                 'classes' => $this->model->options('classes', $user),
                 'schedules' => $this->attendanceModel->scheduleOptionsForToday($user),
             ] : [],
-            'attendance_followups' => $section === 'attendance' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true)
+            'attendance_followups' => $section === 'attendance' && $this->inRoleGroup('teaching_staff', $user)
                 ? $this->model->absenceFollowUps($user)
                 : [],
             'document_options' => $section === 'documents' ? [
@@ -599,8 +568,118 @@ class SmartTrack_api extends Base
             'certificate_stats' => $section === 'certificates' ? $this->certificateModel->certificateStats() : null,
             'assessment_options' => $section === 'assessments' ? [
                 'trainees' => $this->model->options('trainees', $user),
-                'classes' => $this->assessmentModel->classOptions(),
+                'classes' => $this->assessmentModel->classOptions($user),
             ] : [],
+        ]);
+    }
+
+    private function apiModuleSectionData(string $section, array $user): ?array
+    {
+        if ($section === 'certificates' && $this->inRoleGroup('administrative_staff', $user)) {
+            $this->eligibilityModel->refreshEligibilityRecords();
+            return [
+                'records' => $this->certificateModel->getCertificates([]),
+                'columns' => ['trainee_name', 'program_name', 'class_name', 'certificate_number', 'issue_date', 'status'],
+                'key' => 'certificate_id',
+                'fields' => [],
+                'eligibility' => [],
+            ];
+        }
+        if ($section === 'eligibility' && $this->inRoleGroup('administrative_staff', $user)) {
+            return [
+                'records' => $this->eligibilityModel->getEligibilityRecords([]),
+                'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'attendance_percentage', 'documents_approved', 'assessments_completed', 'is_eligible', 'approval_status', 'ineligibility_reasons'],
+                'key' => 'eligibility_id',
+                'fields' => [],
+                'eligibility' => [],
+            ];
+        }
+        if ($section === 'assessments' && $this->inRoleGroup('teaching_staff', $user)) {
+            return [
+                'records' => $this->assessmentModel->assessmentRecords($user),
+                'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'],
+                'key' => 'assessment_id',
+                'fields' => [
+                    ['name' => 'trainee_id', 'label' => 'Trainee', 'type' => 'options', 'options' => 'trainees', 'required' => true],
+                    ['name' => 'class_id', 'label' => 'Class', 'type' => 'options', 'options' => 'classes', 'required' => true],
+                    ['name' => 'assessment_name', 'label' => 'Assessment name', 'required' => true],
+                    ['name' => 'outcome', 'label' => 'Outcome', 'type' => 'select', 'values' => ['pass', 'fail'], 'required' => true],
+                    ['name' => 'assessment_date', 'label' => 'Assessment date', 'type' => 'date', 'required' => true],
+                    ['name' => 'notes', 'label' => 'Notes', 'type' => 'textarea'],
+                ],
+                'eligibility' => [],
+            ];
+        }
+        if ($section === 'my_certificates' && $user['role'] === 'trainee') {
+            $trainee = $this->certificateModel->traineeForUser((int) $user['user_id']);
+            return [
+                'records' => $trainee ? $this->certificateModel->traineeCertificates((int) $trainee['trainee_id']) : [],
+                'columns' => ['certificate_number', 'program_name', 'class_name', 'issue_date', 'status'],
+                'key' => 'certificate_id',
+                'fields' => [],
+                'eligibility' => $trainee ? $this->certificateModel->traineeEligibilityRecords((int) $trainee['trainee_id']) : [],
+            ];
+        }
+        if ($section === 'documents') {
+            return [
+                'records' => $this->model->records('documents', $user),
+                'columns' => ['trainee_name', 'document_name', 'upload_date', 'status', 'access_level'],
+                'key' => 'document_id',
+                'fields' => [],
+                'eligibility' => [],
+            ];
+        }
+        return null;
+    }
+
+    private function certificateConfigModuleResponse()
+    {
+        $configs = [];
+        foreach ([
+            'min_attendance_percentage',
+            'require_documents',
+            'require_assessments',
+            'required_assessment_count',
+        ] as $configKey) {
+            $configs[$configKey] = $this->configModel->getConfig($configKey, '');
+        }
+        $template = $this->certificateModel->getLatestTemplate() ?: $this->certificateModel->legacyTemplate();
+
+        return $this->jsonResponse([
+            'title' => 'Certificate Settings',
+            'section' => 'certificate_config',
+            'configs' => $configs,
+            'certificate_template' => $template,
+            'certificate_template_versions' => $this->certificateModel->getTemplateVersions(),
+            'document_requirements' => $this->documentModel->documentRequirements(),
+            'signatories' => $this->certificateModel->signatories(),
+            'signatory_accounts' => $this->certificateModel->signatoryAccounts(),
+            'certificate_classes' => $this->recordModel->certificateClassOptions(),
+            'can_configure_certificates' => true,
+            'can_manage' => false,
+            'records' => [],
+            'fields' => [],
+            'columns' => [],
+            'primary_key' => '',
+        ]);
+    }
+
+    private function profileModuleResponse(array $user)
+    {
+        $trainee = $user['role'] === 'trainee'
+            ? $this->userModel->traineeForUser((int) $user['user_id'])
+            : null;
+
+        return $this->jsonResponse([
+            'title' => 'My Profile',
+            'section' => 'profile',
+            'user' => $user,
+            'trainee' => $trainee,
+            'can_manage' => false,
+            'records' => [],
+            'fields' => [],
+            'columns' => [],
+            'primary_key' => '',
         ]);
     }
 
@@ -609,113 +688,18 @@ class SmartTrack_api extends Base
         return $this->apiUserFromToken();
     }
 
-    // API wrappers that call the actual controller methods
-    public function apiSaveModule($section)
+    private function isValidApiDate(string $value): bool
     {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Dashboard.php';
-        $dashboard = new Dashboard();
-        $dashboard->before_action();
-        $dashboard->save($section);
+        $date = DateTime::createFromFormat('!Y-m-d', $value);
+        $errors = DateTime::getLastErrors();
+        return $date !== false
+            && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0))
+            && $date->format('Y-m-d') === $value;
     }
 
-    public function apiDeleteModule($section, $id)
+    private function isValidContactNumber(string $value): bool
     {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Dashboard.php';
-        $dashboard = new Dashboard();
-        $dashboard->before_action();
-        $dashboard->delete($section, $id);
-    }
-
-    public function apiSaveProfile()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Profile.php';
-        $profile = new Profile();
-        $profile->before_action();
-        $profile->saveProfile();
-    }
-
-    public function apiSavePassword()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Profile.php';
-        $profile = new Profile();
-        $profile->before_action();
-        $profile->savePassword();
-    }
-
-    public function apiUploadDocument()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Documents.php';
-        $documents = new Documents();
-        $documents->before_action();
-        $documents->uploadDocument();
-    }
-
-    public function apiDownloadDocument($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Documents.php';
-        $documents = new Documents();
-        $documents->before_action();
-        $documents->downloadDocument($id);
-    }
-
-    public function apiUpdateDocumentStatus($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Documents.php';
-        $documents = new Documents();
-        $documents->before_action();
-        $documents->updateDocumentStatus($id);
-    }
-
-    public function apiReviewDocument($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Documents.php';
-        $documents = new Documents();
-        $documents->before_action();
-        $documents->reviewDocument($id);
-    }
-
-    public function apiDeleteDocument($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Documents.php';
-        $documents = new Documents();
-        $documents->before_action();
-        $documents->deleteDocument($id);
-    }
-
-    public function apiSaveAssessment()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Assessments.php';
-        $assessments = new Assessments();
-        $assessments->before_action();
-        $assessments->saveAssessment();
-    }
-
-    public function apiDeleteAssessment($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Assessments.php';
-        $assessments = new Assessments();
-        $assessments->before_action();
-        $assessments->deleteAssessment($id);
-    }
-
-    public function apiScanAttendance()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Attendance.php';
-        $attendance = new Attendance();
-        $attendance->before_action();
-        $attendance->scanAttendance();
+        return preg_match('/^[0-9\s\-\+\(\)]{7,20}$/', $value) === 1;
     }
 
     public function apiAttendanceClasses()
@@ -727,7 +711,7 @@ class SmartTrack_api extends Base
             return;
         }
 
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'classes' => $this->attendanceModel->attendanceClasses($this->user),
         ]);
     }
@@ -743,15 +727,15 @@ class SmartTrack_api extends Base
 
         $classId = filter_var($classId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         if ($classId === false) {
-            $this->jsonResponse(['message' => 'Choose a valid class.', 'errors' => ['class_id' => 'Choose a valid class.']], 422);
+            return $this->jsonResponse(['message' => 'Choose a valid class.', 'errors' => ['class_id' => 'Choose a valid class.']], 422);
         }
 
         $class = $this->attendanceModel->attendanceClass((int) $classId, $this->user);
         if (!$class) {
-            $this->jsonResponse(['message' => 'That class is not available to your account.'], 404);
+            return $this->jsonResponse(['message' => 'That class is not available to your account.'], 404);
         }
 
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'schedules' => $this->attendanceModel->attendanceSchedules((int) $classId),
         ]);
     }
@@ -765,7 +749,7 @@ class SmartTrack_api extends Base
             return;
         }
 
-        $this->jsonResponse([
+        return $this->jsonResponse([
             'records' => $this->attendanceModel->todayAttendance($this->user),
         ]);
     }
@@ -775,19 +759,10 @@ class SmartTrack_api extends Base
         if (!$this->requireUser()) {
             return false;
         }
-        if (!in_array($this->user['role'] ?? '', ['administrator', 'staff', 'instructor'], true)) {
-            $this->jsonResponse(['message' => 'You are not allowed to manage attendance.'], 403);
+        if (!$this->inRoleGroup('teaching_staff')) {
+            return $this->jsonResponse(['message' => 'You are not allowed to manage attendance.'], 403);
         }
         return true;
-    }
-
-    public function apiExportReport($period)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Attendance.php';
-        $attendance = new Attendance();
-        $attendance->before_action();
-        $attendance->exportReport($period);
     }
 
     public function apiReports()
@@ -797,15 +772,13 @@ class SmartTrack_api extends Base
         }
         $user = $this->authenticatedApiUser();
         if (!$user) {
-            $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
+            return $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
         }
-        if (!in_array($user['role'], ['administrator', 'staff'], true)) {
-            $this->jsonResponse(['message' => 'Reports are available to administrator and staff accounts.'], 403);
+        if (!$this->inRoleGroup('administrative_staff', $user)) {
+            return $this->jsonResponse(['message' => 'Reports are available to administrator and staff accounts.'], 403);
         }
-        require_once APP_DIR . 'models/Reports_model.php';
-        $reportsModel = new Reports_model($this->db);
-        $this->jsonResponse([
-            'reports' => $reportsModel->availableReports(),
+        return $this->jsonResponse([
+            'reports' => $this->getReportsModel()->availableReports(),
             'programs' => $this->recordModel->options('programs', $user),
             'classes' => $this->recordModel->options('classes', $user),
         ]);
@@ -818,16 +791,14 @@ class SmartTrack_api extends Base
         }
         $user = $this->authenticatedApiUser();
         if (!$user) {
-            $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
+            return $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
         }
-        if (!in_array($user['role'], ['administrator', 'staff'], true)) {
-            $this->jsonResponse(['message' => 'Reports are available to administrator and staff accounts.'], 403);
+        if (!$this->inRoleGroup('administrative_staff', $user)) {
+            return $this->jsonResponse(['message' => 'Reports are available to administrator and staff accounts.'], 403);
         }
         if (!$this->validCsrf()) {
-            $this->jsonResponse(['message' => 'Invalid CSRF token.'], 403);
+            return $this->jsonResponse(['message' => 'Invalid CSRF token.'], 403);
         }
-        require_once APP_DIR . 'models/Reports_model.php';
-        $reportsModel = new Reports_model($this->db);
         $reportType = trim((string) $this->input('report_type'));
         $format = trim((string) $this->input('format'));
         $filters = [
@@ -839,14 +810,30 @@ class SmartTrack_api extends Base
             'fee_kind' => trim((string) $this->input('fee_kind')),
             'method' => trim((string) $this->input('method')),
         ];
-        $availableReports = $reportsModel->availableReports();
+        foreach (['start_date', 'end_date'] as $dateField) {
+            if ($filters[$dateField] !== '' && !$this->isValidApiDate($filters[$dateField])) {
+                return $this->jsonResponse([
+                    'message' => 'Enter valid report dates.',
+                    'errors' => [$dateField => 'Use the YYYY-MM-DD format.'],
+                ], 422);
+            }
+        }
+        $filters['start_date'] = $filters['start_date'] ?: date('Y-m-01');
+        $filters['end_date'] = $filters['end_date'] ?: date('Y-m-d');
+        if ($filters['start_date'] > $filters['end_date']) {
+            return $this->jsonResponse([
+                'message' => 'The report start date must be before its end date.',
+                'errors' => ['start_date' => 'Must not be later than the end date.'],
+            ], 422);
+        }
+        $availableReports = $this->getReportsModel()->availableReports();
         if (!isset($availableReports[$reportType])) {
-            $this->jsonResponse(['message' => 'Invalid report type.'], 400);
+            return $this->jsonResponse(['message' => 'Invalid report type.'], 400);
         }
         if (!in_array($format, $availableReports[$reportType]['formats'])) {
-            $this->jsonResponse(['message' => 'Invalid format for this report type.'], 400);
+            return $this->jsonResponse(['message' => 'Invalid format for this report type.'], 400);
         }
-        $data = $reportsModel->getReportData($reportType, $filters);
+        $data = $this->getReportsModel()->getReportData($reportType, $filters);
         if ($format === 'pdf') {
             $this->apiGeneratePDF($reportType, $data, $filters, $availableReports);
         } else {
@@ -856,6 +843,10 @@ class SmartTrack_api extends Base
 
     private function apiGeneratePDF($reportType, $data, array $filters, array $availableReports)
     {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
         $pdf = SmartTrackPdf::create('L');
         $pdf->setTitle('SmartTrack ' . $availableReports[$reportType]['name']);
         $pdf->setAuthor('LSI SmartTrack');
@@ -863,7 +854,7 @@ class SmartTrack_api extends Base
         $html = '<h1 style="color: #173a60;">' . htmlspecialchars($availableReports[$reportType]['name'], ENT_QUOTES, 'UTF-8') . '</h1>';
         $html .= '<p style="color: #5d6f82; font-size: 12px;">';
         $html .= 'Report Period: ' . htmlspecialchars($filters['start_date'] . ' to ' . $filters['end_date'], ENT_QUOTES, 'UTF-8') . '<br>';
-        $html .= 'Generated: ' . date('Y-m-d H:i:s');
+        $html .= 'Generated: ' . (new DateTimeImmutable('now'))->format('Y-m-d H:i:s');
         $html .= '</p>';
         if (!empty($data)) {
             $html .= '<table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; font-size: 10px;">';
@@ -885,15 +876,19 @@ class SmartTrack_api extends Base
         } else {
             $html .= '<p style="color: #c4372c;">No data found for the selected filters.</p>';
         }
-        $filename = 'smarttrack-' . $reportType . '-report-' . $filters['start_date'] . '-to-' . $filters['end_date'] . '.pdf';
+        $filename = 'smarttrack-' . $reportType . '-report-' . bin2hex(random_bytes(8)) . '.pdf';
         $pdf->setPDFFilename($filename);
-        $pdf->addHTMLCell(html: $html, posx: 15, posy: 15, width: 267);
+        $pdf->addHTMLCell(html: $html, posx: 15, posy: 15);
         $pdf->downloadPDF($pdf->getOutPDFString());
         exit;
     }
 
     private function apiGenerateCSV($reportType, $data, array $filters)
     {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="smarttrack-' . $reportType . '-report-' . $filters['start_date'] . '-to-' . $filters['end_date'] . '.csv"');
         $output = fopen('php://output', 'w');
@@ -914,97 +909,9 @@ class SmartTrack_api extends Base
         exit;
     }
 
-    public function apiReviewEligibility()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->reviewEligibility();
-    }
-
-    public function apiRecalculateEligibility()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->recalculateEligibility();
-    }
-
-    public function apiDeleteEligibility($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->deleteEligibility($id);
-    }
-
-    public function apiIssueCertificate()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->issueCertificate();
-    }
-
-    public function apiRevokeCertificate()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->revokeCertificate();
-    }
-
-    public function apiSaveCertificateConfig()
-    {
-        $this->apiRequest = true;
-        try {
-            require_once APP_DIR . 'controllers/Certificates.php';
-            $certificates = new Certificates();
-            $certificates->before_action();
-            $certificates->certificateConfig();
-        } catch (Throwable $error) {
-            error_log('Certificate configuration API failed: ' . $error->getMessage());
-            $this->jsonResponse([
-                'message' => 'The certificate settings could not be saved. Check the server error log for details.',
-            ], 500);
-        }
-    }
-
-    public function apiResubmitCertificateForSigning($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->resubmitCertificateForSigning($id);
-    }
-
-    public function apiActivateCertificateTemplate($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->activateCertificateTemplate($id);
-    }
-
-    public function apiDeleteCertificateTemplate($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->deleteCertificateTemplate($id);
-    }
-
     public function apiCertificatesToSign()
     {
-        if (!$this->requireUser() || !in_array($this->user['role'] ?? '', ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to sign certificates.');
         }
         return $this->jsonResponse([
@@ -1012,66 +919,4 @@ class SmartTrack_api extends Base
         ]);
     }
 
-    public function apiCertificateSignPreview($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->previewCertificateForSigning($id);
-    }
-
-    public function apiSignCertificate($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->signCertificate($id);
-    }
-
-    public function apiRejectCertificateSignature($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->rejectCertificateSignature($id);
-    }
-
-    public function apiSaveCertificateSignatory()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->saveCertificateSignatory();
-    }
-
-    public function apiDeleteCertificateSignatory($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Certificates.php';
-        $certificates = new Certificates();
-        $certificates->before_action();
-        $certificates->deleteCertificateSignatory($id);
-    }
-
-    public function apiSaveDocumentRequirement()
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Documents.php';
-        $documents = new Documents();
-        $documents->before_action();
-        $documents->saveDocumentRequirement();
-    }
-
-    public function apiDeleteDocumentRequirement($id)
-    {
-        $this->apiRequest = true;
-        require_once APP_DIR . 'controllers/Documents.php';
-        $documents = new Documents();
-        $documents->before_action();
-        $documents->deleteDocumentRequirement($id);
-    }
 }

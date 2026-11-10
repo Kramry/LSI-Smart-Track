@@ -8,7 +8,7 @@ class Certificates extends Base
 {
     public function certificates()
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to manage certificates.');
         }
 
@@ -32,13 +32,13 @@ class Certificates extends Base
             'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'completion_status', 'attendance_percentage', 'documents_approved', 'documents_required', 'assessments_completed', 'assessments_required', 'is_eligible', 'ineligibility_reasons', 'approval_status', 'certificate_number', 'issue_date', 'status'],
             'user' => $this->user,
             'app_url' => $this->url(''),
-            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+            'csrf' => $this->session->userdata('csrf'),
         ]);
     }
 
     public function eligibility()
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to manage certificate eligibility.');
         }
 
@@ -54,8 +54,7 @@ class Certificates extends Base
         if (array_key_exists('edit', $this->queryParams())) {
             $editId = is_scalar($this->queryParams()['edit']) ? (string) $this->queryParams()['edit'] : '';
             if (!ctype_digit($editId) || !(int) $editId) {
-                show_404();
-                return;
+                return $this->notFound('Eligibility record not found.');
             }
             foreach ($records as $record) {
                 if ((int) $record['eligibility_id'] === (int) $editId) {
@@ -64,8 +63,7 @@ class Certificates extends Base
                 }
             }
             if (!$editingEligibility) {
-                show_404();
-                return;
+                return $this->notFound('Eligibility record not found.');
             }
         }
         $programs = $this->recordModel->options('programs', $this->user);
@@ -79,20 +77,22 @@ class Certificates extends Base
             'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'attendance_percentage', 'documents_approved', 'assessments_completed', 'is_eligible', 'approval_status', 'ineligibility_reasons'],
             'user' => $this->user,
             'app_url' => $this->url(''),
-            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+            'csrf' => $this->session->userdata('csrf'),
         ]);
     }
 
     public function reviewEligibility()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to review certificate eligibility.');
+        if (!$this->authorizeCertificateAction('You are not allowed to review certificate eligibility.', 'manage/eligibility')) {
+            return;
         }
 
-        $eligibilityId = (int) $this->input('eligibility_id');
-        $decision = (string) $this->input('decision');
-        $reason = trim((string) $this->input('reason'));
-        if (!$eligibilityId || !in_array($decision, ['approved', 'rejected'], true) || ($decision === 'rejected' && $reason === '')) {
+        $eligibilityId = $this->positiveIntegerInput('eligibility_id');
+        $decisionValue = $this->input('decision');
+        $decision = is_scalar($decisionValue) ? (string) $decisionValue : '';
+        $reasonValue = $this->input('reason');
+        $reason = is_scalar($reasonValue) ? trim((string) $reasonValue) : '';
+        if ($eligibilityId === null || !in_array($decision, ['approved', 'rejected'], true) || ($decision === 'rejected' && $reason === '')) {
             return $this->actionError('Choose an approval decision and provide a reason when rejecting.', 'manage/eligibility');
         }
 
@@ -100,23 +100,20 @@ class Certificates extends Base
             return $this->actionError('Configure at least one active certificate signatory before approving eligibility.', 'manage/certificate-config');
         }
 
-        $eligibility = $this->certificateModel->eligibilityById($eligibilityId);
-        if (!$eligibility) {
-            return $this->actionError('Eligibility record not found.', 'manage/eligibility', 404);
-        }
-        if (!$this->eligibilityModel->updateEligibilityApproval($eligibilityId, $decision, (int) $this->user['user_id'], $reason ?: null)) {
-            return $this->actionError('Only eligible trainees can be approved. Recalculate eligibility and review the requirements first.', 'manage/eligibility');
-        }
-
-        $certificate = null;
-        if ($decision === 'approved') {
-            $certificate = $this->certificateModel->createPendingCertificate((int) $eligibility['trainee_id'], (int) $eligibility['class_id'], (int) $this->user['user_id']);
-            if (!$certificate) {
-                $existingCertificate = $this->certificateModel->certificateStatusForTraineeClass((int) $eligibility['trainee_id'], (int) $eligibility['class_id']);
-                if (!$existingCertificate || $existingCertificate['status'] !== 'pending_signature') {
-                    return $this->actionError('Eligibility was approved, but the certificate could not be queued for signing. Check the class completion date, signatory setup, and existing certificate status.', 'manage/eligibility');
-                }
+        $result = $this->certificateModel->reviewEligibilityAndQueue(
+            $eligibilityId,
+            $decision,
+            (int) $this->user['user_id'],
+            $reason ?: null
+        );
+        if (!$result['success']) {
+            if ($result['reason'] === 'not_found') {
+                return $this->actionError('Eligibility record not found.', 'manage/eligibility', 404);
             }
+            if ($result['reason'] === 'not_eligible') {
+                return $this->actionError('Only eligible trainees can be approved. Recalculate eligibility and review the requirements first.', 'manage/eligibility');
+            }
+            return $this->actionError('Eligibility could not be approved because the certificate could not be queued. Check the class completion date, signatory setup, and existing certificate status.', 'manage/eligibility');
         }
 
         $this->eligibilityModel->logEligibilityAction((int) $this->user['user_id'], $eligibilityId, $decision, $reason);
@@ -130,12 +127,11 @@ class Certificates extends Base
 
     public function deleteEligibility($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to remove class enrollments.');
+        if (!$this->authorizeCertificateAction('You are not allowed to remove class enrollments.', 'manage/eligibility')) {
+            return;
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
-            show_404();
-            return;
+            return $this->notFound('Eligibility record not found.');
         }
 
         $result = $this->eligibilityModel->deleteEligibilityEnrollment((int) $id, (int) $this->user['user_id']);
@@ -158,14 +154,14 @@ class Certificates extends Base
 
     public function recalculateEligibility()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to recalculate eligibility.');
+        if (!$this->authorizeCertificateAction('You are not allowed to recalculate eligibility.', 'manage/eligibility')) {
+            return;
         }
 
-        $traineeId = (int) $this->input('trainee_id');
-        $classId = (int) $this->input('class_id');
+        $traineeId = $this->positiveIntegerInput('trainee_id');
+        $classId = $this->positiveIntegerInput('class_id');
 
-        if (!$traineeId || !$classId) {
+        if ($traineeId === null || $classId === null) {
             return $this->actionError('Invalid trainee or class.', 'manage/eligibility');
         }
 
@@ -185,14 +181,14 @@ class Certificates extends Base
 
     public function issueCertificate()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to issue certificates.');
+        if (!$this->authorizeCertificateAction('You are not allowed to issue certificates.', 'manage/eligibility')) {
+            return;
         }
 
-        $traineeId = (int) $this->input('trainee_id');
-        $classId = (int) $this->input('class_id');
+        $traineeId = $this->positiveIntegerInput('trainee_id');
+        $classId = $this->positiveIntegerInput('class_id');
 
-        if (!$traineeId || !$classId) {
+        if ($traineeId === null || $classId === null) {
             return $this->actionError('Invalid trainee or class.', 'manage/eligibility');
         }
 
@@ -217,14 +213,13 @@ class Certificates extends Base
 
     public function certificatesToSign($id = null)
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to sign certificates.');
         }
 
         if ($id !== null) {
             if (!ctype_digit((string) $id) || !(int) $id) {
-                show_404();
-                return;
+                return $this->notFound('Certificate not found.');
             }
             $certificate = $this->certificateModel->certificateForSigning((int) $id, (int) $this->user['user_id']);
             if (!$certificate) {
@@ -238,7 +233,7 @@ class Certificates extends Base
                 'columns' => [],
                 'user' => $this->user,
                 'app_url' => $this->url(''),
-                'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+                'csrf' => $this->session->userdata('csrf'),
             ]);
         }
 
@@ -250,18 +245,17 @@ class Certificates extends Base
             'columns' => ['certificate_number', 'trainee_name', 'program_name', 'class_name', 'completion_date'],
             'user' => $this->user,
             'app_url' => $this->url(''),
-            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+            'csrf' => $this->session->userdata('csrf'),
         ]);
     }
 
     public function previewCertificateForSigning($id)
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to preview this certificate.');
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
-            show_404();
-            return;
+            return $this->notFound('Certificate not found.');
         }
         $certificate = $this->certificateModel->certificateForSigning((int) $id, (int) $this->user['user_id']);
         if (!$certificate) {
@@ -277,12 +271,11 @@ class Certificates extends Base
 
     public function signCertificate($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to sign certificates.');
+        if (!$this->authorizeCertificateAction('You are not allowed to sign certificates.', 'certificates/to-sign')) {
+            return;
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
-            show_404();
-            return;
+            return $this->notFound('Certificate not found.');
         }
         $certificate = $this->certificateModel->certificateForSigning((int) $id, (int) $this->user['user_id']);
         $password = (string) $this->input('password');
@@ -312,12 +305,11 @@ class Certificates extends Base
 
     public function rejectCertificateSignature($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to return certificates for review.');
+        if (!$this->authorizeCertificateAction('You are not allowed to return certificates for review.', 'certificates/to-sign')) {
+            return;
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
-            show_404();
-            return;
+            return $this->notFound('Certificate not found.');
         }
         $certificate = $this->certificateModel->certificateForSigning((int) $id, (int) $this->user['user_id']);
         $remarks = trim((string) $this->input('remarks'));
@@ -338,12 +330,11 @@ class Certificates extends Base
 
     public function resubmitCertificateForSigning($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to resubmit certificates.');
+        if (!$this->authorizeCertificateAction('You are not allowed to resubmit certificates.', 'manage/certificates')) {
+            return;
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
-            show_404();
-            return;
+            return $this->notFound('Certificate not found.');
         }
         if (!$this->certificateModel->resubmitCertificateForSigning((int) $id, (int) $this->user['user_id'])) {
             return $this->actionError('The certificate could not be resubmitted. Ensure it is in draft status and active signatories are configured.', 'manage/certificates');
@@ -359,18 +350,16 @@ class Certificates extends Base
 
     public function certificateHistory($id)
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to view certificate history.');
         }
         if (!ctype_digit((string) $id)) {
-            show_404();
-            return;
+            return $this->notFound('Certificate not found.');
         }
 
         $certificate = $this->certificateModel->certificateNumber((int) $id);
         if (!$certificate) {
-            show_404();
-            return;
+            return $this->notFound('Certificate not found.');
         }
 
         $this->render('module', [
@@ -466,14 +455,15 @@ class Certificates extends Base
 
     public function revokeCertificate()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to revoke certificates.');
+        if (!$this->authorizeCertificateAction('You are not allowed to revoke certificates.', 'manage/certificates')) {
+            return;
         }
 
-        $certificateId = (int) $this->input('certificate_id');
-        $reason = trim((string) $this->input('reason'));
+        $certificateId = $this->positiveIntegerInput('certificate_id');
+        $reasonValue = $this->input('reason');
+        $reason = is_scalar($reasonValue) ? trim((string) $reasonValue) : '';
 
-        if (!$certificateId || empty($reason)) {
+        if ($certificateId === null || $reason === '') {
             return $this->actionError('Certificate ID and reason are required.', 'manage/certificates');
         }
 
@@ -491,13 +481,13 @@ class Certificates extends Base
 
     public function certificateConfig()
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to configure certificate templates.');
         }
 
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             if (!$this->validCsrf()) {
-                return $this->deny('Your session expired. Refresh and try again.');
+                return $this->actionError('Your session expired. Refresh and try again.', 'manage/certificate-config', 403);
             }
             return $this->saveCertificateTemplate();
         }
@@ -506,8 +496,7 @@ class Certificates extends Base
         if (array_key_exists('edit_template', $this->queryParams())) {
             $editId = is_scalar($this->queryParams()['edit_template']) ? (string) $this->queryParams()['edit_template'] : '';
             if (!ctype_digit($editId) || !(int) $editId || !($template = $this->certificateModel->getTemplate((int) $editId))) {
-                show_404();
-                return;
+                return $this->notFound('Certificate template not found.');
             }
         }
         $template = $template ?: $this->certificateModel->getLatestTemplate() ?: $this->certificateModel->legacyTemplate();
@@ -516,8 +505,7 @@ class Certificates extends Base
         if (array_key_exists('signatory_id', $this->queryParams())) {
             $signatoryId = is_scalar($this->queryParams()['signatory_id']) ? (string) $this->queryParams()['signatory_id'] : '';
             if (!ctype_digit($signatoryId) || !(int) $signatoryId) {
-                show_404();
-                return;
+                return $this->notFound('Certificate signatory not found.');
             }
             foreach ($signatories as $signatory) {
                 if ((int) $signatory['signatory_id'] === (int) $signatoryId) {
@@ -526,8 +514,7 @@ class Certificates extends Base
                 }
             }
             if (!$editingSignatory) {
-                show_404();
-                return;
+                return $this->notFound('Certificate signatory not found.');
             }
         }
         $configs = [
@@ -550,14 +537,14 @@ class Certificates extends Base
             'signatory_accounts' => $this->certificateModel->signatoryAccounts(),
             'user' => $this->user,
             'app_url' => $this->url(''),
-            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+            'csrf' => $this->session->userdata('csrf'),
         ]);
     }
 
     public function saveCertificateSignatory()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || $this->user['role'] !== 'administrator') {
-            return $this->deny('Only administrators can configure certificate signatories.');
+        if (!$this->authorizeCertificateAction('Only administrators can configure certificate signatories.', 'manage/certificate-config', true)) {
+            return;
         }
         $signatoryId = (int) $this->input('signatory_id');
         $userId = (int) $this->input('user_id');
@@ -619,12 +606,11 @@ class Certificates extends Base
 
     public function deleteCertificateSignatory($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || $this->user['role'] !== 'administrator') {
-            return $this->deny('Only administrators can configure certificate signatories.');
+        if (!$this->authorizeCertificateAction('Only administrators can configure certificate signatories.', 'manage/certificate-config', true)) {
+            return;
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
-            show_404();
-            return;
+            return $this->notFound('Certificate signatory not found.');
         }
         $signatory = $this->certificateModel->signatoryNameAndPosition((int) $id);
         if (!$signatory || !$this->certificateModel->deleteSignatory((int) $id)) {
@@ -901,8 +887,8 @@ class Certificates extends Base
 
     public function activateCertificateTemplate($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to activate certificate templates.');
+        if (!$this->authorizeCertificateAction('You are not allowed to activate certificate templates.', 'manage/certificate-config')) {
+            return;
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
             return $this->actionError('Choose a valid certificate template version.', 'manage/certificate-config');
@@ -921,8 +907,8 @@ class Certificates extends Base
 
     public function deleteCertificateTemplate($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return $this->deny('You are not allowed to delete certificate templates.');
+        if (!$this->authorizeCertificateAction('You are not allowed to delete certificate templates.', 'manage/certificate-config')) {
+            return;
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
             return $this->actionError('Choose a valid certificate template version.', 'manage/certificate-config');
@@ -952,28 +938,24 @@ class Certificates extends Base
 
     public function certificateTemplateFile($id)
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to preview certificate template files.');
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
-            show_404();
-            return;
+            return $this->notFound('Certificate template not found.');
         }
         $template = $this->certificateModel->getTemplate((int) $id);
         if (!$template) {
-            show_404();
-            return;
+            return $this->notFound('Certificate template not found.');
         }
         $asset = ($this->queryParams()['asset'] ?? '') === 'logo' ? ($template['settings']['logo_path'] ?? '') : ($template['file_path'] ?? '');
         $filePath = $this->privateCertificatePath($asset);
         if (!$filePath) {
-            show_404();
-            return;
+            return $this->notFound('Certificate template file not found.');
         }
         $mime = (new finfo(FILEINFO_MIME_TYPE))->file($filePath);
         if (!in_array($mime, ['application/pdf', 'image/png', 'image/jpeg'], true)) {
-            show_404();
-            return;
+            return $this->notFound('Certificate template file not found.');
         }
         header('Content-Type: ' . $mime);
         header('Content-Disposition: inline; filename="certificate-template.' . ($mime === 'application/pdf' ? 'pdf' : ($mime === 'image/png' ? 'png' : 'jpg')) . '"');
@@ -1007,7 +989,7 @@ class Certificates extends Base
             'eligibility' => $eligibility,
             'user' => $this->user,
             'app_url' => $this->url(''),
-            'csrf' => $this->session->flashdata('_csrf') ?? bin2hex(random_bytes(32)),
+            'csrf' => $this->session->userdata('csrf'),
         ]);
     }
 
@@ -1018,13 +1000,11 @@ class Certificates extends Base
         }
 
         if (!ctype_digit((string) $id) || !(int) $id) {
-            show_404();
-            return;
+            return $this->notFound('Certificate not found.');
         }
         $certificate = $this->certificateModel->downloadableCertificate((int) $id);
         if (!$certificate) {
-            show_404();
-            return;
+            return $this->notFound('Certificate not found.');
         }
 
         // Security check: trainees can only download their own certificates
@@ -1033,14 +1013,15 @@ class Certificates extends Base
         }
 
         // Staff/admin can download any certificate
-        if (!in_array($this->user['role'], ['administrator', 'staff', 'trainee'], true)) {
+        if (!$this->inRoleGroup('certificate_viewers')) {
             return $this->deny('You are not allowed to download certificates.');
         }
 
         if ($certificate['status'] !== 'issued') {
-            $this->notice($certificate['status'] === 'revoked' ? 'This certificate has been revoked.' : 'This certificate is not available for download until all signatories have signed.');
-            redirect($this->url('dashboard'));
-            return;
+            $message = $certificate['status'] === 'revoked'
+                ? 'This certificate has been revoked.'
+                : 'This certificate is not available for download until all signatories have signed.';
+            return $this->actionError($message, 'dashboard', 422);
         }
 
         $filePath = !empty($certificate['file_path']) ? $this->privateCertificatePath($certificate['file_path']) : null;
@@ -1131,5 +1112,43 @@ class Certificates extends Base
             'certificate_signatures' => $signatures,
             'app_url' => $this->url(''),
         ]);
+    }
+
+    private function authorizeCertificateAction($message, $redirectPath, $administratorOnly = false)
+    {
+        if (!$this->requireUser()) {
+            return false;
+        }
+        $authorized = $administratorOnly
+            ? ($this->user['role'] ?? '') === 'administrator'
+            : $this->inRoleGroup('administrative_staff');
+        if (!$authorized) {
+            $this->deny($message);
+            return false;
+        }
+        if (!$this->validCsrf()) {
+            $this->actionError('Your session expired. Refresh and try again.', $redirectPath, 403);
+            return false;
+        }
+        return true;
+    }
+
+    private function notFound($message)
+    {
+        if ($this->apiRequest) {
+            $this->jsonResponse(['message' => $message], 404);
+        }
+        show_404();
+        exit;
+    }
+
+    private function positiveIntegerInput($key)
+    {
+        $value = $this->input($key);
+        if (!is_scalar($value)) {
+            return null;
+        }
+        $integer = filter_var($value, FILTER_VALIDATE_INT);
+        return $integer !== false && $integer > 0 ? $integer : null;
     }
 }

@@ -5,6 +5,22 @@ require_once APP_DIR . 'models/Base_model.php';
 
 class Payment_model extends Base_model
 {
+    private function actorCanManagePayments($actorId): bool
+    {
+        $actorId = (int) $actorId;
+        if ($actorId < 1) {
+            return false;
+        }
+
+        $actor = $this->db->table('users')
+            ->select('role')
+            ->where('user_id', $actorId)
+            ->limit(1)
+            ->get();
+
+        return $actor && in_array($actor['role'], ['administrator', 'staff'], true);
+    }
+
     public function feeSetupPrograms()
     {
         return $this->db->table('training_programs')
@@ -259,7 +275,11 @@ class Payment_model extends Base_model
             }
             if ($payment['status'] === 'paid') {
                 $this->db->commit();
-                return ['success' => true, 'status' => 'paid'];
+                return ['success' => true, 'status' => 'paid', 'already_processed' => true];
+            }
+            if ($payment['status'] === $verifiedStatus) {
+                $this->db->commit();
+                return ['success' => true, 'status' => $payment['status'], 'already_processed' => true];
             }
 
             if ($verifiedStatus === 'paid') {
@@ -446,6 +466,9 @@ class Payment_model extends Base_model
 
     public function reversePayment($paymentId, $amount, $remarks, $actorId)
     {
+        if (!$this->actorCanManagePayments($actorId)) {
+            return false;
+        }
         $this->db->transaction();
         try {
             // Serialize reversals so concurrent requests cannot exceed the payment amount.
@@ -573,6 +596,9 @@ class Payment_model extends Base_model
 
     public function bondAction($feeId, $action, $amount, $date, $method, $reference, $remarks, $actorId)
     {
+        if (!$this->actorCanManagePayments($actorId)) {
+            return ['success' => false, 'message' => 'You are not allowed to manage payments.'];
+        }
         $this->db->transaction();
         try {
             // Lock the fee row to serialize balance checks and bond status changes.

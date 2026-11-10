@@ -260,11 +260,23 @@ class Document_model extends Base_model
 
     public function addDocumentRequirement($classId, $documentName, $createdBy)
     {
-        $this->db->table('certificate_document_requirements')->insert([
+        $inserted = $this->db->table('certificate_document_requirements')->insert([
             'class_id' => (int) $classId,
             'required_document_name' => $documentName,
             'created_by' => (int) $createdBy,
         ]);
+        if (!$inserted) {
+            $existingRequirement = $this->db->table('certificate_document_requirements')
+                ->select('requirement_id')
+                ->where('class_id', (int) $classId)
+                ->where('required_document_name', $documentName)
+                ->limit(1)
+                ->get();
+            if ($existingRequirement) {
+                throw new RuntimeException('Duplicate document requirement.');
+            }
+            throw new RuntimeException('Unable to add the document requirement.');
+        }
         $requirement = $this->db->table('certificate_document_requirements')
             ->select('requirement_id')
             ->where('class_id', (int) $classId)

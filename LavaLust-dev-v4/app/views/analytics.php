@@ -882,7 +882,10 @@ createApp({
                 const query = new URLSearchParams(filters.value);
                 const response = await fetch(`${generateAiInsightsEndpoint}?${query.toString()}`, {
                     method: 'POST',
-                    headers: { Accept: 'application/json' },
+                    headers: {
+                        Accept: 'application/json',
+                        'X-CSRF-Token': '<?= $e($csrf) ?>',
+                    },
                     credentials: 'same-origin',
                 });
                 const payload = await parseApiPayload(response);

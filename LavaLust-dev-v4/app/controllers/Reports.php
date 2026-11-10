@@ -2,27 +2,20 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once APP_DIR . 'controllers/Base.php';
-require_once APP_DIR . 'models/Reports_model.php';
 require_once APP_DIR . 'libraries/SmartTrackPdf.php';
 
 class Reports extends Base
 {
-    private $reportsModel;
-
     public function before_action()
     {
         parent::before_action();
-        $this->reportsModel = new Reports_model($this->db);
     }
 
     public function index()
     {
-        if (!$this->requireUser() || !$this->canViewReports($this->user)) {
+        if (!$this->requireUser() || !$this->canAccessReports($this->user)) {
             return $this->deny('Reports are available to administrator and staff accounts.');
         }
-
-        require_once APP_DIR . 'models/Record_model.php';
-        $recordModel = new Record_model($this->db);
 
         $data = [
             'title' => 'Reports',
@@ -30,9 +23,9 @@ class Reports extends Base
             'navigation' => $this->navigationForUser(),
             'app_url' => $this->url(''),
             'csrf' => $this->session->userdata('csrf'),
-            'reports' => $this->reportsModel->availableReports(),
-            'programs' => $recordModel->options('programs', $this->user),
-            'classes' => $recordModel->options('classes', $this->user),
+            'reports' => $this->getReportsModel()->availableReports(),
+            'programs' => $this->recordModel->options('programs', $this->user),
+            'classes' => $this->recordModel->options('classes', $this->user),
         ];
 
         $this->call->view('reports', $data);
@@ -40,7 +33,7 @@ class Reports extends Base
 
     public function generate()
     {
-        if (!$this->requireUser() || !$this->canViewReports($this->user)) {
+        if (!$this->requireUser() || !$this->canAccessReports($this->user)) {
             return $this->deny('Reports are available to administrator and staff accounts.');
         }
 
@@ -64,7 +57,7 @@ class Reports extends Base
             'method' => trim((string) $this->input('method')),
         ];
 
-        $availableReports = $this->reportsModel->availableReports();
+        $availableReports = $this->getReportsModel()->availableReports();
         if (!isset($availableReports[$reportType])) {
             return $this->jsonResponse(['message' => 'Invalid report type.'], 400);
         }
@@ -73,7 +66,7 @@ class Reports extends Base
             return $this->jsonResponse(['message' => 'Invalid format for this report type.'], 400);
         }
 
-        $data = $this->reportsModel->getReportData($reportType, $filters);
+        $data = $this->getReportsModel()->getReportData($reportType, $filters);
 
         if ($format === 'pdf') {
             $this->generatePDF($reportType, $data, $filters);
@@ -84,7 +77,11 @@ class Reports extends Base
 
     private function generatePDF($reportType, $data, array $filters)
     {
-        $availableReports = $this->reportsModel->availableReports();
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
+        $availableReports = $this->getReportsModel()->availableReports();
 
         $pdf = SmartTrackPdf::create('L');
         $pdf->setTitle('SmartTrack ' . $availableReports[$reportType]['name']);
@@ -94,7 +91,7 @@ class Reports extends Base
         $html = '<h1 style="color: #173a60;">' . htmlspecialchars($availableReports[$reportType]['name'], ENT_QUOTES, 'UTF-8') . '</h1>';
         $html .= '<p style="color: #5d6f82; font-size: 12px;">';
         $html .= 'Report Period: ' . htmlspecialchars($filters['start_date'] . ' to ' . $filters['end_date'], ENT_QUOTES, 'UTF-8') . '<br>';
-        $html .= 'Generated: ' . date('Y-m-d H:i:s');
+        $html .= 'Generated: ' . (new DateTimeImmutable('now'))->format('Y-m-d H:i:s');
         $html .= '</p>';
 
         if (!empty($data)) {
@@ -121,15 +118,19 @@ class Reports extends Base
             $html .= '<p style="color: #c4372c;">No data found for the selected filters.</p>';
         }
 
-        $filename = 'smarttrack-' . $reportType . '-report-' . $filters['start_date'] . '-to-' . $filters['end_date'] . '.pdf';
+        $filename = 'smarttrack-' . $reportType . '-report-' . bin2hex(random_bytes(8)) . '.pdf';
         $pdf->setPDFFilename($filename);
-        $pdf->addHTMLCell(html: $html, posx: 15, posy: 15, width: 267);
+        $pdf->addHTMLCell(html: $html, posx: 15, posy: 15);
         $pdf->downloadPDF($pdf->getOutPDFString());
         exit;
     }
 
     private function generateCSV($reportType, $data, array $filters)
     {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="smarttrack-' . $reportType . '-report-' . $filters['start_date'] . '-to-' . $filters['end_date'] . '.csv"');
 
@@ -161,8 +162,8 @@ class Reports extends Base
         exit;
     }
 
-    private function canViewReports(array $user)
+    private function canAccessReports(array $user)
     {
-        return in_array($user['role'] ?? '', ['administrator', 'staff'], true);
+        return $this->inRoleGroup('administrative_staff', $user);
     }
 }

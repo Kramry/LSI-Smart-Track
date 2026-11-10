@@ -38,6 +38,28 @@ Sign in / First-run administrator setup
     └── My profile (profile and password)
 ```
 
+## Application Architecture
+
+Controllers extend the LavaLust controller base and use its documented resource
+loader for framework libraries, helpers, and views. SmartTrack's database
+models currently require the shared database object in their constructors, so
+`SmartTrackModelRegistry` wires those dependencies and loads optional
+controller-specific models only when needed. The generic `Base` controller
+keeps compatibility helpers for request input, CSRF, response envelopes, and
+controller access while delegating JWT work, role groups, module metadata,
+view context, and private upload path checks to focused application libraries.
+API responses use LavaLust's API library; PHP errors and exceptions remain in
+the framework error/logging pipeline rather than being intercepted by a
+controller-level error handler.
+
+Analytics reads and Gemini insight requests enforce role and class access in
+both the controller and analytics model. API clients use the JWT authorization
+header; the same-origin analytics page may use its server-side session and
+includes its CSRF token on generation POSTs. Gemini generation limits are
+shared through MySQL's atomic per-user counter. Apply
+[add_gemini_generation_rate_limits.sql](../add_gemini_generation_rate_limits.sql)
+to existing databases; the table is also included in the main schema dump.
+
 ## Initial Interface Wireframes
 
 ### Sign in

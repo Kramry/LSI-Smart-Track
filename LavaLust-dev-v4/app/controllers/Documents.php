@@ -7,7 +7,7 @@ class Documents extends Base
 {
     public function uploadDocument()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor', 'trainee'], true)) {
+        if (!$this->requireUser() || !$this->validCsrf() || !$this->inRoleGroup('all_accounts')) {
             return $this->deny('You are not allowed to upload documents.');
         }
         $traineeId = (int) $this->input('trainee_id');
@@ -106,7 +106,11 @@ class Documents extends Base
             'review_status' => $reviewStatus,
             'access_level' => $access,
         ]);
-        $this->recalculateEligibilityPair($traineeId, $classId);
+        try {
+            $this->recalculateEligibilityPair($traineeId, $classId);
+        } catch (Throwable $error) {
+            error_log('Document upload eligibility recalculation failed (' . get_class($error) . '): ' . $error->getMessage());
+        }
         $this->model->logActivity((int) $this->user['user_id'], 'Uploaded document', substr($label, 0, 150) . ($useCloud ? ' (Cloud)' : ' (Local)'));
         $message = $useCloud
             ? 'Document uploaded to cloud storage.'
@@ -115,7 +119,7 @@ class Documents extends Base
             $message = 'Requirement submitted and pending staff review. ' . $message;
         }
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => $message]);
+            return $this->jsonResponse(['message' => $message]);
         }
         $this->notice($message);
         redirect($this->url('manage/documents'));
@@ -127,7 +131,7 @@ class Documents extends Base
             return $this->deny('The document could not be found.');
         }
         $document = $this->documentModel->documentById((int) $id);
-        $isAdmin = in_array($this->user['role'], ['administrator', 'staff'], true);
+        $isAdmin = $this->inRoleGroup('administrative_staff');
         $isOwner = $document && $this->user['role'] === 'trainee' && $document['access_level'] !== 'staff' && (int) $document['trainee_user_id'] === (int) $this->user['user_id'];
         $isClassDocument = false;
         if ($document && $this->user['role'] === 'instructor' && !empty($document['trainee_id']) && $document['access_level'] !== 'staff' && !empty($document['class_id'])) {
@@ -165,7 +169,8 @@ class Documents extends Base
             http_response_code(404);
             exit('Document not found.');
         }
-        header('Content-Type: ' . (mime_content_type($path) ?: 'application/octet-stream'));
+        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($path);
+        header('Content-Type: ' . ($mime ?: 'application/octet-stream'));
         header('Content-Length: ' . filesize($path));
         header('Content-Disposition: attachment; filename="' . preg_replace('/[^A-Za-z0-9._-]/', '_', $document['document_name']) . '"');
         readfile($path);
@@ -174,7 +179,7 @@ class Documents extends Base
 
     public function deleteDocument($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->validCsrf() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to delete documents.');
         }
 
@@ -186,27 +191,44 @@ class Documents extends Base
         $filePath = $document['file_path'];
         $isCloud = strpos($filePath, 'cloud://') === 0;
 
-        if ($isCloud) {
-            // Delete from cloud storage
-            $this->call->library('CloudStorage');
-            $cloudStorage = new CloudStorage();
-            $remotePath = substr($filePath, 8); // Remove 'cloud://' prefix
-            if (!$cloudStorage->delete($remotePath)) {
-                return $this->actionError('The cloud document could not be deleted. No database records were removed.', 'manage/documents', 500);
-            }
-        } else {
-            // Delete from local storage
-            $path = $this->privateDocumentPath($filePath);
-            if ($path && file_exists($path)) {
-                unlink($path);
-            }
+        try {
+            $this->recordModel->transactional(function () use ($id, $document, $isCloud) {
+                if (!$this->documentModel->deleteDocument((int) $id)) {
+                    throw new RuntimeException('Unable to delete the document record.');
+                }
+                try {
+                    $this->recalculateEligibilityPair($document['trainee_id'] ?? 0, $document['class_id'] ?? 0);
+                } catch (Throwable $error) {
+                    error_log('Document deletion eligibility recalculation failed (' . get_class($error) . '): ' . $error->getMessage());
+                }
+                $this->model->logActivity((int) $this->user['user_id'], 'Deleted document', $document['document_name'] . ($isCloud ? ' (Cloud)' : ' (Local)'));
+            });
+        } catch (Throwable $error) {
+            error_log('Unable to delete document record: ' . $error->getMessage());
+            return $this->actionError('The document could not be deleted.', 'manage/documents', 500);
         }
 
-        $this->documentModel->deleteDocument((int) $id);
-        $this->recalculateEligibilityPair($document['trainee_id'] ?? 0, $document['class_id'] ?? 0);
-        $this->model->logActivity((int) $this->user['user_id'], 'Deleted document', $document['document_name'] . ($isCloud ? ' (Cloud)' : ' (Local)'));
+        $fileCleanupFailed = false;
+        if ($isCloud) {
+            $this->call->library('CloudStorage');
+            $cloudStorage = new CloudStorage();
+            $remotePath = substr($filePath, 8);
+            if (!$cloudStorage->delete($remotePath)) {
+                error_log('Document row deleted but cloud object removal failed for document #' . (int) $id . '.');
+                $fileCleanupFailed = true;
+            }
+        } else {
+            $path = $this->privateDocumentPath($filePath);
+            if ($path && file_exists($path) && !@unlink($path)) {
+                error_log('Document row deleted but local file removal failed for document #' . (int) $id . '.');
+                $fileCleanupFailed = true;
+            }
+        }
+        if ($fileCleanupFailed) {
+            return $this->actionError('The document record was deleted, but its file could not be removed.', 'manage/documents', 500);
+        }
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => 'Document deleted.']);
+            return $this->jsonResponse(['message' => 'Document deleted.']);
         }
         $this->notice('Document deleted.');
         redirect($this->url('manage/documents'));
@@ -214,12 +236,15 @@ class Documents extends Base
 
     public function updateDocumentStatus($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff') || !$this->validCsrf()) {
             return $this->deny('You are not allowed to update document status.');
+        }
+        if (!ctype_digit((string) $id) || !(int) $id) {
+            return $this->actionError('Document not found.', 'manage/documents', 404);
         }
 
         $status = $this->input('status');
-        if (!in_array($status, ['active', 'inactive', 'archived'], true)) {
+        if (!is_string($status) || !in_array($status, ['active', 'inactive', 'archived'], true)) {
             return $this->actionError('Invalid status.', 'manage/documents');
         }
 
@@ -229,10 +254,14 @@ class Documents extends Base
         }
 
         $this->documentModel->updateDocumentStatus((int) $id, $status);
-        $this->recalculateEligibilityPair($document['trainee_id'] ?? 0, $document['class_id'] ?? 0);
+        try {
+            $this->recalculateEligibilityPair($document['trainee_id'] ?? 0, $document['class_id'] ?? 0);
+        } catch (Throwable $error) {
+            error_log('Document status eligibility recalculation failed (' . get_class($error) . '): ' . $error->getMessage());
+        }
         $this->model->logActivity((int) $this->user['user_id'], 'Updated document status', $document['document_name'] . ' -> ' . $status);
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => 'Document status updated.']);
+            return $this->jsonResponse(['message' => 'Document status updated.']);
         }
         $this->notice('Document status updated.');
         redirect($this->url('manage/documents'));
@@ -240,7 +269,7 @@ class Documents extends Base
 
     public function reviewDocument($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->requireUser() || (!$this->inRoleGroup('administrative_staff') && !$this->inRoleGroup('teaching_staff')) || !$this->validCsrf()) {
             return $this->deny('You are not allowed to review uploaded requirements.');
         }
         if (!ctype_digit((string) $id)) {
@@ -256,7 +285,7 @@ class Documents extends Base
         if (!$document || empty($document['trainee_id'])) {
             return $this->actionError('Trainee requirement not found.', 'manage/documents', 404);
         }
-        if ($this->user['role'] === 'instructor' && (
+        if (($this->user['role'] ?? '') === 'instructor' && (
             empty($document['class_id'])
             || $document['access_level'] === 'staff'
             || !$this->documentModel->instructorOwnsClass((int) $document['class_id'], (int) $this->user['user_id'])
@@ -265,10 +294,14 @@ class Documents extends Base
         }
 
         $this->documentModel->reviewDocument((int) $id, $decision, (int) $this->user['user_id']);
-        $this->recalculateEligibilityPair((int) $document['trainee_id'], (int) ($document['class_id'] ?? 0));
+        try {
+            $this->recalculateEligibilityPair((int) $document['trainee_id'], (int) ($document['class_id'] ?? 0));
+        } catch (Throwable $error) {
+            error_log('Document review eligibility recalculation failed (' . get_class($error) . '): ' . $error->getMessage());
+        }
         $this->model->logActivity((int) $this->user['user_id'], ucfirst($decision) . ' trainee document', $document['document_name']);
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => 'Document ' . $decision . '.']);
+            return $this->jsonResponse(['message' => 'Document ' . $decision . '.']);
         }
         $this->notice('Document ' . $decision . '.');
         redirect($this->url('manage/documents'));
@@ -276,27 +309,39 @@ class Documents extends Base
 
     public function saveDocumentRequirement()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->requireUser() || !$this->validCsrf() || !$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to configure required documents.');
         }
 
         $classId = (int) $this->input('class_id');
         $documentName = trim((string) $this->input('required_document_name'));
         $class = $this->documentModel->classById($classId);
-        if (!$class || $documentName === '' || strlen($documentName) > 150) {
+        if (!$class || $documentName === '' || mb_strlen($documentName) > 150) {
             return $this->actionError('Choose a class and enter a document name up to 150 characters.', 'manage/certificate-config');
         }
 
         try {
-            $this->documentModel->addDocumentRequirement($classId, $documentName, (int) $this->user['user_id']);
+            $this->recordModel->transactional(function () use ($classId, $documentName) {
+                $this->documentModel->addDocumentRequirement($classId, $documentName, (int) $this->user['user_id']);
+                try {
+                    $this->eligibilityModel->recalculateClassEligibility($classId);
+                } catch (Throwable $error) {
+                    error_log('Document requirement eligibility recalculation failed (' . get_class($error) . '): ' . $error->getMessage());
+                }
+                $this->model->logActivity((int) $this->user['user_id'], 'Added certificate document requirement', $documentName);
+            });
         } catch (Throwable $error) {
             error_log('Unable to add certificate document requirement: ' . $error->getMessage());
-            return $this->actionError('That required document is already listed for this class.', 'manage/certificate-config');
+            $isDuplicate = stripos($error->getMessage(), 'duplicate') !== false
+                || stripos($error->getMessage(), 'unique') !== false;
+            return $this->actionError(
+                $isDuplicate ? 'That required document is already listed for this class.' : 'The required document could not be added.',
+                'manage/certificate-config',
+                422
+            );
         }
-        $this->eligibilityModel->recalculateClassEligibility($classId);
-        $this->model->logActivity((int) $this->user['user_id'], 'Added certificate document requirement', $documentName);
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => 'Required document added.']);
+            return $this->jsonResponse(['message' => 'Required document added.']);
         }
         $this->notice('Required document added.');
         redirect($this->url('manage/certificate-config'));
@@ -304,7 +349,7 @@ class Documents extends Base
 
     public function deleteDocumentRequirement($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->requireUser() || !$this->validCsrf() || !$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to configure required documents.');
         }
         $requirement = ctype_digit((string) $id)
@@ -312,17 +357,22 @@ class Documents extends Base
             : null;
         if (!$requirement || !$this->documentModel->deleteDocumentRequirement((int) $id)) {
             if ($this->apiRequest) {
-                $this->jsonResponse(['message' => 'Required document not found.'], 404);
+                return $this->jsonResponse(['message' => 'Required document not found.'], 404);
             }
             $this->notice('Required document not found.');
+            return redirect($this->url('manage/certificate-config'));
         } else {
-            $this->eligibilityModel->recalculateClassEligibility((int) $requirement['class_id']);
+            try {
+                $this->eligibilityModel->recalculateClassEligibility((int) $requirement['class_id']);
+            } catch (Throwable $error) {
+                error_log('Deleted document requirement eligibility recalculation failed (' . get_class($error) . '): ' . $error->getMessage());
+            }
             $this->model->logActivity((int) $this->user['user_id'], 'Removed certificate document requirement', 'Requirement #' . (int) $id);
             if ($this->apiRequest) {
-                $this->jsonResponse(['message' => 'Required document removed.']);
+                return $this->jsonResponse(['message' => 'Required document removed.']);
             }
             $this->notice('Required document removed.');
+            return redirect($this->url('manage/certificate-config'));
         }
-        redirect($this->url('manage/certificate-config'));
     }
 }

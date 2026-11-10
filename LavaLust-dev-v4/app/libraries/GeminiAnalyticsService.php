@@ -19,7 +19,10 @@ class GeminiAnalyticsService
         $this->apiKey = trim((string) (getenv('GEMINI_API_KEY') ?: ''));
         $this->model = trim((string) (getenv('GEMINI_MODEL') ?: self::DEFAULT_MODEL));
         $this->cacheDirectory = $cacheDirectory ?: dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'cache' . DIRECTORY_SEPARATOR . 'gemini-insights';
+    }
 
+    public function assertConfigured()
+    {
         if ($this->apiKey === '') {
             throw new GeminiAnalyticsConfigurationException('GEMINI_API_KEY is not configured.');
         }
@@ -39,6 +42,7 @@ class GeminiAnalyticsService
 
     public function generate(array $analytics)
     {
+        $this->assertConfigured();
         $safeAnalytics = $this->privacySafeAnalytics($analytics);
         $cacheFile = $this->cacheFile($analytics);
         $cached = $this->readCache($cacheFile, 3600);
@@ -68,7 +72,10 @@ class GeminiAnalyticsService
         ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 
         $handle = curl_init($url);
-        curl_setopt_array($handle, [
+        if ($handle === false) {
+            throw new RuntimeException('Unable to initialize the Gemini request.');
+        }
+        $configured = curl_setopt_array($handle, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $requestBody,
@@ -80,9 +87,14 @@ class GeminiAnalyticsService
             CURLOPT_CONNECTTIMEOUT => 5,
             CURLOPT_TIMEOUT => 45,
         ]);
+        if (!$configured) {
+            curl_close($handle);
+            throw new RuntimeException('Unable to configure the Gemini request.');
+        }
         $responseBody = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
         $requestError = curl_error($handle);
+        curl_close($handle);
 
         if ($responseBody === false) {
             throw new RuntimeException('Gemini request failed: ' . ($requestError ?: 'connection error'));

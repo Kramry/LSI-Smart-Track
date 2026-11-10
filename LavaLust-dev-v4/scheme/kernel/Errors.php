@@ -79,13 +79,7 @@ class Errors
 	public function show_error($heading, $message, $template, $code = 500)
 	{
 		if ($this->is_api_request()) {
-			http_response_code($code);
-			header('Content-Type: application/json; charset=UTF-8');
-			echo json_encode([
-				'ok' => false,
-				'message' => $message ?: 'The API request failed. Please try again later.'
-			], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-			exit;
+			$this->respond_api_error($code);
 		}
 		$template_path = config_item('error_view_path');
 		if (empty($template_path))
@@ -98,10 +92,21 @@ class Errors
 		exit();
 	}
 
-	private function is_api_request()
+	public function is_api_request()
 	{
 		$request_path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
 		return is_string($request_path) && preg_match('#(?:^|/)api(?:/|$)#', $request_path) === 1;
+	}
+
+	private function respond_api_error($status = 500)
+	{
+		http_response_code($status);
+		header('Content-Type: application/json; charset=UTF-8');
+		echo json_encode([
+			'ok' => false,
+			'message' => 'The server encountered an internal error. Please try again later.',
+		], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+		exit;
 	}
 
 	/**
@@ -112,6 +117,10 @@ class Errors
 	 */
 	public function show_exception($exception)
 	{
+		if ($this->is_api_request()) {
+			$this->respond_api_error();
+		}
+
 		$template_path = config_item('error_view_path');
 		if (empty($template_path))
 		{
@@ -139,6 +148,10 @@ class Errors
 	 */
 	public function show_php_error($severity, $message, $filepath, $line)
 	{
+		if ($this->is_api_request()) {
+			$this->respond_api_error();
+		}
+
 		$template_path = config_item('error_view_path');
 		if (empty($template_path))
 		{
@@ -160,6 +173,10 @@ class Errors
 	 */
 	public function show_database_error($message, $sql = '', $bindings = [], $exception = null, $template = 'error_db')
 	{
+		if ($this->is_api_request()) {
+			$this->respond_api_error();
+		}
+
 		http_response_code(500);
 		
 		if (config_item('environment') !== 'development') {

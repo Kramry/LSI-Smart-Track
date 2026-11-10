@@ -16,7 +16,7 @@ class Dashboard extends Base
             'announcements' => $this->dashboardModel->announcements(),
         ];
 
-        if (in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if ($this->inRoleGroup('teaching_staff')) {
             $data['charts'] = $this->dashboardModel->dashboardChartData($this->user);
         }
 
@@ -37,6 +37,7 @@ class Dashboard extends Base
             show_404();
             return;
         }
+        $query = $this->queryParams();
 
         $fields = $this->fieldsFor($section);
         foreach ($fields as &$field) {
@@ -49,7 +50,7 @@ class Dashboard extends Base
         if ($section === 'documents') {
             $filters = [];
             foreach (['search', 'document_type', 'class_id', 'access_level', 'status', 'review_status', 'date_from', 'date_to', 'sort'] as $filter) {
-                $value = $this->queryParams()[$filter] ?? '';
+                $value = $query[$filter] ?? '';
                 $filters[$filter] = is_scalar($value) ? trim((string) $value) : '';
             }
             $filters['sort'] = $filters['sort'] ?: 'newest';
@@ -72,10 +73,15 @@ class Dashboard extends Base
             $columns[] = 'requirements';
         }
 
-        $editId = (int) ($this->queryParams()['edit'] ?? $this->session->flashdata('smarttrack_edit') ?? 0);
-        $editing = $editId ? $this->recordModel->findRecord($definition['table'], $definition['key'], $editId) : null;
-        if ($editing && !$this->recordIsVisible($section, $editing, $records, $definition['key'])) {
-            $editing = null;
+        $editId = (int) ($query['edit'] ?? $this->session->flashdata('smarttrack_edit') ?? 0);
+        $editing = $editId
+            ? $this->recordModel->findRecordScoped($definition['table'], $definition['key'], $editId, $this->user)
+            : null;
+
+        $traineeId = 0;
+        if ($section === 'attendance' && ($this->user['role'] ?? '') === 'trainee') {
+            $trainee = $this->userModel->traineeForUser($this->user['user_id']);
+            $traineeId = $trainee ? (int) $trainee['trainee_id'] : 0;
         }
 
         $data = [
@@ -94,7 +100,7 @@ class Dashboard extends Base
                 'schedules' => $this->recordModel->options('schedules', $this->user),
             ],
             'summary' => $section === 'attendance' && $this->user['role'] === 'trainee'
-                ? $this->attendanceModel->attendanceSummary((int) ($this->userModel->traineeForUser($this->user['user_id'])['trainee_id'] ?? 0))
+                ? $this->attendanceModel->attendanceSummary($traineeId)
                 : [],
             'followups' => $section === 'attendance' && $this->user['role'] !== 'trainee'
                 ? $this->dashboardModel->absenceFollowUps($this->user)
@@ -104,7 +110,7 @@ class Dashboard extends Base
                 : [],
         ];
 
-        if ($section === 'documents' && in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if ($section === 'documents' && $this->inRoleGroup('administrative_staff')) {
             $data['doc_stats'] = $this->documentModel->documentStats($this->user);
             $data['recent_docs'] = $this->documentModel->recentDocuments($this->user, 5);
         }
@@ -114,7 +120,7 @@ class Dashboard extends Base
 
     public function save($section)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !$this->canAccess($section) || !$this->canManage($section)) {
+        if (!$this->requireUser() || !$this->canAccess($section) || !$this->canManage($section) || !$this->validCsrf()) {
             return $this->deny('You are not allowed to change this section.');
         }
         $definition = $this->resourceDefinition($section);
@@ -124,13 +130,16 @@ class Dashboard extends Base
         }
 
         $existing = null;
-        $recordId = (int) $this->input($definition['key']);
+        $recordId = $this->positiveInteger($this->input($definition['key'])) ?? 0;
         if ($recordId) {
             if ($section === 'users' && $recordId === (int) $this->user['user_id']) {
                 return $this->deny('Use My Profile to change your own account details.');
             }
-            $existing = $this->recordModel->findRecord($definition['table'], $definition['key'], $recordId);
-            if (!$existing || !$this->recordIsVisible($section, $existing, $this->recordModel->records($section, $this->user), $definition['key'])) {
+            $existing = $this->recordModel->findRecordScoped($definition['table'], $definition['key'], $recordId, $this->user);
+            if (!$existing) {
+                if ($section === 'inquiries' && in_array($this->user['role'], ['trainee', 'instructor'], true)) {
+                    return $this->deny('That inquiry is not assigned to a trainee or class you can access.');
+                }
                 return $this->deny('That record is not available to your account.');
             }
             if ($section === 'users' && $this->user['role'] !== 'administrator' && $existing['role'] === 'administrator') {
@@ -142,7 +151,8 @@ class Dashboard extends Base
         $errors = [];
         foreach ($fields as $field) {
             $name = $field['name'];
-            $value = trim((string) $this->input($name));
+            $inputValue = $this->input($name);
+            $value = is_scalar($inputValue) ? trim((string) $inputValue) : '';
             if (!empty($field['required']) && $value === '' && !($name === 'password' && $recordId > 0)) {
                 $errors[] = $field['label'] . ' is required.';
                 continue;
@@ -160,7 +170,8 @@ class Dashboard extends Base
             }
             if ($value !== '' && ($field['type'] ?? '') === 'date') {
                 $date = DateTime::createFromFormat('!Y-m-d', $value);
-                if (!$date || $date->format('Y-m-d') !== $value) {
+                $dateErrors = DateTime::getLastErrors();
+                if (!$date || ($dateErrors !== false && ($dateErrors['warning_count'] || $dateErrors['error_count'])) || $date->format('Y-m-d') !== $value) {
                     $errors[] = 'Enter a valid ' . strtolower($field['label']) . '.';
                     continue;
                 }
@@ -170,13 +181,13 @@ class Dashboard extends Base
                     $errors[] = 'Enter a valid ' . strtolower($field['label']) . '.';
                     continue;
                 }
-                if (strlen($value) === 5) {
+                if (mb_strlen($value) === 5) {
                     $value .= ':00';
                 }
             }
             if ($value !== '' && $name === 'published_at') {
                 $value = str_replace('T', ' ', $value);
-                if (strlen($value) === 16) {
+                if (mb_strlen($value) === 16) {
                     $value .= ':00';
                 }
                 $publishedAt = DateTime::createFromFormat('!Y-m-d H:i:s', $value);
@@ -185,8 +196,7 @@ class Dashboard extends Base
                     continue;
                 }
             }
-            $maxLengths = ['full_name' => 150, 'username' => 50, 'first_name' => 100, 'last_name' => 100, 'sex' => 20, 'contact_number' => 20, 'course' => 100, 'program_code' => 30, 'program_name' => 150, 'class_name' => 150, 'title' => 150, 'subject' => 150, 'document_name' => 150];
-            if (isset($maxLengths[$name]) && strlen($value) > $maxLengths[$name]) {
+            if (isset($field['max_length']) && mb_strlen($value) > $field['max_length']) {
                 $errors[] = $field['label'] . ' is too long.';
                 continue;
             }
@@ -195,7 +205,7 @@ class Dashboard extends Base
             }
         }
 
-        if ($section === 'users' && isset($data['password']) && strlen((string) $data['password']) < 10) {
+        if ($section === 'users' && isset($data['password']) && mb_strlen((string) $data['password']) < 10) {
             $errors[] = 'Passwords must contain at least 10 characters.';
         }
         if ($section === 'users' && isset($data['username']) && !preg_match('/^[A-Za-z0-9_.-]{4,50}$/', (string) $data['username'])) {
@@ -205,7 +215,7 @@ class Dashboard extends Base
             $errors[] = 'A temporary password is required for a new account.';
         }
         if ($section === 'attendance' && !empty($data['class_id']) && !empty($data['trainee_id'])) {
-            $enrollment = $this->attendanceModel->enrollmentForClass((int) $data['class_id'], (int) $data['trainee_id']);
+            $enrollment = $this->attendanceModel->enrollmentForClass((int) $data['class_id'], (int) $data['trainee_id'], $this->user);
             if (!$enrollment) {
                 $errors[] = 'The trainee must be enrolled in the selected class.';
             }
@@ -237,11 +247,11 @@ class Dashboard extends Base
         if ($section === 'schedules' && !empty($data['start_time']) && !empty($data['end_time']) && $data['end_time'] <= $data['start_time']) {
             $errors[] = 'Session end time must be later than its start time.';
         }
-        if ($section === 'trainees' && !$recordId) {
-            $data['qr_code'] = 'LSI-' . strtoupper(bin2hex(random_bytes(6)));
-        }
         if ($section === 'users' && !$recordId) {
             $data['created_at'] = date('Y-m-d H:i:s');
+        }
+        if ($section === 'users' && isset($data['password'])) {
+            $data['password'] = password_hash((string) $data['password'], PASSWORD_DEFAULT);
         }
         if ($section === 'attendance') {
             $data['recorded_by'] = (int) $this->user['user_id'];
@@ -271,33 +281,39 @@ class Dashboard extends Base
                     }
                 }
             } elseif ($recordId) {
+                if (!$existing) {
+                    return $this->deny('That inquiry is not assigned to a trainee or class you can access.');
+                }
                 $data = array_intersect_key($data, ['reply' => true, 'status' => true]);
             }
         }
 
         if ($errors) {
             if ($this->apiRequest) {
-                $this->jsonResponse(['message' => implode(' ', $errors)], 422);
+                return $this->jsonResponse(['message' => implode(' ', $errors), 'errors' => $errors], 422);
             }
             return $this->moduleWithError($section, implode(' ', $errors), $recordId);
         }
 
         try {
-            $savedId = $this->recordModel->saveRecord($definition['table'], $definition['key'], $data, $recordId ?: null);
-            if ($section === 'classes') {
-                $this->eligibilityModel->recalculateClassEligibility((int) $savedId);
-            } elseif (in_array($section, ['enrollments', 'attendance'], true)) {
-                if ($existing) {
-                    $this->recalculateEligibilityPair($existing['trainee_id'] ?? 0, $existing['class_id'] ?? 0);
+            $savedId = $this->recordModel->transactional(function () use ($section, $definition, $data, $recordId, $existing) {
+                $savedId = $this->saveRecordWithQrRetry($section, $definition, $data, $recordId);
+                if ($section === 'classes') {
+                    $this->eligibilityModel->recalculateClassEligibility((int) $savedId);
+                } elseif (in_array($section, ['enrollments', 'attendance'], true)) {
+                    if ($existing) {
+                        $this->recalculateEligibilityPair($existing['trainee_id'] ?? 0, $existing['class_id'] ?? 0);
+                    }
+                    $savedRecord = $this->recordModel->findRecord($definition['table'], $definition['key'], (int) $savedId);
+                    if ($savedRecord) {
+                        $this->recalculateEligibilityPair($savedRecord['trainee_id'] ?? 0, $savedRecord['class_id'] ?? 0);
+                    }
                 }
-                $savedRecord = $this->recordModel->findRecord($definition['table'], $definition['key'], (int) $savedId);
-                if ($savedRecord) {
-                    $this->recalculateEligibilityPair($savedRecord['trainee_id'] ?? 0, $savedRecord['class_id'] ?? 0);
-                }
-            }
-            $this->recordModel->logActivity((int) $this->user['user_id'], ($recordId ? 'Updated ' : 'Created ') . $section, 'Record #' . $savedId);
+                $this->recordModel->logActivity((int) $this->user['user_id'], ($recordId ? 'Updated ' : 'Created ') . $section, 'Record #' . $savedId);
+                return $savedId;
+            });
             if ($this->apiRequest) {
-                $this->jsonResponse([
+                return $this->jsonResponse([
                     'message' => ucfirst(rtrim($definition['title'], 's')) . ' saved.',
                     'id' => (int) $savedId,
                 ]);
@@ -305,25 +321,82 @@ class Dashboard extends Base
             $this->notice(ucfirst(rtrim($definition['title'], 's')) . ' saved.');
             redirect($this->url('manage/' . $section));
         } catch (Throwable $error) {
+            error_log('Module record save failed for ' . $section . ' (' . get_class($error) . '): ' . $error->getMessage());
             if ($this->apiRequest) {
-                $this->jsonResponse(['message' => 'The record could not be saved. Check for duplicate values and valid relationships.'], 422);
+                return $this->jsonResponse(['message' => 'The record could not be saved. Check for duplicate values and valid relationships.'], 422);
             }
             return $this->moduleWithError($section, 'The record could not be saved. Check for duplicate values and valid relationships.', $recordId);
         }
     }
 
+    private function saveRecordWithQrRetry($section, array $definition, array $data, $recordId)
+    {
+        $isNewTrainee = $section === 'trainees' && !$recordId;
+        for ($retry = 0; ; $retry++) {
+            if ($isNewTrainee) {
+                $data['qr_code'] = 'LSI-' . strtoupper(bin2hex(random_bytes(6)));
+            }
+            try {
+                return $this->recordModel->saveRecord(
+                    $definition['table'],
+                    $definition['key'],
+                    $data,
+                    $recordId ?: null
+                );
+            } catch (Throwable $error) {
+                if (!$isNewTrainee || $retry >= 5 || !$this->isDuplicateQrError($error)) {
+                    throw $error;
+                }
+            }
+        }
+    }
+
+    private function isDuplicateQrError(Throwable $error)
+    {
+        $sqlState = (string) $error->getCode();
+        $message = $error->getMessage();
+        $driverCode = null;
+        if ($error instanceof PDOException && isset($error->errorInfo[1])) {
+            $sqlState = (string) ($error->errorInfo[0] ?? $sqlState);
+            $driverCode = (int) $error->errorInfo[1];
+        }
+        if ($sqlState !== '23000' && preg_match('/SQLSTATE\[([A-Z0-9]{5})\]/', $message, $matches)) {
+            $sqlState = $matches[1];
+        }
+        $duplicateKey = $driverCode === 1062
+            || preg_match('/duplicate (?:entry|key)/i', $message) === 1;
+        return $sqlState === '23000' && $duplicateKey;
+    }
+
+    private function positiveInteger($value)
+    {
+        if (!is_scalar($value)) {
+            return null;
+        }
+        $integer = filter_var($value, FILTER_VALIDATE_INT);
+        return $integer !== false && $integer > 0 ? $integer : null;
+    }
+
     public function delete($section, $id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !$this->canAccess($section) || !$this->canManage($section)) {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            if ($this->apiRequest) {
+                return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+            }
+            http_response_code(405);
+            header('Allow: POST');
+            exit('Method not allowed.');
+        }
+        if (!$this->requireUser() || !$this->canAccess($section) || !$this->canManage($section) || !$this->validCsrf()) {
             return $this->deny('You are not allowed to delete records in this section.');
         }
         $definition = $this->resourceDefinition($section);
-        if (!$definition || !ctype_digit((string) $id)) {
+        if (!$definition || !ctype_digit((string) $id) || !(int) $id) {
             show_404();
             return;
         }
-        $existing = $this->recordModel->findRecord($definition['table'], $definition['key'], (int) $id);
-        if (!$existing || !$this->recordIsVisible($section, $existing, $this->recordModel->records($section, $this->user), $definition['key'])) {
+        $existing = $this->recordModel->findRecordScoped($definition['table'], $definition['key'], (int) $id, $this->user);
+        if (!$existing) {
             return $this->deny('That record is not available to your account.');
         }
         $deactivate = in_array($section, ['users', 'trainees'], true);
@@ -333,22 +406,19 @@ class Dashboard extends Base
         if ($section === 'users' && $this->user['role'] !== 'administrator' && $existing['role'] === 'administrator') {
             return $this->deny('Only an administrator can deactivate another administrator account.');
         }
-        if ($section === 'documents') {
-            $document = $this->documentModel->documentById((int) $id);
-            if ($document) {
-                $path = $this->privateDocumentPath($document['file_path']);
-                if ($path) {
-                    unlink($path);
-                }
+        $deleted = $this->recordModel->deleteRecord($definition['table'], $definition['key'], (int) $id, $deactivate);
+        if ($section === 'documents' && $deleted && !empty($existing['file_path'])) {
+            $path = $this->privateDocumentPath($existing['file_path']);
+            if ($path) {
+                @unlink($path);
             }
         }
-        $this->recordModel->deleteRecord($definition['table'], $definition['key'], (int) $id, $deactivate);
         if (in_array($section, ['enrollments', 'attendance', 'documents'], true)) {
             $this->recalculateEligibilityPair($existing['trainee_id'] ?? 0, $existing['class_id'] ?? 0);
         }
         $this->recordModel->logActivity((int) $this->user['user_id'], 'Deleted ' . $section, 'Record #' . (int) $id . ($deactivate ? ' deactivated' : ' removed'));
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => $deactivate ? 'Record deactivated.' : 'Record deleted.']);
+            return $this->jsonResponse(['message' => $deactivate ? 'Record deactivated.' : 'Record deleted.']);
         }
         $this->notice($deactivate ? 'Record deactivated.' : 'Record deleted.');
         redirect($this->url('manage/' . $section));

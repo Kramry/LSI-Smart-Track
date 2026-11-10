@@ -318,6 +318,56 @@ class Certificate_model extends Base_model
             ->get() ?: null;
     }
 
+    public function reviewEligibilityAndQueue($eligibilityId, $decision, $actorId, $reason = null)
+    {
+        if (!$this->eligibilityModel) {
+            throw new RuntimeException('The eligibility model is required to review certificate eligibility.');
+        }
+        if (!$this->db->transaction()) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Certificate review transaction initialization cleanup failed (' . get_class($rollbackError) . ').');
+            }
+            throw new RuntimeException('Unable to start the certificate review transaction.');
+        }
+
+        try {
+            $eligibility = $this->eligibilityById((int) $eligibilityId);
+            if (!$eligibility) {
+                $this->db->roll_back();
+                return ['success' => false, 'reason' => 'not_found'];
+            }
+            if (!$this->eligibilityModel->updateEligibilityApproval((int) $eligibilityId, $decision, (int) $actorId, $reason)) {
+                $this->db->roll_back();
+                return ['success' => false, 'reason' => 'not_eligible'];
+            }
+
+            if ($decision === 'approved') {
+                $certificate = $this->createPendingCertificate((int) $eligibility['trainee_id'], (int) $eligibility['class_id'], (int) $actorId);
+                if (!$certificate) {
+                    $existingCertificate = $this->certificateStatusForTraineeClass((int) $eligibility['trainee_id'], (int) $eligibility['class_id']);
+                    if (!$existingCertificate || $existingCertificate['status'] !== 'pending_signature') {
+                        $this->db->roll_back();
+                        return ['success' => false, 'reason' => 'queue_failed'];
+                    }
+                }
+            }
+
+            if (!$this->db->commit()) {
+                throw new RuntimeException('Unable to commit the certificate review transaction.');
+            }
+            return ['success' => true];
+        } catch (Throwable $error) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Certificate review transaction rollback failed (' . get_class($rollbackError) . ').');
+            }
+            throw $error;
+        }
+    }
+
     public function signingAccount($userId)
     {
         return $this->db->table('users')

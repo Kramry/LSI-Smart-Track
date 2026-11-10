@@ -2,21 +2,18 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once APP_DIR . 'controllers/Base.php';
-require_once APP_DIR . 'models/Classes_model.php';
 
 class Classes extends Base
 {
-    private $classesModel;
-
     public function before_action()
     {
         parent::before_action();
-        $this->classesModel = new Classes_model($this->db);
+        $this->classesModel = $this->modelRegistry->loadOptional($this->db, 'Classes_model');
     }
 
     public function index()
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to view teaching classes.');
         }
         $query = $this->queryParams();
@@ -24,12 +21,7 @@ class Classes extends Base
             'program_id' => $this->numericFilter($query['program_id'] ?? ''),
             'instructor_id' => $this->numericFilter($query['instructor_id'] ?? ''),
         ];
-        $classes = $this->classesModel->classes($this->user, $filters);
-        foreach ($classes as &$class) {
-            $class['teaching_status'] = $this->teachingStatus($class);
-            $class['today_not_scanned'] = max(0, (int) $class['enrolled_count'] - (int) $class['today_scanned']);
-        }
-        unset($class);
+        $classes = $this->buildClassList($this->user, $filters);
 
         $editingClass = null;
         $editId = $this->numericFilter($query['edit'] ?? '');
@@ -51,38 +43,40 @@ class Classes extends Base
 
     public function detail($id)
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to view class details.');
         }
         if (!ctype_digit((string) $id) || !(int) $id) {
             show_404();
             return;
         }
-        $classId = (int) $id;
-        $class = $this->classesModel->classById($classId, $this->user);
-        if (!$class) {
+        $detail = $this->loadClassDetail((int) $id, $this->user);
+        if ($detail === null) {
             show_404();
             return;
         }
         $this->render('class_detail', [
-            'title' => $class['class_name'],
-            'class' => $class,
-            'schedules' => $this->classesModel->schedules($classId),
-            'roster' => $this->classesModel->roster($classId),
-            'attendance' => $this->classesModel->attendance($classId),
-            'assessments' => $this->classesModel->assessments($classId),
-            'documents' => $this->classesModel->documents($classId),
-            'announcements' => $this->classesModel->announcements($classId),
-            'stats' => $this->classesModel->quickStats($classId),
+            'title' => $detail['class']['class_name'],
+            'class' => $detail['class'],
+            'schedules' => $detail['schedules'],
+            'roster' => $detail['roster'],
+            'attendance' => $detail['attendance'],
+            'assessments' => $detail['assessments'],
+            'documents' => $detail['documents'],
+            'announcements' => $detail['announcements'],
+            'stats' => $detail['quickStats'],
         ]);
     }
 
     public function apiIndex()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET' || !$this->requireUser()) {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
+        if (!$this->requireUser()) {
             return;
         }
-        if (!in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->inRoleGroup('teaching_staff')) {
             return $this->jsonResponse(['message' => 'You are not allowed to view classes.'], 403);
         }
         $query = $this->queryParams();
@@ -90,12 +84,7 @@ class Classes extends Base
             'program_id' => $this->numericFilter($query['program_id'] ?? ''),
             'instructor_id' => $this->numericFilter($query['instructor_id'] ?? ''),
         ];
-        $classes = $this->classesModel->classes($this->user, $filters);
-        foreach ($classes as &$class) {
-            $class['teaching_status'] = $this->teachingStatus($class);
-            $class['today_not_scanned'] = max(0, (int) $class['enrolled_count'] - (int) $class['today_scanned']);
-        }
-        unset($class);
+        $classes = $this->buildClassList($this->user, $filters);
         return $this->jsonResponse([
             'classes' => $classes,
             'programs' => $this->recordModel->options('programs'),
@@ -105,19 +94,59 @@ class Classes extends Base
 
     public function apiDetail($id)
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET' || !$this->requireUser()) {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
+        if (!$this->requireUser()) {
             return;
         }
-        if (!in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)
+        if (!$this->inRoleGroup('teaching_staff')
             || !ctype_digit((string) $id) || !(int) $id) {
             return $this->jsonResponse(['message' => 'Class not found.'], 404);
         }
-        $classId = (int) $id;
-        $class = $this->classesModel->classById($classId, $this->user);
-        if (!$class) {
+        $detail = $this->loadClassDetail((int) $id, $this->user);
+        if ($detail === null) {
             return $this->jsonResponse(['message' => 'Class not found.'], 404);
         }
         return $this->jsonResponse([
+            'class' => $detail['class'],
+            'schedules' => $detail['schedules'],
+            'roster' => $detail['roster'],
+            'attendance' => $detail['attendance'],
+            'assessments' => $detail['assessments'],
+            'documents' => $detail['documents'],
+            'announcements' => $detail['announcements'],
+            'stats' => $detail['quickStats'],
+        ]);
+    }
+
+    private function numericFilter($value)
+    {
+        if (!is_scalar($value)) {
+            return null;
+        }
+        $integer = filter_var($value, FILTER_VALIDATE_INT);
+        return $integer !== false && $integer > 0 ? $integer : null;
+    }
+
+    private function buildClassList(array $user, array $filters)
+    {
+        $classes = $this->classesModel->classes($user, $filters);
+        foreach ($classes as &$class) {
+            $class['teaching_status'] = $this->teachingStatus($class);
+            $class['today_not_scanned'] = max(0, (int) ($class['enrolled_count'] ?? 0) - (int) ($class['today_scanned'] ?? 0));
+        }
+        unset($class);
+        return $classes;
+    }
+
+    private function loadClassDetail($classId, array $user)
+    {
+        $class = $this->classesModel->classById($classId, $user);
+        if (!$class) {
+            return null;
+        }
+        return [
             'class' => $class,
             'schedules' => $this->classesModel->schedules($classId),
             'roster' => $this->classesModel->roster($classId),
@@ -125,18 +154,132 @@ class Classes extends Base
             'assessments' => $this->classesModel->assessments($classId),
             'documents' => $this->classesModel->documents($classId),
             'announcements' => $this->classesModel->announcements($classId),
-            'stats' => $this->classesModel->quickStats($classId),
-        ]);
+            'quickStats' => $this->classesModel->quickStats($classId),
+        ];
     }
 
-    private function numericFilter($value)
+    private function validateClassData(array $input)
     {
-        return is_scalar($value) && ctype_digit((string) $value) && (int) $value > 0 ? (int) $value : null;
+        $errors = [];
+        $classIdValue = $input['class_id'] ?? '';
+        $classId = $classIdValue === '' || $classIdValue === null ? 0 : $this->numericFilter($classIdValue);
+        if ($classId === null) {
+            $errors[] = 'Choose a valid class.';
+            $classId = 0;
+        }
+
+        $classNameValue = $input['class_name'] ?? '';
+        $className = is_scalar($classNameValue) ? trim((string) $classNameValue) : '';
+        if ($className === '') {
+            $errors[] = 'Class name is required.';
+        } elseif (strlen($className) > 255) {
+            $errors[] = 'Class name must be 255 bytes or fewer.';
+        }
+
+        $programId = $this->numericFilter($input['program_id'] ?? null);
+        if ($programId === null) {
+            $errors[] = 'Program is required.';
+        }
+
+        $instructorValue = $input['instructor_id'] ?? '';
+        $instructorId = $instructorValue === '' || $instructorValue === null
+            ? null
+            : $this->numericFilter($instructorValue);
+        if ($instructorValue !== '' && $instructorValue !== null && $instructorId === null) {
+            $errors[] = 'Choose a valid instructor.';
+        }
+
+        $startDateValue = $input['start_date'] ?? '';
+        $startDate = is_scalar($startDateValue) ? trim((string) $startDateValue) : '';
+        $endDateValue = $input['end_date'] ?? '';
+        $endDate = is_scalar($endDateValue) ? trim((string) $endDateValue) : '';
+        if (!is_scalar($startDateValue) || ($startDate !== '' && !$this->isValidDate($startDate))) {
+            $errors[] = 'Enter a valid start date.';
+        }
+        if (!is_scalar($endDateValue) || ($endDate !== '' && !$this->isValidDate($endDate))) {
+            $errors[] = 'Enter a valid end date.';
+        }
+        if ($startDate !== '' && $endDate !== '' && $this->isValidDate($startDate) && $this->isValidDate($endDate) && $endDate < $startDate) {
+            $errors[] = 'Class end date cannot be earlier than its start date.';
+        }
+
+        $statusValue = $input['status'] ?? '';
+        $status = is_scalar($statusValue) ? trim((string) $statusValue) : '';
+        if (!in_array($status, ['active', 'inactive'], true)) {
+            $errors[] = 'Status is required.';
+        }
+
+        return [
+            'errors' => $errors,
+            'data' => [
+                'class_name' => $className,
+                'program_id' => $programId,
+                'instructor_id' => $instructorId,
+                'start_date' => $startDate !== '' ? $startDate : null,
+                'end_date' => $endDate !== '' ? $endDate : null,
+                'status' => $status,
+            ],
+            'class_id' => $classId,
+        ];
+    }
+
+    private function isValidDate($value)
+    {
+        $date = DateTime::createFromFormat('!Y-m-d', $value);
+        $errors = DateTime::getLastErrors();
+        return $date !== false
+            && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0))
+            && $date->format('Y-m-d') === $value;
+    }
+
+    private function persistClass($classId, array $data, array $user)
+    {
+        if (!$this->db->transaction()) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Class transaction initialization cleanup failed (' . get_class($rollbackError) . ').');
+            }
+            throw new RuntimeException('Unable to start the class transaction.');
+        }
+
+        try {
+            if ($classId) {
+                if (!$this->classesModel->classById($classId, $user)) {
+                    $this->db->roll_back();
+                    return ['success' => false, 'reason' => 'not_found'];
+                }
+                $this->classesModel->updateClass($classId, $data);
+                $savedId = $classId;
+                $action = 'Updated class';
+            } else {
+                $this->classesModel->createClass($data);
+                $savedId = (int) $this->db->last_id();
+                if ($savedId < 1) {
+                    throw new RuntimeException('Class insert did not return a valid ID.');
+                }
+                $action = 'Created class';
+            }
+
+            $this->recordModel->logActivity((int) $user['user_id'], $action, 'Class #' . $savedId);
+            $this->eligibilityModel->recalculateClassEligibility($savedId);
+            if (!$this->db->commit()) {
+                throw new RuntimeException('Unable to commit the class transaction.');
+            }
+            return ['success' => true, 'id' => $savedId];
+        } catch (Throwable $error) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Class transaction rollback failed (' . get_class($rollbackError) . ').');
+            }
+            throw $error;
+        }
     }
 
     private function teachingStatus(array $class)
     {
-        $today = date('Y-m-d');
+        $today = (new DateTimeImmutable('today'))->format('Y-m-d');
         if (!empty($class['end_date']) && $class['end_date'] < $today) {
             return 'completed';
         }
@@ -148,68 +291,31 @@ class Classes extends Base
 
     public function save()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !$this->canManage('classes')) {
+        if (!$this->requireUser() || !$this->canManage('classes') || !$this->validCsrf()) {
             return $this->deny('You are not allowed to manage classes.');
         }
 
-        $classId = $this->numericFilter($this->input('class_id'));
-        $className = trim((string) $this->input('class_name'));
-        $programId = $this->numericFilter($this->input('program_id'));
-        $instructorId = $this->numericFilter($this->input('instructor_id'));
-        $startDate = trim((string) $this->input('start_date'));
-        $endDate = trim((string) $this->input('end_date'));
-        $status = trim((string) $this->input('status'));
-
-        $errors = [];
-
-        if ($className === '') {
-            $errors[] = 'Class name is required.';
-        }
-        if (!$programId) {
-            $errors[] = 'Program is required.';
-        }
-        if ($status === '' || !in_array($status, ['active', 'inactive'], true)) {
-            $errors[] = 'Status is required.';
-        }
-        if ($startDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) {
-            $errors[] = 'Enter a valid start date.';
-        }
-        if ($endDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) {
-            $errors[] = 'Enter a valid end date.';
-        }
-        if ($startDate !== '' && $endDate !== '' && $endDate < $startDate) {
-            $errors[] = 'Class end date cannot be earlier than its start date.';
-        }
-
-        if ($errors) {
-            $this->session->set_flashdata('error', implode(' ', $errors));
+        $validated = $this->validateClassData($this->requestData());
+        $classId = $validated['class_id'];
+        if ($validated['errors']) {
+            $this->session->set_flashdata('error', implode(' ', $validated['errors']));
             redirect($this->url('manage/classes' . ($classId ? '?edit=' . $classId : '?create=1')));
             return;
         }
 
+        if ($classId && !$this->classesModel->classById($classId, $this->user)) {
+            return $this->deny('That class is not available to your account.');
+        }
+
         try {
-            $data = [
-                'class_name' => $className,
-                'program_id' => $programId,
-                'instructor_id' => $instructorId ?: null,
-                'start_date' => $startDate ?: null,
-                'end_date' => $endDate ?: null,
-                'status' => $status,
-            ];
-
-            if ($classId) {
-                $this->classesModel->updateClass($classId, $data);
-                $savedId = $classId;
-                $this->recordModel->logActivity((int) $this->user['user_id'], 'Updated class', 'Class #' . $savedId);
-            } else {
-                $savedId = $this->classesModel->createClass($data);
-                $this->recordModel->logActivity((int) $this->user['user_id'], 'Created class', 'Class #' . $savedId);
+            $result = $this->persistClass($classId, $validated['data'], $this->user);
+            if (!$result['success']) {
+                return $this->deny('That class is not available to your account.');
             }
-
-            $this->eligibilityModel->recalculateClassEligibility((int) $savedId);
             $this->notice($classId ? 'Class updated.' : 'Class created.');
             redirect($this->url('manage/classes'));
         } catch (Throwable $error) {
+            error_log('Class save error: ' . $error->getMessage());
             $this->session->set_flashdata('error', 'The class could not be saved. Check for duplicate values and valid relationships.');
             redirect($this->url('manage/classes' . ($classId ? '?edit=' . $classId : '?create=1')));
         }
@@ -246,78 +352,43 @@ class Classes extends Base
 
     public function apiSave()
     {
-        $this->apiRequest = true;
-        if (!$this->requireUser() || !$this->validCsrf() || !$this->canManage('classes')) {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
+        if (!$this->requireUser() || !$this->canManage('classes') || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'You are not allowed to manage classes.'], 403);
         }
 
-        $classId = $this->numericFilter($this->input('class_id'));
-        $className = trim((string) $this->input('class_name'));
-        $programId = $this->numericFilter($this->input('program_id'));
-        $instructorId = $this->numericFilter($this->input('instructor_id'));
-        $startDate = trim((string) $this->input('start_date'));
-        $endDate = trim((string) $this->input('end_date'));
-        $status = trim((string) $this->input('status'));
-
-        $errors = [];
-
-        if ($className === '') {
-            $errors[] = 'Class name is required.';
-        }
-        if (!$programId) {
-            $errors[] = 'Program is required.';
-        }
-        if ($status === '' || !in_array($status, ['active', 'inactive'], true)) {
-            $errors[] = 'Status is required.';
-        }
-        if ($startDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) {
-            $errors[] = 'Enter a valid start date.';
-        }
-        if ($endDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) {
-            $errors[] = 'Enter a valid end date.';
-        }
-        if ($startDate !== '' && $endDate !== '' && $endDate < $startDate) {
-            $errors[] = 'Class end date cannot be earlier than its start date.';
-        }
-
-        if ($errors) {
-            return $this->jsonResponse(['message' => implode(' ', $errors)], 422);
+        $validated = $this->validateClassData($this->requestData());
+        $classId = $validated['class_id'];
+        if ($validated['errors']) {
+            return $this->jsonResponse([
+                'message' => implode(' ', $validated['errors']),
+                'errors' => $validated['errors'],
+            ], 422);
         }
 
         try {
-            $data = [
-                'class_name' => $className,
-                'program_id' => $programId,
-                'instructor_id' => $instructorId ?: null,
-                'start_date' => $startDate ?: null,
-                'end_date' => $endDate ?: null,
-                'status' => $status,
-            ];
-
-            if ($classId) {
-                $this->classesModel->updateClass($classId, $data);
-                $savedId = $classId;
-                $this->recordModel->logActivity((int) $this->user['user_id'], 'Updated class', 'Class #' . $savedId);
-            } else {
-                $savedId = $this->classesModel->createClass($data);
-                $this->recordModel->logActivity((int) $this->user['user_id'], 'Created class', 'Class #' . $savedId);
+            $result = $this->persistClass($classId, $validated['data'], $this->user);
+            if (!$result['success']) {
+                return $this->jsonResponse(['message' => 'That class is not available to your account.'], 403);
             }
-
-            $this->eligibilityModel->recalculateClassEligibility((int) $savedId);
             return $this->jsonResponse([
                 'message' => $classId ? 'Class updated.' : 'Class created.',
-                'id' => (int) $savedId,
+                'id' => (int) $result['id'],
             ]);
         } catch (Throwable $error) {
             error_log('Class save error: ' . $error->getMessage());
-            return $this->jsonResponse(['message' => 'The class could not be saved: ' . $error->getMessage()], 422);
+            return $this->jsonResponse(['message' => 'The class could not be saved. Check for duplicate values and valid relationships.'], 422);
         }
     }
 
     public function apiDelete($id)
     {
-        $this->apiRequest = true;
-        if (!$this->requireUser() || !$this->validCsrf() || !$this->canManage('classes')) {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
+        if (!$this->requireUser() || !$this->canManage('classes') || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'You are not allowed to delete classes.'], 403);
         }
 

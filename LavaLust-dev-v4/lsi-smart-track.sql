@@ -324,6 +324,20 @@ CREATE TABLE `attendance_records` (
   `recorded_by` int UNSIGNED DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `smarttrack_attendance_scan_limits`
+--
+
+CREATE TABLE `smarttrack_attendance_scan_limits` (
+  `rate_key` char(64) NOT NULL,
+  `window_started_at` datetime NOT NULL,
+  `request_count` int unsigned NOT NULL DEFAULT 0,
+  PRIMARY KEY (`rate_key`),
+  KEY `idx_smarttrack_attendance_scan_window` (`window_started_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 --
 -- Dumping data for table `attendance_records`
 --
@@ -1822,6 +1836,18 @@ ALTER TABLE `training_schedules`
 ALTER TABLE `xendit_payments`
   ADD CONSTRAINT `fk_xendit_payment_fee` FOREIGN KEY (`trainee_fee_id`) REFERENCES `trainee_fees` (`trainee_fee_id`) ON DELETE CASCADE,
   ADD CONSTRAINT `fk_xendit_payment_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE;
+
+--
+-- Shared atomic rate-limit state for Gemini insight generation
+--
+CREATE TABLE `smarttrack_gemini_generation_limits` (
+  `user_id` int unsigned NOT NULL,
+  `window_started_at` datetime NOT NULL,
+  `request_count` tinyint unsigned NOT NULL DEFAULT 0,
+  `last_granted` tinyint unsigned NOT NULL DEFAULT 1,
+  PRIMARY KEY (`user_id`),
+  KEY `idx_smarttrack_gemini_limits_window` (`window_started_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

@@ -3,10 +3,15 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once APP_DIR . 'models/Base_model.php';
 
+class AnalyticsAuthorizationException extends RuntimeException
+{
+}
+
 class Analytics_model extends Base_model
 {
     public function classOptions(array $user)
     {
+        $this->assertAnalyticsUser($user);
         $query = $this->db->table('training_classes')
             ->select('class_id, class_name');
         if (($user['role'] ?? '') === 'instructor') {
@@ -17,6 +22,11 @@ class Analytics_model extends Base_model
 
     public function classIsVisible($classId, array $user)
     {
+        if (!$this->isAnalyticsUser($user)
+            || (!is_int($classId) && (!is_string($classId) || !ctype_digit($classId)))
+            || (int) $classId < 1) {
+            return false;
+        }
         $query = $this->db->table('training_classes')
             ->select('class_id')
             ->where('class_id', (int) $classId);
@@ -28,44 +38,31 @@ class Analytics_model extends Base_model
 
     public function analytics(array $user, array $filters)
     {
-        $classFilters = [];
-        if (!empty($filters['class_id'])) {
-            $classFilters['class_id'] = (int) $filters['class_id'];
+        $this->assertAnalyticsUser($user);
+        $this->assertAnalyticsFilters($filters);
+        $classId = $filters['class_id'] ?? null;
+        if ($classId !== null && $classId !== '' && !$this->classIsVisible($classId, $user)) {
+            throw new AnalyticsAuthorizationException('Selected class is not available to this account.');
         }
-        if (($user['role'] ?? '') === 'instructor') {
-            $classFilters['instructor_id'] = (int) $user['user_id'];
-        }
-
-        $applyClassFilters = static function ($query) use ($classFilters) {
-            foreach ($classFilters as $column => $value) {
-                $query->where('c.' . $column, $value);
-            }
-            return $query;
-        };
 
         $activeTraineeQuery = $this->db->table('class_enrollments e')
             ->select('COUNT(DISTINCT e.trainee_id) AS active_trainees')
             ->join('trainees t', "t.trainee_id = e.trainee_id AND t.status = 'active'")
             ->join('training_classes c', 'c.class_id = e.class_id');
-        $applyClassFilters($activeTraineeQuery);
+        $this->applyClassScope($activeTraineeQuery, $user, $filters);
         $activeTrainees = (int) ($activeTraineeQuery->row_array()['active_trainees'] ?? 0);
 
         $activeClassQuery = $this->db->table('training_classes c')
             ->select('COUNT(DISTINCT c.class_id) AS active_classes')
             ->where('c.status', 'active');
-        $applyClassFilters($activeClassQuery);
+        $this->applyClassScope($activeClassQuery, $user, $filters);
         $activeClasses = (int) ($activeClassQuery->row_array()['active_classes'] ?? 0);
 
         $attendanceQuery = $this->db->table('attendance_records a')
             ->select("COUNT(a.attendance_id) AS attendance_records, SUM(CASE WHEN a.status = 'Present' OR a.status = 'Late' THEN 1 ELSE 0 END) AS attended_records, SUM(CASE WHEN a.status = 'Absent' THEN 1 ELSE 0 END) AS absent_records")
             ->join('training_classes c', 'c.class_id = a.class_id')
             ->between('a.attendance_date', $filters['start_date'], $filters['end_date']);
-        if (!empty($filters['class_id'])) {
-            $attendanceQuery->where('a.class_id', (int) $filters['class_id']);
-        }
-        if (($user['role'] ?? '') === 'instructor') {
-            $attendanceQuery->where('c.instructor_id', (int) $user['user_id']);
-        }
+        $this->applyClassScope($attendanceQuery, $user, $filters);
         $attendanceSummary = $attendanceQuery->row_array() ?: [];
         $totalRecords = (int) ($attendanceSummary['attendance_records'] ?? 0);
         $summary = [
@@ -82,12 +79,7 @@ class Analytics_model extends Base_model
             ->select("a.attendance_date, COUNT(*) AS total, SUM(a.status = 'Present') AS present, SUM(a.status = 'Late') AS late, SUM(a.status = 'Absent') AS absent")
             ->join('training_classes c', 'c.class_id = a.class_id')
             ->between('a.attendance_date', $filters['start_date'], $filters['end_date']);
-        if (!empty($filters['class_id'])) {
-            $trendQuery->where('a.class_id', (int) $filters['class_id']);
-        }
-        if (($user['role'] ?? '') === 'instructor') {
-            $trendQuery->where('c.instructor_id', (int) $user['user_id']);
-        }
+        $this->applyClassScope($trendQuery, $user, $filters);
         $trendRows = $trendQuery->group_by('a.attendance_date')
             ->order_by('a.attendance_date')
             ->result_array();
@@ -121,12 +113,7 @@ class Analytics_model extends Base_model
             ->select('a.status, COUNT(*) AS total')
             ->join('training_classes c', 'c.class_id = a.class_id')
             ->between('a.attendance_date', $filters['start_date'], $filters['end_date']);
-        if (!empty($filters['class_id'])) {
-            $statusQuery->where('a.class_id', (int) $filters['class_id']);
-        }
-        if (($user['role'] ?? '') === 'instructor') {
-            $statusQuery->where('c.instructor_id', (int) $user['user_id']);
-        }
+        $this->applyClassScope($statusQuery, $user, $filters);
         $statusRows = $statusQuery->group_by('a.status')
             ->order_by('a.status')
             ->result_array();
@@ -138,17 +125,15 @@ class Analytics_model extends Base_model
         $classQuery = $this->db->table('training_classes c')
             ->select('c.class_id, c.class_name, p.program_name')
             ->join('training_programs p', 'p.program_id = c.program_id');
-        if (!empty($filters['class_id'])) {
-            $classQuery->where('c.class_id', (int) $filters['class_id']);
-        }
-        if (($user['role'] ?? '') === 'instructor') {
-            $classQuery->where('c.instructor_id', (int) $user['user_id']);
-        }
+        $this->applyClassScope($classQuery, $user, $filters);
         $classes = $classQuery->order_by('c.class_name')->result_array();
 
         $enrollmentStats = $this->db->table('class_enrollments e')
             ->select('e.class_id, COUNT(DISTINCT t.trainee_id) AS active_trainees')
             ->join('trainees t', "t.trainee_id = e.trainee_id AND t.status = 'active'")
+            ->join('training_classes c', 'c.class_id = e.class_id');
+        $this->applyClassScope($enrollmentStats, $user, $filters);
+        $enrollmentStats = $enrollmentStats
             ->group_by('e.class_id')
             ->result_array();
         $enrollmentByClass = [];
@@ -158,7 +143,10 @@ class Analytics_model extends Base_model
 
         $attendanceStats = $this->db->table('attendance_records a')
             ->select("a.class_id, COUNT(*) AS attendance_records, SUM(a.status = 'Present' OR a.status = 'Late') AS attended_records, SUM(a.status = 'Absent') AS absent_records")
-            ->between('a.attendance_date', $filters['start_date'], $filters['end_date'])
+            ->join('training_classes c', 'c.class_id = a.class_id')
+            ->between('a.attendance_date', $filters['start_date'], $filters['end_date']);
+        $this->applyClassScope($attendanceStats, $user, $filters);
+        $attendanceStats = $attendanceStats
             ->group_by('a.class_id')
             ->result_array();
         $attendanceByClass = [];
@@ -195,12 +183,7 @@ class Analytics_model extends Base_model
             ->join('trainees t', 't.trainee_id = a.trainee_id')
             ->join('training_classes c', 'c.class_id = a.class_id')
             ->between('a.attendance_date', $filters['start_date'], $filters['end_date']);
-        if (!empty($filters['class_id'])) {
-            $traineeQuery->where('a.class_id', (int) $filters['class_id']);
-        }
-        if (($user['role'] ?? '') === 'instructor') {
-            $traineeQuery->where('c.instructor_id', (int) $user['user_id']);
-        }
+        $this->applyClassScope($traineeQuery, $user, $filters);
         $trainees = $traineeQuery
             ->group_by(['t.trainee_id', 't.first_name', 't.last_name'])
             ->result_array();
@@ -246,8 +229,8 @@ class Analytics_model extends Base_model
         }
         unset($trainee);
         $traineeSortRanks = [
-            'last_name' => $this->columnOrderRanks('trainees', 'last_name'),
-            'first_name' => $this->columnOrderRanks('trainees', 'first_name'),
+            'last_name' => $this->columnOrderRanks('trainees', 'last_name', 'ASC', array_column($trainees, 'trainee_id')),
+            'first_name' => $this->columnOrderRanks('trainees', 'first_name', 'ASC', array_column($trainees, 'trainee_id')),
         ];
         foreach ($trainees as $index => &$trainee) {
             $trainee['_sort_order'] = $index;
@@ -682,7 +665,7 @@ class Analytics_model extends Base_model
             ->left_join('trainee_documents d', "d.class_id = cdr.class_id AND d.document_name = cdr.required_document_name AND d.review_status = 'approved'")
             ->where_null('d.document_id');
         if (!empty($filters['class_id'])) {
-            $missingQuery->where('d.class_id', (int) $filters['class_id']);
+            $missingQuery->where('cdr.class_id', (int) $filters['class_id']);
         }
         $missingDocs = $missingQuery->row_array() ?: [];
 
@@ -691,7 +674,7 @@ class Analytics_model extends Base_model
             ->left_join('certificate_document_requirements cdr', 'cdr.class_id = c.class_id')
             ->left_join('trainee_documents d', "d.class_id = c.class_id AND d.document_name = cdr.required_document_name AND d.review_status = 'approved'");
         if (!empty($filters['class_id'])) {
-            $completionQuery->where('d.class_id', (int) $filters['class_id']);
+            $completionQuery->where('c.class_id', (int) $filters['class_id']);
         }
         $completionByClass = $completionQuery
             ->group_by(['c.class_id', 'c.class_name'])
@@ -905,12 +888,125 @@ class Analytics_model extends Base_model
         ];
     }
 
-    private function columnOrderRanks($table, $column, $direction = 'ASC')
+    public function consumeGeminiGenerationSlot($userId)
     {
-        $values = $this->db->table($table)
-            ->select($column)
-            ->order_by($column, $direction)
-            ->result_array();
+        $userId = (int) $userId;
+        if ($userId < 1) {
+            throw new InvalidArgumentException('A valid user is required for the generation limit.');
+        }
+
+        $this->execute(
+            'DELETE FROM smarttrack_gemini_generation_limits
+             WHERE window_started_at < UTC_TIMESTAMP() - INTERVAL 1 DAY'
+        );
+        // LAST_INSERT_ID carries this connection's grant decision out of the atomic upsert.
+        $this->execute(
+            'INSERT INTO smarttrack_gemini_generation_limits
+                (user_id, window_started_at, request_count, last_granted)
+             VALUES (?, UTC_TIMESTAMP(), 1, LAST_INSERT_ID(1))
+             ON DUPLICATE KEY UPDATE
+                last_granted = LAST_INSERT_ID(
+                    IF(
+                        window_started_at <= UTC_TIMESTAMP() - INTERVAL 60 SECOND,
+                        1,
+                        IF(request_count < 5, 1, 0)
+                    )
+                ),
+                request_count = IF(
+                    window_started_at <= UTC_TIMESTAMP() - INTERVAL 60 SECOND,
+                    1,
+                    IF(request_count < 5, request_count + 1, request_count)
+                ),
+                window_started_at = IF(
+                    window_started_at <= UTC_TIMESTAMP() - INTERVAL 60 SECOND,
+                    UTC_TIMESTAMP(),
+                    window_started_at
+                )',
+            [$userId]
+        );
+
+        $state = $this->row(
+            'SELECT LAST_INSERT_ID() AS allowed,
+                    GREATEST(
+                        1,
+                        TIMESTAMPDIFF(
+                            SECOND,
+                            UTC_TIMESTAMP(),
+                            DATE_ADD(window_started_at, INTERVAL 60 SECOND)
+                        )
+                    ) AS retry_after
+             FROM smarttrack_gemini_generation_limits
+             WHERE user_id = ?',
+            [$userId]
+        );
+
+        return [
+            'allowed' => (int) ($state['allowed'] ?? 0) === 1,
+            'retry_after' => (int) ($state['retry_after'] ?? 60),
+        ];
+    }
+
+    public function hasGeminiGenerationLimitStorage()
+    {
+        return $this->row(
+            'SELECT 1
+             FROM information_schema.tables
+             WHERE table_schema = DATABASE()
+               AND table_name = ?
+             LIMIT 1',
+            ['smarttrack_gemini_generation_limits']
+        ) !== null;
+    }
+
+    private function isAnalyticsUser(array $user)
+    {
+        return (int) ($user['user_id'] ?? 0) > 0
+            && in_array($user['role'] ?? '', ['administrator', 'staff', 'instructor'], true);
+    }
+
+    private function assertAnalyticsUser(array $user)
+    {
+        if (!$this->isAnalyticsUser($user)) {
+            throw new AnalyticsAuthorizationException('This account cannot view analytics.');
+        }
+    }
+
+    private function assertAnalyticsFilters(array $filters)
+    {
+        if (!isset($filters['start_date'], $filters['end_date'])
+            || !is_string($filters['start_date'])
+            || !is_string($filters['end_date'])) {
+            throw new InvalidArgumentException('Valid analytics dates are required.');
+        }
+
+        $classId = $filters['class_id'] ?? null;
+        if ($classId !== null && $classId !== ''
+            && (!is_scalar($classId) || !ctype_digit((string) $classId) || (int) $classId < 1)) {
+            throw new InvalidArgumentException('Choose a valid class.');
+        }
+    }
+
+    private function applyClassScope($query, array $user, array $filters)
+    {
+        if (($filters['class_id'] ?? null) !== null && $filters['class_id'] !== '') {
+            $query->where('c.class_id', (int) $filters['class_id']);
+        }
+        if (($user['role'] ?? '') === 'instructor') {
+            $query->where('c.instructor_id', (int) $user['user_id']);
+        }
+        return $query;
+    }
+
+    private function columnOrderRanks($table, $column, $direction = 'ASC', ?array $onlyValues = null)
+    {
+        $query = $this->db->table($table)->select($column);
+        if ($onlyValues !== null) {
+            if ($onlyValues === []) {
+                return [];
+            }
+            $query->in($column, array_values(array_unique($onlyValues)));
+        }
+        $values = $query->order_by($column, $direction)->result_array();
         $ranks = [];
         foreach ($values as $index => $value) {
             $key = serialize($value[$column]);

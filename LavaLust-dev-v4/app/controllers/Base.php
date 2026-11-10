@@ -3,13 +3,29 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 class Base extends Controller
 {
-    protected $model;
-    protected $user;
-    protected $apiRequest = false;
-    protected $db;
-    protected $session;
-    protected $api;
-    protected $requestData;
+    protected ?Base_model $model = null;
+    protected ?array $user = null;
+    protected bool $apiRequest = false;
+    protected ?object $db = null;
+    protected ?object $session = null;
+    protected ?object $api = null;
+    protected ?array $requestData = null;
+    protected ?Config_model $configModel = null;
+    protected ?Eligibility_model $eligibilityModel = null;
+    protected ?Certificate_model $certificateModel = null;
+    protected ?Payment_model $paymentModel = null;
+    protected ?User_model $userModel = null;
+    protected ?Record_model $recordModel = null;
+    protected ?Attendance_model $attendanceModel = null;
+    protected ?Document_model $documentModel = null;
+    protected ?Assessment_model $assessmentModel = null;
+    protected ?Dashboard_model $dashboardModel = null;
+    protected ?Classes_model $classesModel = null;
+    protected ?Reports_model $reportsModel = null;
+    protected ?Analytics_model $analyticsModel = null;
+    protected ?SmartTrackModelRegistry $modelRegistry = null;
+    protected ?SmartTrackAuth $auth = null;
+    protected ?SmartTrackPermissions $permissions = null;
 
     public function before_action()
     {
@@ -17,78 +33,49 @@ class Base extends Controller
         $this->apiRequest = is_string($requestPath)
             && preg_match('#(?:^|/)api(?:/|$)#', $requestPath) === 1;
 
-        if ($this->apiRequest) {
-            ini_set('display_errors', '0');
-            set_error_handler(function ($severity, $message, $file, $line) {
-                if (!(error_reporting() & $severity)) {
-                    return true;
-                }
-                $severityNames = [
-                    E_ERROR => 'E_ERROR',
-                    E_WARNING => 'E_WARNING',
-                    E_PARSE => 'E_PARSE',
-                    E_NOTICE => 'E_NOTICE',
-                    E_CORE_ERROR => 'E_CORE_ERROR',
-                    E_CORE_WARNING => 'E_CORE_WARNING',
-                    E_COMPILE_ERROR => 'E_COMPILE_ERROR',
-                    E_COMPILE_WARNING => 'E_COMPILE_WARNING',
-                    E_USER_ERROR => 'E_USER_ERROR',
-                    E_USER_WARNING => 'E_USER_WARNING',
-                    E_USER_NOTICE => 'E_USER_NOTICE',
-                    E_RECOVERABLE_ERROR => 'E_RECOVERABLE_ERROR',
-                    E_DEPRECATED => 'E_DEPRECATED',
-                    E_USER_DEPRECATED => 'E_USER_DEPRECATED',
-                ];
-                error_log(sprintf(
-                    'API PHP error (%s) at %s:%d: %s',
-                    $severityNames[$severity] ?? ('UNKNOWN_' . $severity),
-                    $file,
-                    $line,
-                    $message
-                ));
-                while (ob_get_level() > 0) {
-                    ob_end_clean();
-                }
-                http_response_code(500);
-                header('Content-Type: application/json; charset=UTF-8');
-                echo json_encode([
-                    'ok' => false,
-                    'message' => 'The server encountered an internal error. Please try again later.',
-                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-                exit;
-            });
-        }
-
-        require_once APP_DIR . 'models/Base_model.php';
-        require_once APP_DIR . 'models/User_model.php';
-        require_once APP_DIR . 'models/Record_model.php';
-        require_once APP_DIR . 'models/Attendance_model.php';
-        require_once APP_DIR . 'models/Document_model.php';
-        require_once APP_DIR . 'models/Assessment_model.php';
-        require_once APP_DIR . 'models/Config_model.php';
-        require_once APP_DIR . 'models/Eligibility_model.php';
-        require_once APP_DIR . 'models/Certificate_model.php';
-        require_once APP_DIR . 'models/Payment_model.php';
-        require_once APP_DIR . 'models/Dashboard_model.php';
+        $this->call->library([
+            'SmartTrackAuth',
+            'SmartTrackPermissions',
+            'SmartTrackModelRegistry',
+            'SmartTrackModuleCatalog',
+            'SmartTrackViewContext',
+            'SmartTrackFilePath',
+        ]);
 
         $this->call->helper('url');
         $this->db = $this->call->database();
         $this->session = $this->call->library('session');
 
-        // Instantiate models with dependencies
-        $this->configModel = new Config_model($this->db);
-        $this->eligibilityModel = new Eligibility_model($this->db, $this->configModel);
-        $this->certificateModel = new Certificate_model($this->db, $this->eligibilityModel, $this->configModel);
-        $this->paymentModel = new Payment_model($this->db);
-        $this->userModel = new User_model($this->db);
-        $this->recordModel = new Record_model($this->db);
-        $this->attendanceModel = new Attendance_model($this->db);
-        $this->documentModel = new Document_model($this->db);
-        $this->assessmentModel = new Assessment_model($this->db);
-        $this->dashboardModel = new Dashboard_model($this->db);
-
-        // Keep $this->model for backward compatibility with controllers that haven't been updated yet
-        $this->model = $this->recordModel;
+        $this->modelRegistry = $this->call->library('SmartTrackModelRegistry');
+        $apiModuleMatch = [];
+        $apiModuleSection = is_string($requestPath)
+            && preg_match('#(?:^|/)api/modules/([A-Za-z0-9_-]+)$#', $requestPath, $apiModuleMatch) === 1
+                ? $apiModuleMatch[1]
+                : null;
+        try {
+            $models = $apiModuleSection !== null
+                ? $this->modelRegistry->loadForApiModule($this->db, $apiModuleSection)
+                : $this->modelRegistry->load($this->db);
+        } catch (Throwable $error) {
+            error_log('SmartTrack model loading failed (' . get_class($error) . '): ' . $error->getMessage());
+            if ($apiModuleSection !== null) {
+                $this->jsonResponse(['message' => 'The requested section is temporarily unavailable.'], 500);
+            }
+            throw $error;
+        }
+        $this->configModel = $models['configModel'];
+        $this->eligibilityModel = $models['eligibilityModel'];
+        $this->certificateModel = $models['certificateModel'];
+        $this->paymentModel = $models['paymentModel'];
+        $this->userModel = $models['userModel'];
+        $this->recordModel = $models['recordModel'];
+        $this->attendanceModel = $models['attendanceModel'];
+        $this->documentModel = $models['documentModel'];
+        $this->assessmentModel = $models['assessmentModel'];
+        $this->dashboardModel = $models['dashboardModel'];
+        $this->model = $models['model'];
+        $this->auth = $this->call->library('SmartTrackAuth');
+        $this->permissions = $this->call->library('SmartTrackPermissions');
 
         $this->user = $this->session->userdata('user');
         if ($this->apiRequest) {
@@ -110,36 +97,16 @@ class Base extends Controller
 
     protected function render($page, array $data = [])
     {
-        if ($page === 'module') {
-            $section = $data['section'] ?? '';
-            $definition = $this->resourceDefinition($section);
-            $data['can_manage'] = $data['can_manage'] ?? $this->canManage($section);
-            $data['can_create'] = $data['can_create'] ?? false;
-            $data['primary_key'] = $data['primary_key'] ?? ($definition['key'] ?? '');
-            $data['fields'] = $data['fields'] ?? [];
-            $data['editing'] = $data['editing'] ?? null;
-            $data['records'] = $data['records'] ?? [];
-            $data['columns'] = $data['columns'] ?? [];
-            $data['options'] = $data['options'] ?? [];
-        }
-        $data['page'] = $page;
-        $data['user'] = $this->user;
-        $data['csrf'] = $this->session->userdata('csrf');
-        $data['setup_required'] = $this->userModel->userCount() === 0;
-        $data['app_url'] = $this->url('');
-        $data['notice'] = $this->session->flashdata('notice');
-        $data['flash_error'] = $this->session->flashdata('error');
-
-        $navigation = [
-            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'assessments', 'announcements', 'inquiries'],
-            'trainee' => ['dashboard', 'attendance', 'documents', 'my_payments', 'my_certificates', 'announcements', 'inquiries'],
-        ];
-        $data['navigation'] = $this->user ? ($navigation[$this->user['role']] ?? []) : [];
-
-        $customViews = ['classes', 'class_detail'];
-        $this->call->view(in_array($page, $customViews, true) ? $page : 'smarttrack', $data);
+        $data = SmartTrackViewContext::prepare(
+            $page,
+            $data,
+            $this->user,
+            $this->session,
+            $this->userModel->userCount(),
+            $this->url(''),
+            $this->permissions
+        );
+        $this->call->view(SmartTrackViewContext::viewName($page), $data);
     }
 
     protected function input($key)
@@ -191,10 +158,8 @@ class Base extends Controller
                 $response = [
                     'ok' => false,
                     'message' => (string) ($data['message'] ?? 'The request could not be completed.'),
+                    'errors' => isset($data['errors']) && is_array($data['errors']) ? $data['errors'] : [],
                 ];
-                if (isset($data['errors']) && is_array($data['errors'])) {
-                    $response['errors'] = $data['errors'];
-                }
                 $data = $response;
             } else {
                 $data = [
@@ -203,21 +168,22 @@ class Base extends Controller
                     'message' => '',
                 ];
             }
+        } elseif ($data['ok'] === false && (!isset($data['errors']) || !is_array($data['errors']))) {
+            $data['errors'] = [];
         }
 
-        while (ob_get_level() > 0) {
-            ob_end_clean();
-        }
-        $this->apiLibrary()->respond($data, $status);
+        $this->apiLibrary()->respond($data, (int) $status);
+        exit;
     }
 
     protected function actionError($message, $redirectPath, $status = 422)
     {
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => $message], $status);
+            return $this->jsonResponse(['message' => $message, 'errors' => []], $status);
         }
         $this->notice($message);
         redirect($this->url($redirectPath));
+        exit;
     }
 
     protected function validCsrf()
@@ -237,98 +203,46 @@ class Base extends Controller
             return true;
         }
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
+            return $this->jsonResponse(['message' => 'Sign in to continue.', 'errors' => []], 401);
         }
         redirect($this->url(''));
+        exit;
         return false;
     }
 
     protected function apiUserFromToken()
     {
-        $token = $this->apiLibrary()->get_jwt_data();
-        if (!is_array($token) || !isset($token['sub']) || !ctype_digit((string) $token['sub'])) {
-            return null;
-        }
-
-        $account = $this->userModel->apiUserById((int) $token['sub']);
-        if (!$account || $account['status'] !== 'active') {
-            return null;
-        }
-
-        return [
-            'user_id' => (int) $account['user_id'],
-            'full_name' => $account['full_name'],
-            'username' => $account['username'],
-            'role' => $account['role'],
-        ];
+        return $this->auth->resolveApiUser($this->apiLibrary(), $this->userModel);
     }
 
     protected function setRefreshTokenCookie($token)
     {
-        $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
-        $secure = filter_var(getenv('SESSION_COOKIE_SECURE') ?: false, FILTER_VALIDATE_BOOLEAN)
-            || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || $forwardedProto === 'https';
-        $sameSite = getenv('SESSION_COOKIE_SAMESITE') ?: ($secure ? 'None' : 'Lax');
-        if ($sameSite === 'None' && !$secure) {
-            $sameSite = 'Lax';
-        }
-        $expiresIn = (int) (config_item('refresh_token_expiration') ?: 604800);
-
-        setcookie('smarttrack_refresh', (string) $token, [
-            'expires' => time() + $expiresIn,
-            'path' => '/api',
-            'secure' => $secure,
-            'httponly' => true,
-            'samesite' => $sameSite,
-        ]);
+        $this->auth->setRefreshTokenCookie($token);
     }
 
     protected function clearRefreshTokenCookie()
     {
-        $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
-        $secure = filter_var(getenv('SESSION_COOKIE_SECURE') ?: false, FILTER_VALIDATE_BOOLEAN)
-            || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || $forwardedProto === 'https';
-        $sameSite = getenv('SESSION_COOKIE_SAMESITE') ?: ($secure ? 'None' : 'Lax');
-        if ($sameSite === 'None' && !$secure) {
-            $sameSite = 'Lax';
-        }
-
-        setcookie('smarttrack_refresh', '', [
-            'expires' => time() - 3600,
-            'path' => '/api',
-            'secure' => $secure,
-            'httponly' => true,
-            'samesite' => $sameSite,
-        ]);
+        $this->auth->clearRefreshTokenCookie();
     }
 
     protected function canAccess($section)
     {
-        $roles = [
-            'administrator' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'staff' => ['users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
-            'instructor' => ['trainees', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'assessments', 'announcements', 'inquiries'],
-            'trainee' => ['attendance', 'documents', 'my_payments', 'announcements', 'inquiries'],
-        ];
-        return in_array($section, $roles[$this->user['role']] ?? [], true);
+        return $this->permissions->canAccess($this->user['role'] ?? '', $section);
     }
 
     protected function canManage($section)
     {
-        if (in_array($this->user['role'], ['administrator', 'staff'], true)) {
-            return true;
-        }
-        if ($this->user['role'] === 'instructor') {
-            return in_array($section, ['attendance', 'assessments', 'announcements', 'inquiries', 'documents'], true);
-        }
-        return $this->user['role'] === 'trainee' && $section === 'inquiries';
+        return $this->permissions->canManage($this->user['role'] ?? '', $section);
+    }
+
+    protected function inRoleGroup($group, ?array $user = null)
+    {
+        return $this->permissions->inRoleGroup(($user ?? $this->user)['role'] ?? '', $group);
     }
 
     protected function recordIsVisible($section, array $record, array $records, $key)
     {
-        if (in_array($this->user['role'], ['administrator', 'staff'], true)) {
+        if ($this->inRoleGroup('administrative_staff')) {
             return true;
         }
         foreach ($records as $visible) {
@@ -347,10 +261,11 @@ class Base extends Controller
     protected function deny($message)
     {
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => $message], 403);
+            return $this->jsonResponse(['message' => $message, 'errors' => []], 403);
         }
         $this->notice($message);
         redirect($this->url('dashboard'));
+        exit;
     }
 
     protected function url($path)
@@ -361,115 +276,25 @@ class Base extends Controller
 
     protected function navigationForUser()
     {
-        $navigation = [
-            'administrator' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity', 'profile'],
-            'staff' => ['dashboard', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity', 'profile'],
-            'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'announcements', 'inquiries', 'profile'],
-            'trainee' => ['dashboard', 'attendance', 'documents', 'my_payments', 'my_certificates', 'announcements', 'inquiries', 'profile'],
-        ];
-        return $this->user ? ($navigation[$this->user['role']] ?? []) : [];
+        return $this->permissions->navigation($this->user['role'] ?? '', 'standalone');
     }
 
     protected function resourceDefinition($section)
     {
-        $definitions = [
-            'users' => ['title' => 'User accounts', 'table' => 'users', 'key' => 'user_id', 'columns' => ['full_name', 'username', 'role', 'status']],
-            'trainees' => ['title' => 'Trainees', 'table' => 'trainees', 'key' => 'trainee_id', 'columns' => ['first_name', 'last_name', 'course', 'program_name', 'status', 'qr_code']],
-            'programs' => ['title' => 'Training programs', 'table' => 'training_programs', 'key' => 'program_id', 'columns' => ['program_code', 'program_name', 'status']],
-            'classes' => ['title' => 'Classes', 'table' => 'training_classes', 'key' => 'class_id', 'columns' => ['class_name', 'program_name', 'instructor_name', 'start_date', 'end_date', 'status']],
-            'schedules' => ['title' => 'Schedules', 'table' => 'training_schedules', 'key' => 'schedule_id', 'columns' => ['class_name', 'schedule_date', 'start_time', 'end_time']],
-            'enrollments' => ['title' => 'Class enrollments', 'table' => 'class_enrollments', 'key' => 'enrollment_id', 'columns' => ['class_name', 'trainee_name', 'enrolled_at', 'registration_payment_status']],
-            'attendance' => ['title' => 'Attendance', 'table' => 'attendance_records', 'key' => 'attendance_id', 'columns' => ['trainee_name', 'class_name', 'attendance_date', 'time_in', 'time_out', 'status', 'remarks']],
-            'documents' => ['title' => 'Documents', 'table' => 'trainee_documents', 'key' => 'document_id', 'columns' => ['trainee_name', 'document_name', 'upload_date', 'review_status', 'status', 'access_level']],
-            'certificates' => ['title' => 'Certificates', 'table' => 'certificates', 'key' => 'certificate_id', 'columns' => ['trainee_name', 'program_name', 'class_name', 'certificate_number', 'issue_date', 'status']],
-            'eligibility' => ['title' => 'Certificate Eligibility', 'table' => 'certificate_eligibility', 'key' => 'eligibility_id', 'columns' => ['trainee_name', 'program_name', 'class_name', 'attendance_percentage', 'is_eligible', 'ineligibility_reasons']],
-            'announcements' => ['title' => 'Announcements', 'table' => 'announcements', 'key' => 'announcement_id', 'columns' => ['title', 'status', 'author', 'created_at']],
-            'inquiries' => ['title' => 'Inquiries', 'table' => 'inquiries', 'key' => 'inquiry_id', 'columns' => ['trainee_name', 'subject', 'message', 'reply', 'status', 'created_at']],
-            'activity' => ['title' => 'Activity log', 'table' => 'activity_logs', 'key' => 'log_id', 'columns' => ['user_name', 'action', 'details', 'created_at']],
-        ];
-        return $definitions[$section] ?? null;
+        return SmartTrackModuleCatalog::definition($section);
     }
 
     protected function fieldsFor($section)
     {
-        $fields = [
-            'users' => [
-                ['name' => 'full_name', 'label' => 'Full name', 'required' => true],
-                ['name' => 'username', 'label' => 'Username', 'required' => true],
-                ['name' => 'role', 'label' => 'Role', 'type' => 'select', 'required' => true, 'values' => $this->user['role'] === 'administrator' ? ['trainee', 'instructor', 'staff', 'administrator'] : ['trainee', 'instructor', 'staff']],
-                ['name' => 'status', 'label' => 'Account status', 'type' => 'select', 'required' => true, 'values' => ['active', 'inactive']],
-                ['name' => 'password', 'label' => 'Temporary password (10+ characters)', 'type' => 'password', 'required' => false],
-            ],
-            'trainees' => [
-                ['name' => 'first_name', 'label' => 'First name', 'required' => true],
-                ['name' => 'last_name', 'label' => 'Last name', 'required' => true],
-                ['name' => 'sex', 'label' => 'Sex', 'type' => 'select', 'required' => true, 'values' => ['Female', 'Male', 'Other']],
-                ['name' => 'date_of_birth', 'label' => 'Date of birth', 'type' => 'date'],
-                ['name' => 'address', 'label' => 'Address', 'type' => 'textarea'],
-                ['name' => 'email', 'label' => 'Email address', 'type' => 'email'],
-                ['name' => 'contact_number', 'label' => 'Contact number', 'required' => true],
-                ['name' => 'course', 'label' => 'Course / qualification', 'required' => true],
-                ['name' => 'program_id', 'label' => 'Training program', 'type' => 'options', 'options' => 'programs'],
-                ['name' => 'user_id', 'label' => 'Trainee login account', 'type' => 'options', 'options' => 'user_accounts'],
-                ['name' => 'status', 'label' => 'Trainee status', 'type' => 'select', 'required' => true, 'values' => ['active', 'inactive']],
-            ],
-            'programs' => [
-                ['name' => 'program_code', 'label' => 'LSI program code', 'required' => true],
-                ['name' => 'program_name', 'label' => 'Program name', 'required' => true],
-                ['name' => 'description', 'label' => 'Description', 'type' => 'textarea'],
-                ['name' => 'status', 'label' => 'Status', 'type' => 'select', 'required' => true, 'values' => ['active', 'inactive']],
-            ],
-            'classes' => [
-                ['name' => 'class_name', 'label' => 'Class name', 'required' => true],
-                ['name' => 'program_id', 'label' => 'Program', 'type' => 'options', 'options' => 'programs', 'required' => true],
-                ['name' => 'instructor_id', 'label' => 'Instructor', 'type' => 'options', 'options' => 'instructors'],
-                ['name' => 'start_date', 'label' => 'Start date', 'type' => 'date'],
-                ['name' => 'end_date', 'label' => 'End date', 'type' => 'date'],
-                ['name' => 'status', 'label' => 'Status', 'type' => 'select', 'required' => true, 'values' => ['active', 'inactive']],
-            ],
-            'schedules' => [
-                ['name' => 'class_id', 'label' => 'Class', 'type' => 'options', 'options' => 'classes', 'required' => true],
-                ['name' => 'program_id', 'label' => 'Program (legacy link)', 'type' => 'options', 'options' => 'programs'],
-                ['name' => 'schedule_date', 'label' => 'Date', 'type' => 'date', 'required' => true],
-                ['name' => 'start_time', 'label' => 'Start time', 'type' => 'time', 'required' => true],
-                ['name' => 'end_time', 'label' => 'End time', 'type' => 'time', 'required' => true],
-            ],
-            'enrollments' => [
-                ['name' => 'class_id', 'label' => 'Class', 'type' => 'options', 'options' => 'classes', 'required' => true],
-                ['name' => 'trainee_id', 'label' => 'Trainee', 'type' => 'options', 'options' => 'trainees', 'required' => true],
-            ],
-            'attendance' => [
-                ['name' => 'trainee_id', 'label' => 'Trainee', 'type' => 'options', 'options' => 'trainees', 'required' => true],
-                ['name' => 'class_id', 'label' => 'Class', 'type' => 'options', 'options' => 'classes'],
-                ['name' => 'schedule_id', 'label' => 'Schedule', 'type' => 'options', 'options' => 'schedules'],
-                ['name' => 'attendance_date', 'label' => 'Attendance date', 'type' => 'date', 'required' => true],
-                ['name' => 'time_in', 'label' => 'Time in', 'type' => 'time'],
-                ['name' => 'time_out', 'label' => 'Time out', 'type' => 'time'],
-                ['name' => 'status', 'label' => 'Status', 'type' => 'select', 'required' => true, 'values' => ['Present', 'Late', 'Absent']],
-                ['name' => 'remarks', 'label' => 'Remarks', 'type' => 'textarea'],
-            ],
-            'announcements' => [
-                ['name' => 'title', 'label' => 'Title', 'required' => true],
-                ['name' => 'content', 'label' => 'Announcement', 'type' => 'textarea', 'required' => true],
-                ['name' => 'category', 'label' => 'Category', 'type' => 'select', 'required' => true, 'values' => ['General', 'Training Schedule', 'Training Updates', 'Requirements', 'Important Notice']],
-                ['name' => 'attachment', 'label' => 'Attachment URL', 'type' => 'url'],
-                ['name' => 'published_at', 'label' => 'Publication date and time', 'type' => 'datetime-local'],
-                ['name' => 'status', 'label' => 'Visibility', 'type' => 'select', 'required' => true, 'values' => ['draft', 'published', 'archived']],
-            ],
-            'inquiries' => [
-                ['name' => 'subject', 'label' => 'Subject', 'required' => true],
-                ['name' => 'message', 'label' => 'Message', 'type' => 'textarea', 'required' => true],
-                ['name' => 'reply', 'label' => 'Reply', 'type' => 'textarea'],
-                ['name' => 'status', 'label' => 'Status', 'type' => 'select', 'values' => ['open', 'replied', 'closed']],
-            ],
-        ];
-        if ($section === 'inquiries' && $this->user['role'] === 'trainee') {
-            return array_slice($fields[$section], 0, 2);
+        return SmartTrackModuleCatalog::fields($section, $this->user['role'] ?? '');
+    }
+
+    protected function getReportsModel()
+    {
+        if ($this->reportsModel === null) {
+            $this->reportsModel = $this->modelRegistry->loadOptional($this->db, 'Reports_model');
         }
-        if ($section === 'inquiries' && $this->user['role'] !== 'trainee') {
-            return array_slice($fields[$section], 2);
-        }
-        return $fields[$section] ?? [];
+        return $this->reportsModel;
     }
 
     protected function moduleWithError($section, $error, $recordId = 0)
@@ -486,36 +311,26 @@ class Base extends Controller
 
     protected function privateDocumentPath($relativePath)
     {
-        $privateRoot = realpath(ROOT_DIR . 'runtime/uploads/private');
-        $path = realpath(ROOT_DIR . ltrim((string) $relativePath, '/\\'));
-        if (!$privateRoot || !$path || strpos($path, $privateRoot . DIRECTORY_SEPARATOR) !== 0 || !is_file($path)) {
-            return null;
-        }
-        return $path;
+        return SmartTrackFilePath::privateDocument($relativePath);
     }
 
     protected function privateCertificatePath($relativePath)
     {
-        $certificateRoot = realpath(ROOT_DIR . 'runtime/uploads/certificates');
-        $path = realpath(ROOT_DIR . ltrim((string) $relativePath, '/\\'));
-        if (!$certificateRoot || !$path || strpos($path, $certificateRoot . DIRECTORY_SEPARATOR) !== 0 || !is_file($path)) {
-            return null;
-        }
-        return $path;
+        return SmartTrackFilePath::privateCertificate($relativePath);
     }
 
     protected function certificateVerificationUrl($token)
     {
         $path = $this->url('verify-certificate?qr=' . rawurlencode((string) $token));
-        $baseUrl = rtrim((string) config_item('base_url'), '/');
+        $configuredUrl = getenv('SMARTTRACK_PUBLIC_URL');
+        $baseUrl = rtrim(
+            is_string($configuredUrl) && trim($configuredUrl) !== ''
+                ? trim($configuredUrl)
+                : (string) config_item('base_url'),
+            '/'
+        );
         if ($baseUrl !== '') {
             return $baseUrl . '/' . ltrim($path, '/');
-        }
-
-        $host = $_SERVER['HTTP_HOST'] ?? '';
-        if ($host !== '') {
-            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-            return $scheme . '://' . $host . $path;
         }
         return $path;
     }

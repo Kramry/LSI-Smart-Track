@@ -7,129 +7,149 @@ class Assessments extends Base
 {
     public function assessments()
     {
-        if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->requireUser() || !$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to manage assessments.');
         }
 
         $editing = null;
         $query = $this->queryParams();
+        $classId = null;
+        if (is_scalar($query['class_id'] ?? null) && ctype_digit((string) $query['class_id'])
+            && (int) $query['class_id'] > 0) {
+            $classId = (int) $query['class_id'];
+        }
         if (array_key_exists('edit', $query)) {
-            $editId = is_scalar($query['edit']) ? (string) $query['edit'] : '';
-            if (!ctype_digit($editId) || !(int) $editId || !($editing = $this->assessmentModel->assessmentById((int) $editId))) {
+            $editId = $query['edit'];
+            if (!is_scalar($editId) || !ctype_digit((string) $editId) || (int) $editId < 1
+                || !($editing = $this->assessmentModel->assessmentById((int) $editId, $this->user))) {
                 show_404();
                 return;
             }
         }
+
         $this->render('module', [
             'title' => 'Training Assessments',
             'section' => 'assessments',
-            'records' => $this->assessmentModel->assessmentRecords(),
+            'records' => $this->assessmentModel->assessmentRecords($this->user, $classId),
             'editing' => $editing,
             'primary_key' => 'assessment_id',
             'options' => [
                 'trainees' => $this->recordModel->options('trainees', $this->user),
-                'classes' => $this->assessmentModel->classOptions(),
+                'classes' => $this->assessmentModel->classOptions($this->user),
             ],
             'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'],
-            'assessment_class_id' => is_scalar($query['class_id'] ?? '') && ctype_digit((string) ($query['class_id'] ?? ''))
-                ? (int) $query['class_id']
-                : 0,
+            'assessment_class_id' => $classId ?? 0,
         ]);
     }
 
     public function saveAssessment()
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
+        if (!$this->requireUser()) {
+            return;
+        }
+        if (!$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to record assessment results.');
         }
-
-        $traineeId = (int) $this->input('trainee_id');
-        $classId = (int) $this->input('class_id');
-        $name = trim((string) $this->input('assessment_name'));
-        $outcome = strtolower(trim((string) $this->input('outcome')));
-        $assessmentDate = trim((string) $this->input('assessment_date'));
-        $notes = trim((string) $this->input('notes'));
-        $timeLimit = trim((string) $this->input('time_limit_minutes'));
-        $assessmentId = trim((string) $this->input('assessment_id'));
-        $editing = null;
-        if ($assessmentId !== '') {
-            if (!ctype_digit($assessmentId) || !(int) $assessmentId || !($editing = $this->assessmentModel->assessmentById((int) $assessmentId))) {
-                return $this->actionError('The assessment record could not be found.', 'manage/assessments', 404);
-            }
-        }
-        $enrollment = $this->assessmentModel->enrollmentForTraineeClass($traineeId, $classId);
-        if ($this->user['role'] === 'instructor' && !$this->attendanceModel->attendanceClass($classId, $this->user)) {
-            return $this->actionError('That class is not assigned to your instructor account.', 'manage/assessments', 403);
-        }
-        $date = DateTime::createFromFormat('!Y-m-d', $assessmentDate);
-
-        // Validate time limit if provided
-        $timeLimitMinutes = null;
-        if ($timeLimit !== '') {
-            if (!ctype_digit($timeLimit) || (int) $timeLimit < 1 || (int) $timeLimit > 1440) {
-                return $this->actionError('Time limit must be between 1 and 1440 minutes (24 hours).', 'manage/assessments');
-            }
-            $timeLimitMinutes = (int) $timeLimit;
+        if (!$this->apiRequest && !$this->validCsrf()) {
+            return $this->actionError('Your security token is invalid or expired. Refresh the page and try again.', 'manage/assessments', 403);
         }
 
-        if (!$traineeId || !$classId || !$enrollment || $name === '' || strlen($name) > 150
-            || !in_array($outcome, ['pass', 'fail'], true)
-            || !$date || $date->format('Y-m-d') !== $assessmentDate
-            || strlen($notes) > 2000) {
-            return $this->actionError('Select an enrolled trainee and class, enter an assessment name and date, and choose Pass or Fail.', 'manage/assessments');
+        $rawAssessmentId = $this->input('assessment_id');
+        if (!is_scalar($rawAssessmentId)) {
+            return $this->actionError('Choose a valid assessment record.', 'manage/assessments', 422);
+        }
+        $assessmentId = trim((string) $rawAssessmentId);
+        if ($assessmentId !== '' && (!ctype_digit($assessmentId) || (int) $assessmentId < 1)) {
+            return $this->actionError('Choose a valid assessment record.', 'manage/assessments', 422);
         }
 
-        $duplicate = $editing
-            ? $this->assessmentModel->duplicateAssessment($traineeId, $classId, $name, (int) $editing['assessment_id'])
-            : null;
-        if ($duplicate) {
-            return $this->actionError('That trainee already has an assessment with this name in the selected class.', 'manage/assessments');
+        try {
+            $savedAssessmentId = $this->assessmentModel->saveAssessment([
+                'assessment_id' => $assessmentId === '' ? null : (int) $assessmentId,
+                'trainee_id' => $this->input('trainee_id'),
+                'class_id' => $this->input('class_id'),
+                'assessment_name' => $this->input('assessment_name'),
+                'outcome' => $this->input('outcome'),
+                'assessment_date' => $this->input('assessment_date'),
+                'notes' => $this->input('notes'),
+                'time_limit_minutes' => $this->input('time_limit_minutes'),
+            ], $this->user, $this->eligibilityModel);
+        } catch (Throwable $error) {
+            return $this->handleAssessmentError($error);
         }
 
-        $savedAssessmentId = $this->assessmentModel->saveAssessment([
-            'assessment_id' => $editing ? (int) $editing['assessment_id'] : null,
-            'trainee_id' => $traineeId,
-            'class_id' => $classId,
-            'assessment_name' => $name,
-            'outcome' => $outcome,
-            'assessed_by' => (int) $this->user['user_id'],
-            'assessment_date' => $assessmentDate,
-            'notes' => $notes,
-            'time_limit_minutes' => $timeLimitMinutes,
-        ]);
-        if ($editing && ((int) $editing['trainee_id'] !== $traineeId || (int) $editing['class_id'] !== $classId)) {
-            $this->recalculateEligibilityPair($editing['trainee_id'], $editing['class_id']);
-        }
-        $this->eligibilityModel->calculateEligibility($traineeId, $classId);
-        $this->recordModel->logActivity((int) $this->user['user_id'], $editing ? 'Updated training assessment' : 'Recorded training assessment', $name . ' (' . strtoupper($outcome) . '), record #' . $savedAssessmentId);
+        $isUpdate = $assessmentId !== '';
+        $message = $isUpdate ? 'Assessment result updated.' : 'Assessment result saved.';
+        $this->logAssessmentActivity(
+            $isUpdate ? 'Updated training assessment' : 'Recorded training assessment',
+            'Assessment record #' . $savedAssessmentId
+        );
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => $editing ? 'Assessment result updated.' : 'Assessment result saved.']);
+            return $this->jsonResponse([
+                'message' => $message,
+                'assessment_id' => $savedAssessmentId,
+            ]);
         }
-        $this->notice($editing ? 'Assessment result updated.' : 'Assessment result saved.');
+
+        $this->notice($message);
         redirect($this->url('manage/assessments'));
     }
 
     public function deleteAssessment($id)
     {
-        if (!$this->requireUser() || !$this->validCsrf() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
-            return $this->deny('You are not allowed to delete assessment results.');
-        }
-        if (!ctype_digit((string) $id) || !(int) $id) {
-            show_404();
+        if (!$this->requireUser()) {
             return;
         }
-
-        $assessment = $this->assessmentModel->assessmentById((int) $id);
-        if (!$assessment || !$this->assessmentModel->deleteAssessment((int) $id)) {
-            return $this->actionError('Assessment record not found or could not be deleted.', 'manage/assessments', 404);
+        if (!$this->inRoleGroup('teaching_staff')) {
+            return $this->deny('You are not allowed to delete assessment results.');
+        }
+        if (!$this->apiRequest && !$this->validCsrf()) {
+            return $this->actionError('Your security token is invalid or expired. Refresh the page and try again.', 'manage/assessments', 403);
+        }
+        if (!is_scalar($id) || !ctype_digit((string) $id) || (int) $id < 1) {
+            return $this->actionError('Assessment record not found.', 'manage/assessments', 404);
         }
 
-        $this->recalculateEligibilityPair($assessment['trainee_id'], $assessment['class_id']);
-        $this->recordModel->logActivity((int) $this->user['user_id'], 'Deleted training assessment', $assessment['assessment_name'] . ', record #' . (int) $id);
+        try {
+            $assessment = $this->assessmentModel->deleteAssessment((int) $id, $this->user, $this->eligibilityModel);
+        } catch (Throwable $error) {
+            return $this->handleAssessmentError($error);
+        }
+
+        $this->logAssessmentActivity('Deleted training assessment', $assessment['assessment_name'] . ', record #' . (int) $id);
         if ($this->apiRequest) {
-            $this->jsonResponse(['message' => 'Assessment record deleted.']);
+            return $this->jsonResponse(['message' => 'Assessment record deleted.']);
         }
+
         $this->notice('Assessment record deleted.');
         redirect($this->url('manage/assessments'));
+    }
+
+    private function handleAssessmentError(Throwable $error)
+    {
+        if ($error instanceof AssessmentAuthorizationException) {
+            return $this->actionError($error->getMessage(), 'manage/assessments', 403);
+        }
+        if ($error instanceof AssessmentNotFoundException) {
+            return $this->actionError($error->getMessage(), 'manage/assessments', 404);
+        }
+        if ($error instanceof AssessmentConflictException) {
+            return $this->actionError($error->getMessage(), 'manage/assessments', 409);
+        }
+        if ($error instanceof AssessmentValidationException) {
+            return $this->actionError($error->getMessage(), 'manage/assessments', 422);
+        }
+
+        error_log('Assessment operation failed (' . get_class($error) . '): ' . $error->getMessage());
+        return $this->actionError('The assessment could not be saved. Please try again.', 'manage/assessments', 500);
+    }
+
+    private function logAssessmentActivity($action, $details)
+    {
+        try {
+            $this->recordModel->logActivity((int) $this->user['user_id'], $action, $details);
+        } catch (Throwable $error) {
+            error_log('Assessment activity logging failed (' . get_class($error) . ').');
+        }
     }
 }

@@ -191,10 +191,10 @@ if ( ! function_exists('_exception_handler'))
 			$logger = load_class('logger', 'kernel');
 			$logger->log('error', get_class($e), $e->getMessage(), $e->getFile(), $e->getLine());
 		}
-		if(strtolower(config_item('environment') == 'development'))
+		$error = load_class('Errors', 'kernel');
+		if(strtolower(config_item('environment')) == 'development' || $error->is_api_request())
 		{
-			$exception = load_class('Errors', 'kernel');
-			$exception->show_exception($e);
+			$error->show_exception($e);
 		}
 		
 	}
@@ -242,8 +242,8 @@ if ( ! function_exists('_error_handler'))
 			$logger->log('error', $severity_name, $errstr, $errfile, $errline);
 		}
 
-		if (strtolower(config_item('environment')) == 'development') { 
-			$error = load_class('Errors', 'kernel');
+		$error = load_class('Errors', 'kernel');
+		if (strtolower(config_item('environment')) == 'development' || $error->is_api_request()) {
 			$error->show_php_error($severity_name, $errstr, $errfile, $errline);
 		}
 	}
