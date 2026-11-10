@@ -1262,7 +1262,7 @@ class Database {
      *
      * @param int $records_per_page
      * @param int $page
-     * @return void
+     * @return object
      */
     public function pagination($records_per_page, $page)
     {
@@ -1485,6 +1485,7 @@ class Database {
                 $this->bind_values ?? [],
                 $e
             );
+            throw $e;
         }
     }
 
@@ -1513,7 +1514,7 @@ class Database {
      *
      * @param string $column
      * @param integer $amount
-     * @return void
+     * @return integer
      */
     public function increment($column, $amount = 1)
     {
@@ -1529,7 +1530,7 @@ class Database {
      *
      * @param string $column
      * @param integer $amount
-     * @return void
+     * @return integer
      */
     public function decrement($column, $amount = 1)
     {
