@@ -15,6 +15,7 @@ class SmartTrackModelRegistry
         $documentModel = null;
         $assessmentModel = null;
         $attendanceModel = null;
+        $dashboardModel = null;
 
         if (in_array($section, ['certificates', 'eligibility', 'my_certificates', 'certificate_config'], true)) {
             require_once APP_DIR . 'models/Config_model.php';
@@ -34,7 +35,9 @@ class SmartTrackModelRegistry
         }
         if ($section === 'attendance') {
             require_once APP_DIR . 'models/Attendance_model.php';
+            require_once APP_DIR . 'models/Dashboard_model.php';
             $attendanceModel = new Attendance_model($db);
+            $dashboardModel = new Dashboard_model($db);
         }
 
         $recordModel = new Record_model($db);
@@ -48,7 +51,7 @@ class SmartTrackModelRegistry
             'attendanceModel' => $attendanceModel,
             'documentModel' => $documentModel,
             'assessmentModel' => $assessmentModel,
-            'dashboardModel' => null,
+            'dashboardModel' => $dashboardModel,
             'model' => $recordModel,
         ];
     }

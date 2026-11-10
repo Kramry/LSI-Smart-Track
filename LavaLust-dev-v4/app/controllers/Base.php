@@ -3,7 +3,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 class Base extends Controller
 {
-    protected ?Base_model $model = null;
+    protected ?Record_model $model = null;
     protected ?array $user = null;
     protected bool $apiRequest = false;
     protected ?object $db = null;

@@ -559,7 +559,7 @@ class SmartTrack_api extends Base
                 'schedules' => $this->attendanceModel->scheduleOptionsForToday($user),
             ] : [],
             'attendance_followups' => $section === 'attendance' && $this->inRoleGroup('teaching_staff', $user)
-                ? $this->model->absenceFollowUps($user)
+                ? $this->dashboardModel->absenceFollowUps($user)
                 : [],
             'document_options' => $section === 'documents' ? [
                 'trainees' => $this->model->options('trainees', $user),
