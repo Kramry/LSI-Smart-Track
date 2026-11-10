@@ -1,3 +1,5 @@
+USE `defaultdb`;
+
 CREATE TABLE IF NOT EXISTS timed_assessments (
   timed_assessment_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   class_id INT UNSIGNED NOT NULL,
