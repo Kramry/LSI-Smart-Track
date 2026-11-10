@@ -439,7 +439,7 @@ class Api
      * encode_jwt
      *
      * @param array $payload
-     * @return array<string,mixed>|null
+     * @return string
      */
     public function encode_jwt($payload, $ttl = null)
     {
@@ -806,7 +806,7 @@ class Api
      *
      * @param string $valid_user
      * @param string $valid_pass
-     * @return void
+     * @return bool
      */
     public function check_basic_auth($valid_user, $valid_pass)
     {
