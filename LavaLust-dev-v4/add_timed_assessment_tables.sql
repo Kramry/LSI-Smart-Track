@@ -1,4 +1,4 @@
-USE `lsi-smart-track`;
+-- Select the same database used by the application (DB_NAME) before running this migration.
 
 CREATE TABLE IF NOT EXISTS timed_assessments (
   timed_assessment_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
