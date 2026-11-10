@@ -29,21 +29,29 @@ class Create_refresh_tokens_table {
                     'unsigned' => TRUE,
                     'null'     => FALSE,
                 ],
-                'token' => [
-                    'type' => 'TEXT',
-                    'null' => FALSE,
-                ],
-                'expires_at' => [
-                    'type' => 'DATETIME',
+                'token_hash' => [
+                    'type'       => 'VARCHAR',
+                    'constraint' => 255,
                     'null' => FALSE,
                 ],
                 'jti' => [
-                    'type' => 'TEXT',
-                    'null' => FALSE,
+                    'type'       => 'VARCHAR',
+                    'constraint' => 64,
+                    'null'       => FALSE,
+                ],
+                'expires_at' => [
+                    'type'    => 'TIMESTAMP',
+                    'null'    => FALSE,
+                ],
+                'created_at' => [
+                    'type'    => 'TIMESTAMP',
+                    'null'    => TRUE,
+                    'default' => 'CURRENT_TIMESTAMP',
                 ],
             ])
             ->add_key('id', primary: TRUE)
             ->add_key('user_id', name: 'user_id_idx')
+            ->add_key('token_hash', name: 'idx_token_hash')
             ->create_table('refresh_tokens');
     }
 

@@ -565,7 +565,7 @@ class Api
 
         $hashed = hash_hmac('sha256', $refresh_token, $this->refresh_token_key);
         $stmt = $this->_lava->db->raw(
-            "SELECT * FROM {$this->refresh_token_table} WHERE token = ? AND expires_at > NOW() LIMIT 1",
+            "SELECT * FROM {$this->refresh_token_table} WHERE token_hash = ? AND expires_at > NOW() LIMIT 1",
             [$hashed]
         );
         $found = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -699,7 +699,7 @@ class Api
         $expires_at = date('Y-m-d H:i:s', $now + $this->refresh_token_expiration);
 
         $this->_lava->db->raw(
-            "INSERT INTO {$this->refresh_token_table} (user_id, token, expires_at, jti) 
+            "INSERT INTO {$this->refresh_token_table} (user_id, token_hash, expires_at, jti)
             VALUES (?, ?, ?, ?)",
             [$user_id, $hashed_refresh, $expires_at, $refresh_payload['jti']]
         );
@@ -730,7 +730,7 @@ class Api
 
         $stmt = $this->_lava->db->raw(
             "SELECT * FROM {$this->refresh_token_table} 
-            WHERE token = ? AND expires_at > NOW() LIMIT 1",
+            WHERE token_hash = ? AND expires_at > NOW() LIMIT 1",
             [$hashed]
         );
         $found = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -752,7 +752,7 @@ class Api
         $this->revoke_refresh_token($refresh_token);
 
         $new_tokens = $this->issue_tokens([
-            'id'     => $user['id'],
+            'id'     => $user[$this->users_table_id],
             'role'   => $user['role'],
             'scopes' => $this->scopes_for_role($user['role']),
         ]);
@@ -773,7 +773,7 @@ class Api
     {
         $hashed = hash_hmac('sha256', $refresh_token, $this->refresh_token_key);
         $this->_lava->db->raw(
-            "DELETE FROM {$this->refresh_token_table} WHERE token = ?",
+            "DELETE FROM {$this->refresh_token_table} WHERE token_hash = ?",
             [$hashed]
         );
     }
