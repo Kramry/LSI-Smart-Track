@@ -16,6 +16,7 @@ class SmartTrackModelRegistry
         $assessmentModel = null;
         $attendanceModel = null;
         $dashboardModel = null;
+        $timedAssessmentModel = null;
 
         if (in_array($section, ['certificates', 'eligibility', 'my_certificates', 'certificate_config'], true)) {
             require_once APP_DIR . 'models/Config_model.php';
@@ -31,7 +32,9 @@ class SmartTrackModelRegistry
         }
         if ($section === 'assessments') {
             require_once APP_DIR . 'models/Assessment_model.php';
+            require_once APP_DIR . 'models/TimedAssessment_model.php';
             $assessmentModel = new Assessment_model($db);
+            $timedAssessmentModel = new TimedAssessment_model($db);
         }
         if ($section === 'attendance') {
             require_once APP_DIR . 'models/Attendance_model.php';
@@ -51,6 +54,7 @@ class SmartTrackModelRegistry
             'attendanceModel' => $attendanceModel,
             'documentModel' => $documentModel,
             'assessmentModel' => $assessmentModel,
+            'timedAssessmentModel' => $timedAssessmentModel,
             'dashboardModel' => $dashboardModel,
             'model' => $recordModel,
         ];
@@ -65,6 +69,7 @@ class SmartTrackModelRegistry
             'Attendance_model',
             'Document_model',
             'Assessment_model',
+            'TimedAssessment_model',
             'Config_model',
             'Eligibility_model',
             'Certificate_model',
@@ -88,6 +93,7 @@ class SmartTrackModelRegistry
             'attendanceModel' => new Attendance_model($db),
             'documentModel' => new Document_model($db),
             'assessmentModel' => new Assessment_model($db),
+            'timedAssessmentModel' => new TimedAssessment_model($db),
             'dashboardModel' => new Dashboard_model($db),
             'model' => $recordModel,
         ];

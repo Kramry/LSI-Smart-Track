@@ -18,7 +18,7 @@ class SmartTrackPermissions
         'administrator' => self::ADMIN_STAFF_ACCESS,
         'staff' => self::ADMIN_STAFF_ACCESS,
         'instructor' => ['trainees', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'assessments', 'announcements', 'inquiries'],
-        'trainee' => ['attendance', 'documents', 'my_payments', 'announcements', 'inquiries'],
+        'trainee' => ['attendance', 'documents', 'my_payments', 'assessments', 'announcements', 'inquiries'],
     ];
 
     private const MANAGEMENT = [
@@ -33,7 +33,7 @@ class SmartTrackPermissions
             'administrator' => self::ADMIN_STAFF_DEFAULT_NAVIGATION,
             'staff' => self::ADMIN_STAFF_DEFAULT_NAVIGATION,
             'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'assessments', 'announcements', 'inquiries'],
-            'trainee' => ['dashboard', 'attendance', 'documents', 'my_payments', 'my_certificates', 'announcements', 'inquiries'],
+            'trainee' => ['dashboard', 'attendance', 'documents', 'my_payments', 'assessments', 'my_certificates', 'announcements', 'inquiries'],
         ],
         'standalone' => [
             'administrator' => self::ADMIN_STAFF_STANDALONE_NAVIGATION,

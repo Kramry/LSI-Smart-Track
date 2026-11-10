@@ -19,6 +19,7 @@ class Base extends Controller
     protected ?Attendance_model $attendanceModel = null;
     protected ?Document_model $documentModel = null;
     protected ?Assessment_model $assessmentModel = null;
+    protected ?TimedAssessment_model $timedAssessmentModel = null;
     protected ?Dashboard_model $dashboardModel = null;
     protected ?Classes_model $classesModel = null;
     protected ?Reports_model $reportsModel = null;
@@ -72,6 +73,7 @@ class Base extends Controller
         $this->attendanceModel = $models['attendanceModel'];
         $this->documentModel = $models['documentModel'];
         $this->assessmentModel = $models['assessmentModel'];
+        $this->timedAssessmentModel = $models['timedAssessmentModel'];
         $this->dashboardModel = $models['dashboardModel'];
         $this->model = $models['model'];
         $this->auth = $this->call->library('SmartTrackAuth');
