@@ -171,6 +171,19 @@ tbody tr:hover { background: #fbfcf8; }
 .upload-form { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end; }
 .upload-form .file-field { grid-column: span 2; }
 .upload-form input[type=file] { padding: 8px; }
+.assessment-card-list { display: grid; gap: 14px; }
+.timed-assessment-card { box-shadow: none; }
+.timed-assessment-card > p { line-height: 1.55; }
+.timed-assessment-card .upload-form { margin-top: 16px; }
+.status.deadline-warning { color: #785918; background: #fff3d6; }
+.panel-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 18px 0; }
+.summary-grid p { margin: 0; border: 1px solid var(--line); border-radius: 4px; padding: 12px; color: var(--muted); background: #fff; font-size: 11px; }
+.summary-grid strong { display: block; margin-top: 6px; color: var(--green-deep); font-size: 18px; }
+.inline-timed-action { display: grid; min-width: 180px; gap: 6px; }
+.inline-timed-action label { font-size: 10px; }
+.inline-timed-action input { padding: 7px; }
+.inline-timed-action .text-button { justify-self: start; }
 .summary-strip { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; }
 .summary-strip span { min-width: 125px; display: flex; justify-content: space-between; gap: 20px; border: 1px solid var(--line); border-radius: 4px; padding: 11px 13px; color: var(--muted); background: #fff; font-size: 11px; }
 .summary-strip strong { color: var(--green-deep); }

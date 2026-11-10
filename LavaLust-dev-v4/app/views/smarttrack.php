@@ -1064,6 +1064,186 @@ $labels = [
                     <?php endif; ?>
 
                     <?php if ($section === "assessments"): ?>
+                        <?php
+                        $timedData = $timed_data ?? [];
+                        $timedAssessments = $timedData['assessments'] ?? [];
+                        $timedClasses = $timedData['classes'] ?? [];
+                        $timedEditing = $timed_editing ?? null;
+                        $timedMonitoringRows = $timed_monitoring ?? [];
+                        $timedStats = $timed_statistics ?? [];
+                        $timedFilters = $timed_filters ?? [];
+                        $timedReportQuery = http_build_query($timedFilters);
+                        $timedRole = $user['role'] ?? '';
+                        $formatTimedDate = static function ($value) {
+                            if (!$value) {
+                                return '—';
+                            }
+                            return (new DateTimeImmutable((string) $value))
+                                ->setTimezone(new DateTimeZone('Asia/Manila'))
+                                ->format('M j, Y g:i A');
+                        };
+                        $timedLocalInput = static function ($value) {
+                            if (!$value) {
+                                return '';
+                            }
+                            return (new DateTimeImmutable((string) $value))
+                                ->setTimezone(new DateTimeZone('Asia/Manila'))
+                                ->format('Y-m-d\TH:i');
+                        };
+                        ?>
+                        <?php if (!empty($timedData['notifications'])): ?>
+                            <section class="panel">
+                                <div class="panel-heading"><div><p class="eyebrow">UPDATES</p><h2>Assessment notifications</h2></div></div>
+                                <?php foreach (array_slice($timedData['notifications'], 0, 5) as $timedNotification): ?>
+                                    <p><?= $e($timedNotification['message']) ?> <small><?= $e($formatTimedDate($timedNotification['created_at'])) ?></small></p>
+                                <?php endforeach; ?>
+                            </section>
+                        <?php endif; ?>
+                        <?php if ($timedRole === 'trainee'): ?>
+                            <section class="panel">
+                                <div class="panel-heading"><div><p class="eyebrow">TIMED ASSESSMENTS</p><h2>My assigned assessments</h2></div></div>
+                                <p class="muted">Submission deadlines and recorded times are validated by the SmartTrack server.</p>
+                                <?php if (empty($timedAssessments)): ?>
+                                    <p class="empty-state">No timed assessments have been assigned to your classes.</p>
+                                <?php else: ?>
+                                    <div class="assessment-card-list" data-server-time="<?= $e($timedData['server_time'] ?? '') ?>">
+                                        <?php foreach ($timedAssessments as $timed): ?>
+                                            <?php
+                                            $status = $timed['submission_status'] ?? 'pending';
+                                            $timedCanSubmit = strtotime((string) ($timedData['server_time'] ?? '')) >= strtotime((string) $timed['start_at']);
+                                            ?>
+                                            <article class="panel timed-assessment-card">
+                                                <div class="panel-heading">
+                                                    <div><p class="eyebrow"><?= $e(ucwords(str_replace('_', ' ', $timed['assessment_type']))) ?> · <?= $e($timed['class_name']) ?></p><h2><?= $e($timed['assessment_title']) ?></h2></div>
+                                                    <span class="status <?= $e($status === 'on_time' ? 'present' : ($status === 'pending' ? 'pending' : 'absent')) ?>"><?= $e(strtoupper(str_replace('_', ' ', $status))) ?></span>
+                                                </div>
+                                                <p class="muted">Instructor: <?= $e($timed['instructor_name'] ?? 'Not assigned') ?></p>
+                                                <?php if (!empty($timed['description'])): ?><p><?= nl2br($e($timed['description'])) ?></p><?php endif; ?>
+                                                <p><strong>Instructions:</strong> <?= nl2br($e($timed['instructions'])) ?></p>
+                                                <p><strong>Starts:</strong> <?= $e($formatTimedDate($timed['start_at'])) ?> · <strong>Deadline:</strong> <?= $e($formatTimedDate($timed['effective_deadline'] ?? $timed['deadline_at'])) ?> · <strong>Duration:</strong> <?= $e($timed['duration_minutes']) ?> minutes</p>
+                                                <?php if (!empty($timed['submitted_at'])): ?><p><strong>Submitted:</strong> <?= $e($formatTimedDate($timed['submitted_at'])) ?></p><?php endif; ?>
+                                                <?php if ($status === 'pending'): ?>
+                                                    <p class="status pending" data-countdown="<?= $e($timed['effective_deadline'] ?? $timed['deadline_at']) ?>" data-start="<?= $e($timed['start_at']) ?>">Loading remaining time…</p>
+                                                <?php elseif ($status === 'not_submitted'): ?>
+                                                    <p class="notice error">The submission period has ended without a submission.<?= !empty($timed['allow_late_submission']) ? ' Late submissions are accepted.' : '' ?></p>
+                                                <?php elseif ($status === 'excused'): ?>
+                                                    <p class="notice success">You are excused<?= !empty($timed['excuse_reason']) ? ': ' . $e($timed['excuse_reason']) : '' ?>.</p>
+                                                <?php endif; ?>
+                                                <?php if (!empty($timed['submission_id'])): ?>
+                                                    <p class="notice success"><strong>Submission recorded.</strong><?= $timed['submitted_score'] !== null ? ' Score: ' . $e($timed['submitted_score']) : '' ?><?= !empty($timed['result_text']) ? '<br>' . nl2br($e($timed['result_text'])) : '' ?></p>
+                                                <?php elseif (($timed['status'] ?? '') === 'published' && $timedCanSubmit && empty($timed['is_excused']) && ($status === 'pending' || ($status === 'not_submitted' && !empty($timed['allow_late_submission'])))): ?>
+                                                    <form method="post" action="<?= $e($app_url) ?>manage/assessments/timed/<?= $e($timed['timed_assessment_id']) ?>/submit" class="upload-form">
+                                                        <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+                                                        <label>Score (optional, 0–100)<input type="number" name="score" min="0" max="100" step="0.01"></label>
+                                                        <label>Assessment result<textarea name="result_text" maxlength="5000" rows="4" placeholder="Enter your result or response"></textarea></label>
+                                                        <button class="button primary" type="submit">Submit assessment</button>
+                                                    </form>
+                                                <?php endif; ?>
+                                            </article>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+                            </section>
+                            <script>
+                            (() => {
+                                const container = document.querySelector('[data-server-time]');
+                                if (!container) return;
+                                const serverTime = Date.parse(container.dataset.serverTime || '');
+                                const syncedAt = performance.now();
+                                const update = () => {
+                                    const now = serverTime + performance.now() - syncedAt;
+                                    container.querySelectorAll('[data-countdown]').forEach((timer) => {
+                                        const start = Date.parse(timer.dataset.start || '');
+                                        const deadline = Date.parse(timer.dataset.countdown || '');
+                                        const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+                                        const seconds = Math.max(0, Math.ceil((start - now) / 1000));
+                                        if (seconds > 0) {
+                                            timer.textContent = `Opens in ${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+                                        } else if (remaining > 0) {
+                                            timer.textContent = `Remaining time: ${Math.floor(remaining / 60)}m ${remaining % 60}s`;
+                                            timer.classList.toggle('deadline-warning', remaining <= 300);
+                                            timer.classList.toggle('absent', remaining <= 60);
+                                        } else {
+                                            timer.textContent = 'Submission deadline passed. Refresh to see the current status.';
+                                            timer.classList.add('absent');
+                                        }
+                                    });
+                                };
+                                update();
+                                window.setInterval(update, 1000);
+                            })();
+                            </script>
+                        <?php else: ?>
+                            <section class="panel">
+                                <div class="panel-heading"><div><p class="eyebrow">TIMED ASSESSMENT MANAGEMENT</p><h2><?= $timedEditing ? 'Edit timed assessment draft' : 'Create timed assessment' ?></h2></div></div>
+                                <p class="muted">Save a draft, then publish it to snapshot the class roster. Schedule and duration cannot be changed after publishing.</p>
+                                <form method="post" action="<?= $e($app_url) ?>manage/assessments/timed/save" class="upload-form">
+                                    <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>">
+                                    <input type="hidden" name="timed_assessment_id" value="<?= $e($timedEditing['timed_assessment_id'] ?? '') ?>">
+                                    <label>Class or group<select name="class_id" required><option value="">Choose class</option><?php foreach ($timedClasses as $class): ?><option value="<?= $e($class['id']) ?>" <?= (string) ($timedEditing['class_id'] ?? '') === (string) $class['id'] ? 'selected' : '' ?>><?= $e($class['label']) ?></option><?php endforeach; ?></select></label>
+                                    <label>Assessment title<input name="assessment_title" value="<?= $e($timedEditing['assessment_title'] ?? '') ?>" maxlength="150" required></label>
+                                    <label>Assessment type<select name="assessment_type" required><?php foreach (['quiz' => 'Quiz', 'examination' => 'Examination', 'class_assessment' => 'Class Assessment'] as $value => $label): ?><option value="<?= $e($value) ?>" <?= ($timedEditing['assessment_type'] ?? 'quiz') === $value ? 'selected' : '' ?>><?= $e($label) ?></option><?php endforeach; ?></select></label>
+                                    <label>Start time (Manila)<input type="datetime-local" name="start_at" value="<?= $e($timedLocalInput($timedEditing['start_at'] ?? null)) ?>" required></label>
+                                    <label>Scheduled end (Manila)<input type="datetime-local" name="scheduled_end_at" value="<?= $e($timedLocalInput($timedEditing['scheduled_end_at'] ?? null)) ?>" required></label>
+                                    <label>Allowed duration (minutes)<input type="number" name="duration_minutes" min="1" max="1440" value="<?= $e($timedEditing['duration_minutes'] ?? 60) ?>" required></label>
+                                    <label>Description<textarea name="description" maxlength="5000" rows="2"><?= $e($timedEditing['description'] ?? '') ?></textarea></label>
+                                    <label>Instructions<textarea name="instructions" maxlength="5000" rows="3" required><?= $e($timedEditing['instructions'] ?? '') ?></textarea></label>
+                                    <label><input type="checkbox" name="allow_late_submission" value="1" <?= !empty($timedEditing['allow_late_submission']) ? 'checked' : '' ?>> Allow late submissions</label>
+                                    <button class="button primary" type="submit"><?= $timedEditing ? 'Save draft changes' : 'Save as draft' ?></button>
+                                    <?php if ($timedEditing): ?><a class="button secondary" href="<?= $e($app_url) ?>manage/assessments">Cancel edit</a><?php endif; ?>
+                                </form>
+                            </section>
+                            <section class="panel">
+                                <div class="panel-heading"><div><p class="eyebrow">SCHEDULE</p><h2>Timed assessments</h2></div></div>
+                                <?php if (empty($timedAssessments)): ?><p class="empty-state">No timed assessments created yet.</p><?php else: ?>
+                                    <div class="table-scroll"><table><thead><tr><th>Assessment</th><th>Class</th><th>Instructor</th><th>Start / deadline</th><th>Duration</th><th>Assigned</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+                                        <?php foreach ($timedAssessments as $timed): ?><tr>
+                                            <td><?= $e($timed['assessment_title']) ?><small><?= $e(ucwords(str_replace('_', ' ', $timed['assessment_type']))) ?></small></td>
+                                            <td><?= $e($timed['class_name']) ?></td><td><?= $e($timed['instructor_name'] ?? '—') ?></td>
+                                            <td><?= $e($formatTimedDate($timed['start_at'])) ?><small>Deadline: <?= $e($formatTimedDate($timed['deadline_at'])) ?></small></td>
+                                            <td><?= $e($timed['duration_minutes']) ?> min</td><td><?= $e($timed['assigned_count']) ?></td><td><?= $e(strtoupper($timed['status'])) ?></td>
+                                            <td>
+                                                <?php if ($timed['status'] === 'draft'): ?>
+                                                    <a class="text-button" href="<?= $e($app_url) ?>manage/assessments?timed_edit=<?= $e($timed['timed_assessment_id']) ?>">Edit</a>
+                                                    <form method="post" action="<?= $e($app_url) ?>manage/assessments/timed/<?= $e($timed['timed_assessment_id']) ?>/publish" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button" type="submit">Publish</button></form>
+                                                <?php elseif ($timed['status'] === 'published'): ?>
+                                                    <form method="post" action="<?= $e($app_url) ?>manage/assessments/timed/<?= $e($timed['timed_assessment_id']) ?>/close" data-confirm="Close this assessment now?" style="display:inline"><input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><button class="text-button danger-text" type="submit">Close</button></form>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr><?php endforeach; ?>
+                                    </tbody></table></div>
+                                <?php endif; ?>
+                            </section>
+                            <section class="panel">
+                                <div class="panel-heading"><div><p class="eyebrow">COMPLIANCE</p><h2>Assessment monitoring</h2></div><div class="panel-actions"><a class="button secondary" href="<?= $e($app_url) ?>manage/assessments/report/csv<?= $timedReportQuery ? '?' . $e($timedReportQuery) : '' ?>">CSV / Excel</a><a class="button secondary" href="<?= $e($app_url) ?>manage/assessments/report/pdf<?= $timedReportQuery ? '?' . $e($timedReportQuery) : '' ?>">PDF</a></div></div>
+                                <form method="get" action="<?= $e($app_url) ?>manage/assessments" class="upload-form">
+                                    <label>Assessment<select name="timed_assessment_id"><option value="">All assessments</option><?php foreach ($timedAssessments as $timed): ?><option value="<?= $e($timed['timed_assessment_id']) ?>" <?= (string) ($timedFilters['timed_assessment_id'] ?? '') === (string) $timed['timed_assessment_id'] ? 'selected' : '' ?>><?= $e($timed['assessment_title']) ?></option><?php endforeach; ?></select></label>
+                                    <label>Class<select name="class_id"><option value="">All classes</option><?php foreach ($timedClasses as $class): ?><option value="<?= $e($class['id']) ?>" <?= (string) ($timedFilters['class_id'] ?? '') === (string) $class['id'] ? 'selected' : '' ?>><?= $e($class['label']) ?></option><?php endforeach; ?></select></label>
+                                    <?php if ($timedRole !== 'instructor'): ?><label>Instructor<select name="instructor_id"><option value="">All instructors</option><?php foreach (($timedData['instructors'] ?? []) as $instructor): ?><option value="<?= $e($instructor['id']) ?>" <?= (string) ($timedFilters['instructor_id'] ?? '') === (string) $instructor['id'] ? 'selected' : '' ?>><?= $e($instructor['label']) ?></option><?php endforeach; ?></select></label><?php endif; ?>
+                                    <label>Trainee / title<input name="search" value="<?= $e($timedFilters['search'] ?? '') ?>" type="search"></label>
+                                    <label>Status<select name="submission_status"><option value="">All statuses</option><?php foreach (['on_time', 'late', 'not_submitted', 'pending', 'excused'] as $statusOption): ?><option value="<?= $e($statusOption) ?>" <?= ($timedFilters['submission_status'] ?? '') === $statusOption ? 'selected' : '' ?>><?= $e(ucwords(str_replace('_', ' ', $statusOption))) ?></option><?php endforeach; ?></select></label>
+                                    <label>Assessment date<input name="assessment_date" type="date" value="<?= $e($timedFilters['assessment_date'] ?? '') ?>"></label>
+                                    <button class="button primary" type="submit">Apply filters</button>
+                                </form>
+                                <div class="summary-grid">
+                                    <p>Assigned: <strong><?= $e($timedStats['assigned'] ?? 0) ?></strong></p><p>On time: <strong><?= $e($timedStats['on_time'] ?? 0) ?></strong></p><p>Late: <strong><?= $e($timedStats['late'] ?? 0) ?></strong></p><p>Not submitted: <strong><?= $e($timedStats['not_submitted'] ?? 0) ?></strong></p><p>Pending: <strong><?= $e($timedStats['pending'] ?? 0) ?></strong></p><p>Excused: <strong><?= $e($timedStats['excused'] ?? 0) ?></strong></p><p>Compliance: <strong><?= $e($timedStats['compliance_percentage'] ?? 0) ?>%</strong></p>
+                                </div>
+                                <?php if (empty($timedMonitoringRows)): ?><p class="empty-state">No trainee assignments match these filters.</p><?php else: ?>
+                                    <div class="table-scroll"><table><thead><tr><th>Trainee</th><th>Assessment</th><th>Class / instructor</th><th>Deadline</th><th>Submitted</th><th>Status</th><th>Score / result</th><th>Update</th></tr></thead><tbody>
+                                        <?php foreach ($timedMonitoringRows as $row): ?><tr>
+                                            <td><?= $e($row['trainee_name']) ?><small><?= $e($row['trainee_number']) ?></small></td><td><?= $e($row['assessment_title']) ?></td><td><?= $e($row['class_name']) ?><small><?= $e($row['instructor_name'] ?? '') ?></small></td><td><?= $e($formatTimedDate($row['effective_deadline'])) ?></td><td><?= $e($formatTimedDate($row['submitted_at'])) ?></td><td><?= $e(strtoupper(str_replace('_', ' ', $row['submission_status']))) ?></td><td><?= $e($row['submitted_score'] ?? '—') ?><?= !empty($row['result_text']) ? '<small>' . $e($row['result_text']) . '</small>' : '' ?></td>
+                                            <td><?php if ($row['submission_status'] !== 'excused'): ?>
+                                                <form method="post" action="<?= $e($app_url) ?>manage/assessments/timed/<?= $e($row['timed_assessment_id']) ?>/recipient/<?= $e($row['trainee_id']) ?>" class="inline-timed-action">
+                                                    <input type="hidden" name="_csrf" value="<?= $e($csrf) ?>"><label>Reason<input name="reason" maxlength="500" required></label><label>New deadline<input type="datetime-local" name="extended_deadline"></label>
+                                                    <button class="text-button" type="submit" name="action" value="extend">Extend</button><button class="text-button danger-text" type="submit" name="action" value="excuse">Excuse</button>
+                                                </form>
+                                            <?php endif; ?></td>
+                                        </tr><?php endforeach; ?>
+                                    </tbody></table></div>
+                                <?php endif; ?>
+                            </section>
+                        <?php endif; ?>
+                        <?php if ($timedRole !== 'trainee'): ?>
                         <section class="panel form-panel">
                             <div class="panel-heading"><div><p class="eyebrow">TRAINING ASSESSMENTS</p><h2><?= !empty(
                                 $editing
@@ -1134,6 +1314,7 @@ $labels = [
                                     : "Save assessment" ?></button>
                             </form>
                         </section>
+                        <?php endif; ?>
                     <?php endif; ?>
 
                     <?php if ($section === "my_certificates"): ?>
@@ -1374,7 +1555,8 @@ $labels = [
                                 $section,
                                 ["certificate_config", "my_certificates", "certificates_to_sign"],
                                 true,
-                            )
+                            ) &&
+                            !($section === "assessments" && ($user["role"] ?? "") === "trainee")
                         ): ?>
                         <section class="panel records-panel" <?php if (
                             $section === "trainees"

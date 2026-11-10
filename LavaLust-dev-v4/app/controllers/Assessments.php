@@ -320,12 +320,39 @@ class Assessments extends Base
 
     public function assessments()
     {
-        if (!$this->requireUser() || !$this->inRoleGroup('teaching_staff')) {
-            return $this->deny('You are not allowed to manage assessments.');
+        if (!$this->requireUser()) {
+            return;
+        }
+        if (!in_array($this->user['role'] ?? '', ['administrator', 'staff', 'instructor', 'trainee'], true)) {
+            return $this->deny('You are not allowed to view assessments.');
         }
 
         $editing = null;
         $query = $this->queryParams();
+        $timedData = $this->timedAssessmentModel->bundle($this->user);
+        $timedMonitoring = [];
+        $timedStatistics = null;
+        $timedEditing = null;
+        if ($this->inRoleGroup('teaching_staff')) {
+            $filters = $this->timedAssessmentFilters($query);
+            $timedMonitoring = $this->timedAssessmentModel->monitoring($this->user, $filters);
+            $timedStatistics = $this->timedAssessmentStatistics($timedMonitoring);
+            if (isset($query['timed_edit']) && is_scalar($query['timed_edit'])) {
+                $timedEditId = $this->validTimedAssessmentId($query['timed_edit']);
+                foreach ($timedData['assessments'] as $timedAssessment) {
+                    if ($timedEditId !== null
+                        && (int) $timedAssessment['timed_assessment_id'] === $timedEditId
+                        && $timedAssessment['status'] === 'draft') {
+                        $timedEditing = $timedAssessment;
+                        break;
+                    }
+                }
+                if ($timedEditing === null) {
+                    show_404();
+                    return;
+                }
+            }
+        }
         $classId = null;
         if (is_scalar($query['class_id'] ?? null) && ctype_digit((string) $query['class_id'])
             && (int) $query['class_id'] > 0) {
@@ -334,25 +361,151 @@ class Assessments extends Base
         if (array_key_exists('edit', $query)) {
             $editId = $query['edit'];
             if (!is_scalar($editId) || !ctype_digit((string) $editId) || (int) $editId < 1
+                || !$this->inRoleGroup('teaching_staff')
                 || !($editing = $this->assessmentModel->assessmentById((int) $editId, $this->user))) {
-                show_404();
-                return;
-            }
+                    show_404();
+                    return;
+                }
         }
 
+        $isTeachingStaff = $this->inRoleGroup('teaching_staff');
         $this->render('module', [
-            'title' => 'Training Assessments',
-            'section' => 'assessments',
-            'records' => $this->assessmentModel->assessmentRecords($this->user, $classId),
-            'editing' => $editing,
-            'primary_key' => 'assessment_id',
-            'options' => [
-                'trainees' => $this->recordModel->options('trainees', $this->user),
-                'classes' => $this->assessmentModel->classOptions($this->user),
-            ],
-            'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'],
-            'assessment_class_id' => $classId ?? 0,
+                'title' => 'Training Assessments',
+                'section' => 'assessments',
+                'records' => $isTeachingStaff ? $this->assessmentModel->assessmentRecords($this->user, $classId) : [],
+                'editing' => $editing,
+                'primary_key' => 'assessment_id',
+                'options' => [
+                    'trainees' => $isTeachingStaff ? $this->recordModel->options('trainees', $this->user) : [],
+                    'classes' => $isTeachingStaff ? $this->assessmentModel->classOptions($this->user) : [],
+                ],
+                'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'],
+                'assessment_class_id' => $classId ?? 0,
+                'timed_data' => $timedData,
+                'timed_monitoring' => $timedMonitoring,
+                'timed_statistics' => $timedStatistics,
+                'timed_filters' => $this->timedAssessmentFilters($query),
+                'timed_editing' => $timedEditing,
         ]);
+    }
+
+    public function saveTimedAssessment()
+    {
+        return $this->processTimedPageAction(
+                fn() => $this->timedAssessmentModel->save($this->requestData(), $this->user),
+                'Timed assessment saved as a draft.'
+        );
+    }
+
+    public function publishTimedAssessment($id)
+    {
+        return $this->processTimedPageAction(
+                fn() => $this->timedAssessmentModel->publish($this->requiredPageAssessmentId($id), $this->user),
+                'Timed assessment published to its current class roster.'
+        );
+    }
+
+    public function closeTimedAssessment($id)
+    {
+        return $this->processTimedPageAction(
+                function () use ($id) {
+                    $this->timedAssessmentModel->close($this->requiredPageAssessmentId($id), $this->user);
+                },
+                'Timed assessment closed.'
+        );
+    }
+
+    public function submitTimedAssessment($id)
+    {
+        return $this->processTimedPageAction(
+                fn() => $this->timedAssessmentModel->submit($this->requiredPageAssessmentId($id), $this->requestData(), $this->user),
+                'Your timed assessment submission was recorded.'
+        );
+    }
+
+    public function adjustTimedAssessmentRecipient($id, $traineeId)
+    {
+        return $this->processTimedPageAction(
+                function () use ($id, $traineeId) {
+                    $this->timedAssessmentModel->adjustRecipient(
+                        $this->requiredPageAssessmentId($id),
+                        $this->requiredPageAssessmentId($traineeId),
+                        $this->requestData(),
+                        $this->user
+                    );
+                },
+                'Trainee assessment status updated.'
+        );
+    }
+
+    public function timedAssessmentWebReport($format)
+    {
+        if (!$this->requireUser()) {
+                return;
+        }
+        if (!in_array((string) $format, ['csv', 'excel', 'pdf'], true)) {
+                return $this->deny('Choose CSV, Excel, or PDF report format.');
+        }
+
+        try {
+                $filters = $this->timedAssessmentFilters($this->queryParams());
+                $rows = $this->timedAssessmentModel->report($this->user, $filters);
+                $content = $format === 'pdf' ? $this->timedAssessmentPdf($rows) : $this->timedAssessmentCsv($rows);
+                while (ob_get_level() > 0) {
+                    ob_end_clean();
+                }
+                $extension = $format === 'pdf' ? 'pdf' : 'csv';
+                header('Content-Type: ' . ($format === 'pdf' ? 'application/pdf' : 'text/csv; charset=utf-8'));
+                header('Content-Disposition: attachment; filename="assessment-compliance-' . gmdate('Y-m-d') . '.' . $extension . '"');
+                header('Content-Length: ' . strlen($content));
+                echo $content;
+                exit;
+        } catch (Throwable $error) {
+                return $this->handleTimedAssessmentPageError($error);
+        }
+    }
+
+    private function processTimedPageAction(callable $operation, string $successMessage)
+    {
+        if (!$this->requireUser()) {
+                return;
+        }
+        if (!$this->validCsrf()) {
+                return $this->actionError('Your security token is invalid or expired. Refresh the page and try again.', 'manage/assessments', 403);
+        }
+
+        try {
+                $operation();
+                $this->notice($successMessage);
+                redirect($this->url('manage/assessments'));
+                exit;
+        } catch (Throwable $error) {
+                return $this->handleTimedAssessmentPageError($error);
+        }
+    }
+
+    private function requiredPageAssessmentId($value): int
+    {
+        $id = $this->validTimedAssessmentId($value);
+        if ($id === null) {
+                throw new TimedAssessmentValidationException('Choose a valid assessment or trainee.');
+        }
+        return $id;
+    }
+
+    private function handleTimedAssessmentPageError(Throwable $error)
+    {
+        if ($error instanceof TimedAssessmentAuthorizationException
+                || $error instanceof TimedAssessmentNotFoundException
+                || $error instanceof TimedAssessmentConflictException
+                || $error instanceof TimedAssessmentValidationException) {
+                $this->notice($error->getMessage());
+        } else {
+                error_log('Timed assessment page operation failed (' . get_class($error) . '): ' . $error->getMessage());
+                $this->session->set_flashdata('error', 'The timed assessment request could not be completed.');
+        }
+        redirect($this->url('manage/assessments'));
+        exit;
     }
 
     public function saveAssessment()
