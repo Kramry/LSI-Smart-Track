@@ -49,7 +49,7 @@ class Dashboard extends Base
         if ($section === 'documents') {
             $filters = [];
             foreach (['search', 'document_type', 'class_id', 'access_level', 'status', 'review_status', 'date_from', 'date_to', 'sort'] as $filter) {
-                $value = $_GET[$filter] ?? '';
+                $value = $this->queryParams()[$filter] ?? '';
                 $filters[$filter] = is_scalar($value) ? trim((string) $value) : '';
             }
             $filters['sort'] = $filters['sort'] ?: 'newest';
@@ -72,7 +72,7 @@ class Dashboard extends Base
             $columns[] = 'requirements';
         }
 
-        $editId = (int) ($_GET['edit'] ?? $this->session->flashdata('smarttrack_edit') ?? 0);
+        $editId = (int) ($this->queryParams()['edit'] ?? $this->session->flashdata('smarttrack_edit') ?? 0);
         $editing = $editId ? $this->recordModel->findRecord($definition['table'], $definition['key'], $editId) : null;
         if ($editing && !$this->recordIsVisible($section, $editing, $records, $definition['key'])) {
             $editing = null;
@@ -205,12 +205,16 @@ class Dashboard extends Base
             $errors[] = 'A temporary password is required for a new account.';
         }
         if ($section === 'attendance' && !empty($data['class_id']) && !empty($data['trainee_id'])) {
-            $enrollment = $this->recordModel->row('SELECT enrollment_id FROM class_enrollments WHERE class_id = ? AND trainee_id = ?', [(int) $data['class_id'], (int) $data['trainee_id']]);
+            $enrollment = $this->attendanceModel->enrollmentForClass((int) $data['class_id'], (int) $data['trainee_id']);
             if (!$enrollment) {
                 $errors[] = 'The trainee must be enrolled in the selected class.';
             }
             if (!empty($data['schedule_id'])) {
-                $schedule = $this->recordModel->row('SELECT schedule_id FROM training_schedules WHERE schedule_id = ? AND class_id = ? AND schedule_date = ?', [(int) $data['schedule_id'], (int) $data['class_id'], $data['attendance_date']]);
+                $schedule = $this->attendanceModel->scheduleForClassOnDate(
+                    (int) $data['schedule_id'],
+                    (int) $data['class_id'],
+                    $data['attendance_date']
+                );
                 if (!$schedule) {
                     $errors[] = 'The session must belong to the selected class and attendance date.';
                 }

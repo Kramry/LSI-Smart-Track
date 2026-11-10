@@ -833,10 +833,27 @@ createApp({
 
         const parseApiPayload = async (response) => {
             const text = await response.text();
+            const trimmed = text.trim();
+
+            if (!trimmed) {
+                throw new Error(response.status === 401
+                    ? 'Your session has expired. Please sign in again.'
+                    : response.status === 404
+                        ? 'The analytics backend endpoint is unavailable. Please verify the backend deployment.'
+                        : `The analytics server returned an empty response for HTTP ${response.status}.`);
+            }
+
             try {
-                return JSON.parse(text);
+                return JSON.parse(trimmed);
             } catch (jsonError) {
-                const preview = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+                const preview = trimmed.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+                if (/^<\s*html/i.test(trimmed)) {
+                    throw new Error(response.status === 404
+                        ? 'The backend analytics route is unavailable. Please sign in again or check the deployment.'
+                        : response.status === 401
+                            ? 'Your session has expired. Please sign in again.'
+                            : 'The analytics backend returned an HTML error page instead of JSON. Please verify the server status.');
+                }
                 throw new Error(`The analytics server returned invalid JSON for HTTP ${response.status}${preview ? `: ${preview}` : '.'}`);
             }
         };

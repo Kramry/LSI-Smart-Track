@@ -53,12 +53,7 @@ class Base extends Controller
                 header('Content-Type: application/json; charset=UTF-8');
                 echo json_encode([
                     'ok' => false,
-                    'message' => sprintf(
-                        'The server encountered an internal PHP error: %s (%s:%d).',
-                        $message,
-                        basename(str_replace('\\', '/', $file)),
-                        $line
-                    ),
+                    'message' => 'The server encountered an internal error. Please try again later.',
                 ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                 exit;
             });
@@ -96,6 +91,9 @@ class Base extends Controller
         $this->model = $this->recordModel;
 
         $this->user = $this->session->userdata('user');
+        if ($this->apiRequest) {
+            $this->user = $this->apiUserFromToken();
+        }
 
         if (!$this->session->userdata('csrf')) {
             $this->session->set_userdata('csrf', bin2hex(random_bytes(32)));
@@ -150,9 +148,21 @@ class Base extends Controller
         return $data[$key] ?? '';
     }
 
+    protected function queryParams()
+    {
+        return $this->apiRequest
+            ? $this->apiLibrary()->get_query_params(false)
+            : $_GET;
+    }
+
     protected function requestData()
     {
         if ($this->requestData !== null) {
+            return $this->requestData;
+        }
+
+        if ($this->apiRequest) {
+            $this->requestData = $this->apiLibrary()->body(false);
             return $this->requestData;
         }
 
@@ -198,13 +208,7 @@ class Base extends Controller
         while (ob_get_level() > 0) {
             ob_end_clean();
         }
-        http_response_code($status);
-        header('Content-Type: application/json; charset=UTF-8');
-        echo json_encode(
-            $data,
-            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
-        );
-        exit;
+        $this->apiLibrary()->respond($data, $status);
     }
 
     protected function actionError($message, $redirectPath, $status = 422)
@@ -226,6 +230,9 @@ class Base extends Controller
 
     protected function requireUser()
     {
+        if ($this->apiRequest) {
+            $this->user = $this->apiUserFromToken();
+        }
         if ($this->user) {
             return true;
         }
@@ -234,6 +241,67 @@ class Base extends Controller
         }
         redirect($this->url(''));
         return false;
+    }
+
+    protected function apiUserFromToken()
+    {
+        $token = $this->apiLibrary()->get_jwt_data();
+        if (!is_array($token) || !isset($token['sub']) || !ctype_digit((string) $token['sub'])) {
+            return null;
+        }
+
+        $account = $this->userModel->apiUserById((int) $token['sub']);
+        if (!$account || $account['status'] !== 'active') {
+            return null;
+        }
+
+        return [
+            'user_id' => (int) $account['user_id'],
+            'full_name' => $account['full_name'],
+            'username' => $account['username'],
+            'role' => $account['role'],
+        ];
+    }
+
+    protected function setRefreshTokenCookie($token)
+    {
+        $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
+        $secure = filter_var(getenv('SESSION_COOKIE_SECURE') ?: false, FILTER_VALIDATE_BOOLEAN)
+            || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || $forwardedProto === 'https';
+        $sameSite = getenv('SESSION_COOKIE_SAMESITE') ?: ($secure ? 'None' : 'Lax');
+        if ($sameSite === 'None' && !$secure) {
+            $sameSite = 'Lax';
+        }
+        $expiresIn = (int) (config_item('refresh_token_expiration') ?: 604800);
+
+        setcookie('smarttrack_refresh', (string) $token, [
+            'expires' => time() + $expiresIn,
+            'path' => '/api',
+            'secure' => $secure,
+            'httponly' => true,
+            'samesite' => $sameSite,
+        ]);
+    }
+
+    protected function clearRefreshTokenCookie()
+    {
+        $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
+        $secure = filter_var(getenv('SESSION_COOKIE_SECURE') ?: false, FILTER_VALIDATE_BOOLEAN)
+            || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || $forwardedProto === 'https';
+        $sameSite = getenv('SESSION_COOKIE_SAMESITE') ?: ($secure ? 'None' : 'Lax');
+        if ($sameSite === 'None' && !$secure) {
+            $sameSite = 'Lax';
+        }
+
+        setcookie('smarttrack_refresh', '', [
+            'expires' => time() - 3600,
+            'path' => '/api',
+            'secure' => $secure,
+            'httponly' => true,
+            'samesite' => $sameSite,
+        ]);
     }
 
     protected function canAccess($section)

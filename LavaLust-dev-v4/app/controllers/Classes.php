@@ -19,9 +19,10 @@ class Classes extends Base
         if (!$this->requireUser() || !in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
             return $this->deny('You are not allowed to view teaching classes.');
         }
+        $query = $this->queryParams();
         $filters = [
-            'program_id' => $this->numericFilter($_GET['program_id'] ?? ''),
-            'instructor_id' => $this->numericFilter($_GET['instructor_id'] ?? ''),
+            'program_id' => $this->numericFilter($query['program_id'] ?? ''),
+            'instructor_id' => $this->numericFilter($query['instructor_id'] ?? ''),
         ];
         $classes = $this->classesModel->classes($this->user, $filters);
         foreach ($classes as &$class) {
@@ -31,7 +32,7 @@ class Classes extends Base
         unset($class);
 
         $editingClass = null;
-        $editId = $this->numericFilter($_GET['edit'] ?? '');
+        $editId = $this->numericFilter($query['edit'] ?? '');
         if ($editId && $this->canManage('classes')) {
             $editingClass = $this->classesModel->classById($editId, $this->user);
         }
@@ -43,7 +44,7 @@ class Classes extends Base
             'programs' => $this->recordModel->options('programs'),
             'instructors' => $this->recordModel->options('instructors'),
             'can_create' => $this->canManage('classes'),
-            'show_create_form' => $this->canManage('classes') && (!empty($_GET['create']) || $editingClass),
+            'show_create_form' => $this->canManage('classes') && (!empty($query['create']) || $editingClass),
             'editing_class' => $editingClass,
         ]);
     }
@@ -84,9 +85,10 @@ class Classes extends Base
         if (!in_array($this->user['role'], ['administrator', 'staff', 'instructor'], true)) {
             return $this->jsonResponse(['message' => 'You are not allowed to view classes.'], 403);
         }
+        $query = $this->queryParams();
         $filters = [
-            'program_id' => $this->numericFilter($_GET['program_id'] ?? ''),
-            'instructor_id' => $this->numericFilter($_GET['instructor_id'] ?? ''),
+            'program_id' => $this->numericFilter($query['program_id'] ?? ''),
+            'instructor_id' => $this->numericFilter($query['instructor_id'] ?? ''),
         ];
         $classes = $this->classesModel->classes($this->user, $filters);
         foreach ($classes as &$class) {
@@ -196,11 +198,11 @@ class Classes extends Base
             ];
 
             if ($classId) {
-                $this->db->table('training_classes')->where('class_id', $classId)->update($data);
+                $this->classesModel->updateClass($classId, $data);
                 $savedId = $classId;
                 $this->recordModel->logActivity((int) $this->user['user_id'], 'Updated class', 'Class #' . $savedId);
             } else {
-                $savedId = $this->db->table('training_classes')->insert($data);
+                $savedId = $this->classesModel->createClass($data);
                 $this->recordModel->logActivity((int) $this->user['user_id'], 'Created class', 'Class #' . $savedId);
             }
 
@@ -232,7 +234,7 @@ class Classes extends Base
         }
 
         try {
-            $this->db->table('training_classes')->where('class_id', $classId)->delete();
+            $this->classesModel->deleteClass($classId);
             $this->recordModel->logActivity((int) $this->user['user_id'], 'Deleted class', 'Class #' . $classId);
             $this->notice('Class deleted.');
             redirect($this->url('manage/classes'));
@@ -293,11 +295,11 @@ class Classes extends Base
             ];
 
             if ($classId) {
-                $this->db->table('training_classes')->where('class_id', $classId)->update($data);
+                $this->classesModel->updateClass($classId, $data);
                 $savedId = $classId;
                 $this->recordModel->logActivity((int) $this->user['user_id'], 'Updated class', 'Class #' . $savedId);
             } else {
-                $savedId = $this->db->table('training_classes')->insert($data);
+                $savedId = $this->classesModel->createClass($data);
                 $this->recordModel->logActivity((int) $this->user['user_id'], 'Created class', 'Class #' . $savedId);
             }
 
@@ -331,7 +333,7 @@ class Classes extends Base
         }
 
         try {
-            $this->db->table('training_classes')->where('class_id', $classId)->delete();
+            $this->classesModel->deleteClass($classId);
             $this->recordModel->logActivity((int) $this->user['user_id'], 'Deleted class', 'Class #' . $classId);
             return $this->jsonResponse(['message' => 'Class deleted.']);
         } catch (Throwable $error) {

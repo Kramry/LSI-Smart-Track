@@ -38,9 +38,9 @@ class Profile extends Base
                 return $this->render('profile', ['trainee' => $trainee, 'error' => 'Enter a first name, last name, and valid contact number.']);
             }
         }
-        $this->model->execute('UPDATE users SET full_name = ? WHERE user_id = ?', [$name, (int) $this->user['user_id']]);
+        $this->userModel->updateFullName((int) $this->user['user_id'], $name);
         if ($trainee) {
-            $this->model->execute('UPDATE trainees SET first_name = ?, last_name = ?, contact_number = ? WHERE trainee_id = ?', [$firstName, $lastName, $contact, (int) $trainee['trainee_id']]);
+            $this->userModel->updateTraineeProfile((int) $trainee['trainee_id'], $firstName, $lastName, $contact);
         }
         $this->user['full_name'] = $name;
         $this->session->set_userdata('smarttrack_user', $this->user);
@@ -57,7 +57,7 @@ class Profile extends Base
         if (!$this->requireUser() || !$this->validCsrf()) {
             return $this->deny('Your session expired. Sign in and try again.');
         }
-        $account = $this->model->row('SELECT password FROM users WHERE user_id = ?', [(int) $this->user['user_id']]);
+        $account = $this->userModel->passwordForUser((int) $this->user['user_id']);
         $current = (string) $this->input('current_password');
         $newPassword = (string) $this->input('new_password');
         if (!$account || !password_verify($current, $account['password']) || strlen($newPassword) < 10) {
@@ -66,7 +66,7 @@ class Profile extends Base
             }
             return $this->render('profile', ['error' => 'Current password is incorrect or the new password is shorter than 10 characters.']);
         }
-        $this->model->execute('UPDATE users SET password = ? WHERE user_id = ?', [password_hash($newPassword, PASSWORD_DEFAULT), (int) $this->user['user_id']]);
+        $this->userModel->updatePassword((int) $this->user['user_id'], password_hash($newPassword, PASSWORD_DEFAULT));
         $this->model->logActivity((int) $this->user['user_id'], 'Changed password', 'Password updated');
         if ($this->apiRequest) {
             $this->jsonResponse(['message' => 'Password updated.']);

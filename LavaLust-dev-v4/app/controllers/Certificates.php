@@ -14,7 +14,7 @@ class Certificates extends Base
 
         $filters = [];
         foreach (['search', 'status', 'program_id'] as $filter) {
-            $value = $_GET[$filter] ?? '';
+            $value = $this->queryParams()[$filter] ?? '';
             $filters[$filter] = is_scalar($value) ? trim((string) $value) : '';
         }
 
@@ -45,14 +45,14 @@ class Certificates extends Base
         $this->eligibilityModel->refreshEligibilityRecords();
         $filters = [];
         foreach (['search', 'eligibility', 'program_id'] as $filter) {
-            $value = $_GET[$filter] ?? '';
+            $value = $this->queryParams()[$filter] ?? '';
             $filters[$filter] = is_scalar($value) ? trim((string) $value) : '';
         }
 
         $records = $this->eligibilityModel->getEligibilityRecords($filters);
         $editingEligibility = null;
-        if (array_key_exists('edit', $_GET)) {
-            $editId = is_scalar($_GET['edit']) ? (string) $_GET['edit'] : '';
+        if (array_key_exists('edit', $this->queryParams())) {
+            $editId = is_scalar($this->queryParams()['edit']) ? (string) $this->queryParams()['edit'] : '';
             if (!ctype_digit($editId) || !(int) $editId) {
                 show_404();
                 return;
@@ -100,7 +100,7 @@ class Certificates extends Base
             return $this->actionError('Configure at least one active certificate signatory before approving eligibility.', 'manage/certificate-config');
         }
 
-        $eligibility = $this->recordModel->row('SELECT trainee_id, class_id FROM certificate_eligibility WHERE eligibility_id = ?', [$eligibilityId]);
+        $eligibility = $this->certificateModel->eligibilityById($eligibilityId);
         if (!$eligibility) {
             return $this->actionError('Eligibility record not found.', 'manage/eligibility', 404);
         }
@@ -112,7 +112,7 @@ class Certificates extends Base
         if ($decision === 'approved') {
             $certificate = $this->certificateModel->createPendingCertificate((int) $eligibility['trainee_id'], (int) $eligibility['class_id'], (int) $this->user['user_id']);
             if (!$certificate) {
-                $existingCertificate = $this->recordModel->row('SELECT status FROM certificates WHERE trainee_id = ? AND class_id = ?', [(int) $eligibility['trainee_id'], (int) $eligibility['class_id']]);
+                $existingCertificate = $this->certificateModel->certificateStatusForTraineeClass((int) $eligibility['trainee_id'], (int) $eligibility['class_id']);
                 if (!$existingCertificate || $existingCertificate['status'] !== 'pending_signature') {
                     return $this->actionError('Eligibility was approved, but the certificate could not be queued for signing. Check the class completion date, signatory setup, and existing certificate status.', 'manage/eligibility');
                 }
@@ -286,7 +286,7 @@ class Certificates extends Base
         }
         $certificate = $this->certificateModel->certificateForSigning((int) $id, (int) $this->user['user_id']);
         $password = (string) $this->input('password');
-        $account = $this->recordModel->row('SELECT password, status FROM users WHERE user_id = ?', [(int) $this->user['user_id']]);
+        $account = $this->certificateModel->signingAccount((int) $this->user['user_id']);
         if (!$certificate || !$account || $account['status'] !== 'active' || !password_verify($password, $account['password'])) {
             return $this->actionError('The certificate is not assigned to your account or the password is incorrect.', 'certificates/to-sign');
         }
@@ -367,7 +367,7 @@ class Certificates extends Base
             return;
         }
 
-        $certificate = $this->recordModel->row('SELECT certificate_number FROM certificates WHERE certificate_id = ?', [(int) $id]);
+        $certificate = $this->certificateModel->certificateNumber((int) $id);
         if (!$certificate) {
             show_404();
             return;
@@ -403,7 +403,7 @@ class Certificates extends Base
         }
         $template['settings']['logo_file_path'] = $logoPath;
 
-        $record = $this->recordModel->row('SELECT CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, c.class_name FROM certificates cert JOIN trainees t ON t.trainee_id = cert.trainee_id JOIN training_programs p ON p.program_id = cert.program_id JOIN training_classes c ON c.class_id = cert.class_id WHERE cert.certificate_id = ?', [(int) $certificate['certificate_id']]);
+        $record = $this->certificateModel->certificatePrintDetails((int) $certificate['certificate_id']);
         if (!$record) {
             throw new RuntimeException('The trainee or program record for this certificate could not be found.');
         }
@@ -503,8 +503,8 @@ class Certificates extends Base
         }
 
         $template = null;
-        if (array_key_exists('edit_template', $_GET)) {
-            $editId = is_scalar($_GET['edit_template']) ? (string) $_GET['edit_template'] : '';
+        if (array_key_exists('edit_template', $this->queryParams())) {
+            $editId = is_scalar($this->queryParams()['edit_template']) ? (string) $this->queryParams()['edit_template'] : '';
             if (!ctype_digit($editId) || !(int) $editId || !($template = $this->certificateModel->getTemplate((int) $editId))) {
                 show_404();
                 return;
@@ -513,8 +513,8 @@ class Certificates extends Base
         $template = $template ?: $this->certificateModel->getLatestTemplate() ?: $this->certificateModel->legacyTemplate();
         $signatories = $this->certificateModel->signatories();
         $editingSignatory = null;
-        if (array_key_exists('signatory_id', $_GET)) {
-            $signatoryId = is_scalar($_GET['signatory_id']) ? (string) $_GET['signatory_id'] : '';
+        if (array_key_exists('signatory_id', $this->queryParams())) {
+            $signatoryId = is_scalar($this->queryParams()['signatory_id']) ? (string) $this->queryParams()['signatory_id'] : '';
             if (!ctype_digit($signatoryId) || !(int) $signatoryId) {
                 show_404();
                 return;
@@ -544,7 +544,7 @@ class Certificates extends Base
             'certificate_template' => $template,
             'certificate_template_versions' => $this->certificateModel->getTemplateVersions(),
             'document_requirements' => $this->documentModel->documentRequirements(),
-            'certificate_classes' => $this->recordModel->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+            'certificate_classes' => $this->certificateModel->certificateClasses(),
             'certificate_signatories' => $signatories,
             'editing_signatory' => $editingSignatory,
             'signatory_accounts' => $this->certificateModel->signatoryAccounts(),
@@ -565,19 +565,19 @@ class Certificates extends Base
         $position = trim((string) $this->input('position'));
         $x = filter_var($this->input('x_position'), FILTER_VALIDATE_FLOAT);
         $y = filter_var($this->input('y_position'), FILTER_VALIDATE_FLOAT);
-        $account = $this->recordModel->row("SELECT user_id FROM users WHERE user_id = ? AND status = 'active' AND role IN ('administrator', 'staff')", [$userId]);
+        $account = $this->certificateModel->activeSignatoryAccount($userId);
         if (!$account || $name === '' || $position === '' || mb_strlen($name) > 150 || mb_strlen($position) > 150
             || $x === false || $x < 0 || $x > 100 || $y === false || $y < 0 || $y > 100) {
             return $this->actionError('Choose an active administrator or staff account, enter a name and position, and set valid signature positions.', 'manage/certificate-config');
         }
 
         $existing = $signatoryId
-            ? $this->recordModel->row('SELECT * FROM certificate_signatories WHERE signatory_id = ?', [$signatoryId])
+            ? $this->certificateModel->signatoryById($signatoryId)
             : null;
         if ($signatoryId && !$existing) {
             return $this->actionError('Signatory not found.', 'manage/certificate-config', 404);
         }
-        $duplicate = $this->recordModel->row('SELECT signatory_id FROM certificate_signatories WHERE user_id = ? AND signatory_id <> ?', [$userId, $signatoryId]);
+        $duplicate = $this->certificateModel->signatoryForUserExcept($userId, $signatoryId);
         if ($duplicate) {
             return $this->actionError('That account is already assigned as a signatory.', 'manage/certificate-config');
         }
@@ -626,7 +626,7 @@ class Certificates extends Base
             show_404();
             return;
         }
-        $signatory = $this->recordModel->row('SELECT name, position FROM certificate_signatories WHERE signatory_id = ?', [(int) $id]);
+        $signatory = $this->certificateModel->signatoryNameAndPosition((int) $id);
         if (!$signatory || !$this->certificateModel->deleteSignatory((int) $id)) {
             return $this->actionError('Signatory not found.', 'manage/certificate-config', 404);
         }
@@ -964,7 +964,7 @@ class Certificates extends Base
             show_404();
             return;
         }
-        $asset = ($_GET['asset'] ?? '') === 'logo' ? ($template['settings']['logo_path'] ?? '') : ($template['file_path'] ?? '');
+        $asset = ($this->queryParams()['asset'] ?? '') === 'logo' ? ($template['settings']['logo_path'] ?? '') : ($template['file_path'] ?? '');
         $filePath = $this->privateCertificatePath($asset);
         if (!$filePath) {
             show_404();
@@ -991,14 +991,14 @@ class Certificates extends Base
             return $this->deny('Only trainees can access their certificates.');
         }
 
-        $trainee = $this->recordModel->row('SELECT trainee_id FROM trainees WHERE user_id = ?', [(int) $this->user['user_id']]);
+        $trainee = $this->certificateModel->traineeForUser((int) $this->user['user_id']);
         if (!$trainee) {
             return $this->deny('Trainee record not found.');
         }
 
-        $records = $this->recordModel->rows('SELECT c.*, p.program_name, cl.class_name FROM certificates c JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.trainee_id = ? ORDER BY c.issue_date DESC', [(int) $trainee['trainee_id']]);
+        $records = $this->certificateModel->traineeCertificates((int) $trainee['trainee_id']);
 
-        $eligibility = $this->recordModel->rows('SELECT e.*, p.program_name, cl.class_name FROM certificate_eligibility e JOIN training_programs p ON p.program_id = e.program_id JOIN training_classes cl ON cl.class_id = e.class_id WHERE e.trainee_id = ? ORDER BY e.updated_at DESC', [(int) $trainee['trainee_id']]);
+        $eligibility = $this->certificateModel->traineeEligibilityRecords((int) $trainee['trainee_id']);
 
         $this->render('module', [
             'title' => 'My Certificates',
@@ -1021,7 +1021,7 @@ class Certificates extends Base
             show_404();
             return;
         }
-        $certificate = $this->recordModel->row('SELECT c.*, t.user_id FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id WHERE c.certificate_id = ?', [(int) $id]);
+        $certificate = $this->certificateModel->downloadableCertificate((int) $id);
         if (!$certificate) {
             show_404();
             return;
@@ -1055,7 +1055,8 @@ class Certificates extends Base
         $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $certificate['certificate_id'], 'download', 'Certificate downloaded by ' . $this->user['role']);
 
         header('Content-Type: application/pdf');
-        $disposition = isset($_GET['preview']) && $_GET['preview'] === '1' ? 'inline' : 'attachment';
+        $query = $this->queryParams();
+        $disposition = isset($query['preview']) && $query['preview'] === '1' ? 'inline' : 'attachment';
         header('Content-Disposition: ' . $disposition . '; filename="certificate_' . $certificate['certificate_number'] . '.pdf"');
         header('Content-Length: ' . filesize($filePath));
         readfile($filePath);
@@ -1064,16 +1065,17 @@ class Certificates extends Base
 
     public function apiVerifyCertificate()
     {
-        $qrCode = isset($_GET['qr']) && is_scalar($_GET['qr']) ? trim((string) $_GET['qr']) : '';
-        $certificateNumber = isset($_GET['certificate_number']) && is_scalar($_GET['certificate_number'])
-            ? trim((string) $_GET['certificate_number'])
+        $query = $this->queryParams();
+        $qrCode = isset($query['qr']) && is_scalar($query['qr']) ? trim((string) $query['qr']) : '';
+        $certificateNumber = isset($query['certificate_number']) && is_scalar($query['certificate_number'])
+            ? trim((string) $query['certificate_number'])
             : '';
 
         $certificate = null;
         if ($qrCode !== '') {
-            $certificate = $this->recordModel->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, cl.class_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.qr_code = ?', [$qrCode]);
+            $certificate = $this->certificateModel->certificateForVerificationByQrCode($qrCode);
         } elseif ($certificateNumber !== '') {
-            $certificate = $this->recordModel->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, cl.class_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.certificate_number = ?', [$certificateNumber]);
+            $certificate = $this->certificateModel->certificateForVerificationByNumber($certificateNumber);
         }
         if (!$certificate) {
             return $this->jsonResponse(['message' => 'Certificate not found.'], 404);
@@ -1108,16 +1110,17 @@ class Certificates extends Base
 
     public function verifyCertificate()
     {
-        $qrCode = isset($_GET['qr']) && is_scalar($_GET['qr']) ? trim((string) $_GET['qr']) : '';
-        $certificateNumber = isset($_GET['certificate_number']) && is_scalar($_GET['certificate_number'])
-            ? trim((string) $_GET['certificate_number'])
+        $query = $this->queryParams();
+        $qrCode = isset($query['qr']) && is_scalar($query['qr']) ? trim((string) $query['qr']) : '';
+        $certificateNumber = isset($query['certificate_number']) && is_scalar($query['certificate_number'])
+            ? trim((string) $query['certificate_number'])
             : '';
 
         $certificate = null;
         if ($qrCode) {
-            $certificate = $this->recordModel->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, cl.class_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.qr_code = ?', [$qrCode]);
+            $certificate = $this->certificateModel->certificateForVerificationByQrCode($qrCode);
         } elseif ($certificateNumber) {
-            $certificate = $this->recordModel->row('SELECT c.*, CONCAT(t.first_name, " ", t.last_name) AS trainee_name, p.program_name, cl.class_name FROM certificates c JOIN trainees t ON t.trainee_id = c.trainee_id JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.certificate_number = ?', [$certificateNumber]);
+            $certificate = $this->certificateModel->certificateForVerificationByNumber($certificateNumber);
         }
         $signatures = $certificate ? $this->certificateModel->certificateSignatures($certificate) : [];
 

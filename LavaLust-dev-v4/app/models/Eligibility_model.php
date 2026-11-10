@@ -16,55 +16,95 @@ class Eligibility_model extends Base_model
 
     public function getEligibilityRecords(array $filters = [])
     {
-        $sql = "SELECT e.*, cert.certificate_id, cert.status AS certificate_status, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, t.qr_code AS trainee_number, p.program_name, c.class_name, u.full_name AS reviewer_name, approver.full_name AS approver_name FROM certificate_eligibility e JOIN trainees t ON t.trainee_id = e.trainee_id JOIN training_classes c ON c.class_id = e.class_id JOIN training_programs p ON p.program_id = e.program_id LEFT JOIN certificates cert ON cert.trainee_id = e.trainee_id AND cert.class_id = e.class_id LEFT JOIN users u ON u.user_id = e.reviewed_by LEFT JOIN users approver ON approver.user_id = e.approved_by";
-        $values = [];
-        $whereClauses = [];
+        $query = $this->db->table('certificate_eligibility e')
+            ->select('e.eligibility_id, e.trainee_id, e.class_id, e.program_id, e.attendance_percentage, e.documents_submitted, e.documents_required, e.documents_approved, e.assessments_completed, e.assessments_required, e.is_eligible, e.ineligibility_reasons, e.approval_status, e.approval_reason, e.approved_by, e.approved_at, e.reviewed_by, e.reviewed_at, e.created_at, e.updated_at, cert.certificate_id, cert.status AS certificate_status, t.first_name, t.last_name, t.qr_code AS trainee_number, p.program_name, c.class_name, u.full_name AS reviewer_name, approver.full_name AS approver_name')
+            ->join('trainees t', 't.trainee_id = e.trainee_id')
+            ->join('training_classes c', 'c.class_id = e.class_id')
+            ->join('training_programs p', 'p.program_id = e.program_id')
+            ->left_join('certificates cert', 'cert.trainee_id = e.trainee_id AND cert.class_id = e.class_id')
+            ->left_join('users u', 'u.user_id = e.reviewed_by')
+            ->left_join('users approver', 'approver.user_id = e.approved_by');
 
         if (!empty($filters['search'])) {
-            $whereClauses[] = '(t.first_name LIKE ? OR t.last_name LIKE ? OR t.qr_code LIKE ? OR p.program_name LIKE ?)';
             $searchTerm = '%' . $filters['search'] . '%';
-            $values[] = $searchTerm;
-            $values[] = $searchTerm;
-            $values[] = $searchTerm;
-            $values[] = $searchTerm;
+            $query->grouped(function ($db) use ($searchTerm) {
+                $db->like('t.first_name', $searchTerm)
+                    ->or_like('t.last_name', $searchTerm)
+                    ->or_like('t.qr_code', $searchTerm)
+                    ->or_like('p.program_name', $searchTerm);
+            });
         }
 
         if (isset($filters['eligibility']) && $filters['eligibility'] !== '') {
-            $whereClauses[] = 'e.is_eligible = ?';
-            $values[] = (int) $filters['eligibility'];
+            $query->where('e.is_eligible', (int) $filters['eligibility']);
         }
 
         if (!empty($filters['program_id'])) {
-            $whereClauses[] = 'e.program_id = ?';
-            $values[] = (int) $filters['program_id'];
+            $query->where('e.program_id', (int) $filters['program_id']);
         }
 
-        if (!empty($whereClauses)) {
-            $sql .= ' WHERE ' . implode(' AND ', $whereClauses);
+        $records = $query->order_by('e.updated_at', 'DESC')->result_array();
+        foreach ($records as &$record) {
+            $traineeName = $record['first_name'] === null || $record['last_name'] === null
+                ? null
+                : $record['first_name'] . ' ' . $record['last_name'];
+            $record = [
+                'eligibility_id' => $record['eligibility_id'],
+                'trainee_id' => $record['trainee_id'],
+                'class_id' => $record['class_id'],
+                'program_id' => $record['program_id'],
+                'attendance_percentage' => $record['attendance_percentage'],
+                'documents_submitted' => $record['documents_submitted'],
+                'documents_required' => $record['documents_required'],
+                'documents_approved' => $record['documents_approved'],
+                'assessments_completed' => $record['assessments_completed'],
+                'assessments_required' => $record['assessments_required'],
+                'is_eligible' => $record['is_eligible'],
+                'ineligibility_reasons' => $record['ineligibility_reasons'],
+                'approval_status' => $record['approval_status'],
+                'approval_reason' => $record['approval_reason'],
+                'approved_by' => $record['approved_by'],
+                'approved_at' => $record['approved_at'],
+                'reviewed_by' => $record['reviewed_by'],
+                'reviewed_at' => $record['reviewed_at'],
+                'created_at' => $record['created_at'],
+                'updated_at' => $record['updated_at'],
+                'certificate_id' => $record['certificate_id'],
+                'certificate_status' => $record['certificate_status'],
+                'trainee_name' => $traineeName,
+                'trainee_number' => $record['trainee_number'],
+                'program_name' => $record['program_name'],
+                'class_name' => $record['class_name'],
+                'reviewer_name' => $record['reviewer_name'],
+                'approver_name' => $record['approver_name'],
+            ];
         }
-
-        $sql .= ' ORDER BY e.updated_at DESC';
-
-        return $this->rows($sql, $values);
+        unset($record);
+        return $records;
     }
 
     public function deleteEligibilityEnrollment($eligibilityId, $actorId)
     {
-        $eligibility = $this->row('SELECT trainee_id, class_id FROM certificate_eligibility WHERE eligibility_id = ?', [(int) $eligibilityId]);
+        $eligibility = $this->db->table('certificate_eligibility')
+            ->select('trainee_id, class_id')
+            ->where('eligibility_id', (int) $eligibilityId)
+            ->row_array();
         if (!$eligibility) {
             return ['success' => false, 'message' => 'Eligibility record not found.'];
         }
-        if ($this->row('SELECT certificate_id FROM certificates WHERE trainee_id = ? AND class_id = ?', [
-            (int) $eligibility['trainee_id'],
-            (int) $eligibility['class_id'],
-        ])) {
+        if ($this->db->table('certificates')
+            ->select('certificate_id')
+            ->where('trainee_id', (int) $eligibility['trainee_id'])
+            ->where('class_id', (int) $eligibility['class_id'])
+            ->row_array()) {
             return ['success' => false, 'message' => 'Enrollment cannot be removed because a certificate has already been issued or revoked.'];
         }
 
-        $enrollment = $this->row('SELECT enrollment_id FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [
-            (int) $eligibility['trainee_id'],
-            (int) $eligibility['class_id'],
-        ]);
+        $enrollment = $this->db->table('class_enrollments')
+            ->select('enrollment_id')
+            ->where('trainee_id', (int) $eligibility['trainee_id'])
+            ->where('class_id', (int) $eligibility['class_id'])
+            ->row_array();
         $message = $enrollment
             ? 'Enrollment removed. Attendance, documents, and assessment history were retained.'
             : 'Stale eligibility record removed; no enrollment was found.';
@@ -77,9 +117,13 @@ class Eligibility_model extends Base_model
                 $message
             );
             if ($enrollment) {
-                $this->execute('DELETE FROM class_enrollments WHERE enrollment_id = ?', [(int) $enrollment['enrollment_id']]);
+                $this->db->table('class_enrollments')
+                    ->where('enrollment_id', (int) $enrollment['enrollment_id'])
+                    ->delete();
             }
-            $this->execute('DELETE FROM certificate_eligibility WHERE eligibility_id = ?', [(int) $eligibilityId]);
+            $this->db->table('certificate_eligibility')
+                ->where('eligibility_id', (int) $eligibilityId)
+                ->delete();
             $this->db->commit();
         } catch (Throwable $error) {
             $this->db->roll_back();
@@ -96,7 +140,11 @@ class Eligibility_model extends Base_model
         $requireAssessments = (bool) $this->configModel->getConfig('require_assessments', 0);
         $requiredAssessments = max(1, (int) $this->configModel->getConfig('required_assessment_count', 1));
 
-        $class = $this->row('SELECT c.*, p.program_id FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id WHERE c.class_id = ?', [(int) $classId]);
+        $class = $this->db->table('training_classes c')
+            ->select('c.class_id, c.program_id, c.instructor_id, c.class_name, c.room, c.start_date, c.end_date, c.status, c.created_at')
+            ->join('training_programs p', 'p.program_id = c.program_id')
+            ->where('c.class_id', (int) $classId)
+            ->row_array();
         if (!$class) {
             return ['eligible' => false, 'reasons' => ['Class not found']];
         }
@@ -107,7 +155,10 @@ class Eligibility_model extends Base_model
             $reasons[] = 'The class has not reached its completion date';
         }
 
-        $enrollment = $this->row('SELECT * FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [(int) $traineeId, (int) $classId]);
+        $enrollment = $this->db->table('class_enrollments')
+            ->where('trainee_id', (int) $traineeId)
+            ->where('class_id', (int) $classId)
+            ->row_array();
         if (!$enrollment) {
             $reasons[] = 'Not enrolled in this class';
         } else {
@@ -117,9 +168,24 @@ class Eligibility_model extends Base_model
             ]);
             $unpaidFeeNames = [];
             foreach ($requiredFees as $requiredFee) {
-                $feeBalance = $this->row("SELECT tf.trainee_fee_id, GREATEST(tf.amount_due - COALESCE(SUM(CASE WHEN pay.entry_type = 'payment' THEN pay.amount WHEN pay.entry_type = 'reversal' THEN -pay.amount ELSE 0 END), 0), 0) AS balance FROM trainee_fees tf JOIN training_classes fee_class ON fee_class.class_id = tf.class_id LEFT JOIN payments pay ON pay.trainee_fee_id = tf.trainee_fee_id WHERE tf.fee_type_id = ? AND tf.trainee_id = ? AND (? IS NULL OR tf.class_id = ?) AND fee_class.program_id = ? GROUP BY tf.trainee_fee_id", [
-                    (int) $requiredFee['fee_type_id'], (int) $traineeId, $requiredFee['class_id'], (int) $requiredFee['class_id'], (int) $class['program_id'],
-                ]);
+                $feeBalance = $this->db->table('trainee_fees tf')
+                    ->select('tf.trainee_fee_id, tf.amount_due, SUM(CASE WHEN pay.entry_type = \'payment\' THEN pay.amount WHEN pay.entry_type = \'reversal\' THEN -pay.amount ELSE 0 END) AS net_paid')
+                    ->join('training_classes fee_class', 'fee_class.class_id = tf.class_id')
+                    ->left_join('payments pay', 'pay.trainee_fee_id = tf.trainee_fee_id')
+                    ->where('tf.fee_type_id', (int) $requiredFee['fee_type_id'])
+                    ->where('tf.trainee_id', (int) $traineeId)
+                    ->where('fee_class.program_id', (int) $class['program_id'])
+                    ->group_by('tf.trainee_fee_id');
+                if ($requiredFee['class_id'] !== null) {
+                    $feeBalance->where('tf.class_id', (int) $requiredFee['class_id']);
+                }
+                $feeBalance = $feeBalance->row_array();
+                if ($feeBalance) {
+                    $feeBalance['balance'] = max(
+                        (float) $feeBalance['amount_due'] - (float) ($feeBalance['net_paid'] ?? 0),
+                        0
+                    );
+                }
                 if (!$feeBalance || (float) $feeBalance['balance'] > 0.00001) {
                     $unpaidFeeNames[] = $requiredFee['fee_name'];
                 }
@@ -129,7 +195,11 @@ class Eligibility_model extends Base_model
             }
         }
 
-        $attendance = $this->row("SELECT COUNT(*) AS total, SUM(CASE WHEN status IN ('Present', 'Late') THEN 1 ELSE 0 END) AS attended FROM attendance_records WHERE trainee_id = ? AND class_id = ?", [(int) $traineeId, (int) $classId]);
+        $attendance = $this->db->table('attendance_records')
+            ->select("COUNT(*) AS total, SUM(CASE WHEN status = 'Present' OR status = 'Late' THEN 1 ELSE 0 END) AS attended")
+            ->where('trainee_id', (int) $traineeId)
+            ->where('class_id', (int) $classId)
+            ->row_array();
         $attendancePercentage = $attendance && (int) $attendance['total'] > 0
             ? ((int) $attendance['attended'] / (int) $attendance['total']) * 100
             : 0;
@@ -137,8 +207,18 @@ class Eligibility_model extends Base_model
             $reasons[] = sprintf('Attendance (%.1f%%) below minimum (%.0f%%)', $attendancePercentage, $minAttendance);
         }
 
-        $requirements = $this->rows('SELECT required_document_name FROM certificate_document_requirements WHERE class_id = ? ORDER BY required_document_name', [(int) $classId]);
-        $submittedDocuments = $this->rows("SELECT document_name FROM trainee_documents WHERE trainee_id = ? AND class_id = ? AND status = 'active' AND review_status = 'approved'", [(int) $traineeId, (int) $classId]);
+        $requirements = $this->db->table('certificate_document_requirements')
+            ->select('required_document_name')
+            ->where('class_id', (int) $classId)
+            ->order_by('required_document_name')
+            ->result_array();
+        $submittedDocuments = $this->db->table('trainee_documents')
+            ->select('document_name')
+            ->where('trainee_id', (int) $traineeId)
+            ->where('class_id', (int) $classId)
+            ->where('status', 'active')
+            ->where('review_status', 'approved')
+            ->result_array();
         $submittedNames = [];
         foreach ($submittedDocuments as $document) {
             $submittedNames[mb_strtolower(trim($document['document_name']))] = true;
@@ -161,7 +241,11 @@ class Eligibility_model extends Base_model
             }
         }
 
-        $assessmentCounts = $this->row("SELECT COUNT(*) AS total, SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END) AS passed FROM training_assessments WHERE trainee_id = ? AND class_id = ?", [(int) $traineeId, (int) $classId]);
+        $assessmentCounts = $this->db->table('training_assessments')
+            ->select('COUNT(*) AS total, SUM(CASE WHEN outcome = \'pass\' THEN 1 ELSE 0 END) AS passed')
+            ->where('trainee_id', (int) $traineeId)
+            ->where('class_id', (int) $classId)
+            ->row_array();
         $assessmentsPassed = (int) ($assessmentCounts['passed'] ?? 0);
         if ($requireAssessments) {
             if ($assessmentsPassed < $requiredAssessments) {
@@ -169,14 +253,22 @@ class Eligibility_model extends Base_model
             }
         }
 
-        $existing = $this->row('SELECT certificate_id FROM certificates WHERE trainee_id = ? AND class_id = ?', [(int) $traineeId, (int) $classId]);
+        $existing = $this->db->table('certificates')
+            ->select('certificate_id')
+            ->where('trainee_id', (int) $traineeId)
+            ->where('class_id', (int) $classId)
+            ->row_array();
         if ($existing) {
             $reasons[] = 'A certificate record already exists for this class';
         }
 
         $isEligible = empty($reasons);
         $reasonText = implode('; ', $reasons);
-        $check = $this->row('SELECT eligibility_id, program_id, attendance_percentage, documents_submitted, documents_required, documents_approved, assessments_completed, assessments_required, is_eligible, ineligibility_reasons FROM certificate_eligibility WHERE trainee_id = ? AND class_id = ?', [(int) $traineeId, (int) $classId]);
+        $check = $this->db->table('certificate_eligibility')
+            ->select('eligibility_id, program_id, attendance_percentage, documents_submitted, documents_required, documents_approved, assessments_completed, assessments_required, is_eligible, ineligibility_reasons')
+            ->where('trainee_id', (int) $traineeId)
+            ->where('class_id', (int) $classId)
+            ->row_array();
         $documentsSubmitted = count($submittedDocuments);
         $documentsRequired = count($requirements);
         $eligibilityChanged = !$check
@@ -208,18 +300,18 @@ class Eligibility_model extends Base_model
                 (int) $check['eligibility_id'],
             ]);
         } else {
-            $this->execute('INSERT INTO certificate_eligibility (trainee_id, class_id, program_id, attendance_percentage, documents_submitted, documents_required, documents_approved, assessments_completed, assessments_required, is_eligible, ineligibility_reasons) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
-                (int) $traineeId,
-                (int) $classId,
-                (int) $class['program_id'],
-                round($attendancePercentage, 2),
-                $documentsSubmitted,
-                $documentsRequired,
-                $matchedRequiredDocuments,
-                $assessmentsPassed,
-                $requireAssessments ? $requiredAssessments : 0,
-                $isEligible ? 1 : 0,
-                $reasonText
+            $this->db->table('certificate_eligibility')->insert([
+                'trainee_id' => (int) $traineeId,
+                'class_id' => (int) $classId,
+                'program_id' => (int) $class['program_id'],
+                'attendance_percentage' => round($attendancePercentage, 2),
+                'documents_submitted' => $documentsSubmitted,
+                'documents_required' => $documentsRequired,
+                'documents_approved' => $matchedRequiredDocuments,
+                'assessments_completed' => $assessmentsPassed,
+                'assessments_required' => $requireAssessments ? $requiredAssessments : 0,
+                'is_eligible' => $isEligible ? 1 : 0,
+                'ineligibility_reasons' => $reasonText,
             ]);
         }
 
@@ -238,7 +330,9 @@ class Eligibility_model extends Base_model
 
     public function refreshEligibilityRecords()
     {
-        $enrollments = $this->rows('SELECT trainee_id, class_id FROM class_enrollments');
+        $enrollments = $this->db->table('class_enrollments')
+            ->select('trainee_id, class_id')
+            ->result_array();
         foreach ($enrollments as $enrollment) {
             $this->calculateEligibility((int) $enrollment['trainee_id'], (int) $enrollment['class_id']);
         }
@@ -246,7 +340,10 @@ class Eligibility_model extends Base_model
 
     public function recalculateClassEligibility($classId)
     {
-        $enrollments = $this->rows('SELECT trainee_id FROM class_enrollments WHERE class_id = ?', [(int) $classId]);
+        $enrollments = $this->db->table('class_enrollments')
+            ->select('trainee_id')
+            ->where('class_id', (int) $classId)
+            ->result_array();
         foreach ($enrollments as $enrollment) {
             $this->calculateEligibility((int) $enrollment['trainee_id'], (int) $classId);
         }
@@ -254,7 +351,10 @@ class Eligibility_model extends Base_model
 
     public function updateEligibilityApproval($eligibilityId, $decision, $actorId, $reason = null)
     {
-        $eligibility = $this->row('SELECT is_eligible FROM certificate_eligibility WHERE eligibility_id = ?', [(int) $eligibilityId]);
+        $eligibility = $this->db->table('certificate_eligibility')
+            ->select('is_eligible')
+            ->where('eligibility_id', (int) $eligibilityId)
+            ->row_array();
         if (!$eligibility || ($decision === 'approved' && !(int) $eligibility['is_eligible'])) {
             return false;
         }
@@ -271,12 +371,12 @@ class Eligibility_model extends Base_model
     public function logEligibilityAction($actorId, $eligibilityId, $action, $details = null)
     {
         $ipAddress = $_SERVER['REMOTE_ADDR'] ?? null;
-        $this->execute('INSERT INTO certificate_audit_logs (actor_id, eligibility_id, action, details, ip_address) VALUES (?, ?, ?, ?, ?)', [
-            (int) $actorId,
-            (int) $eligibilityId,
-            $action,
-            $details,
-            $ipAddress,
+        $this->db->table('certificate_audit_logs')->insert([
+            'actor_id' => (int) $actorId,
+            'eligibility_id' => (int) $eligibilityId,
+            'action' => $action,
+            'details' => $details,
+            'ip_address' => $ipAddress,
         ]);
     }
 }

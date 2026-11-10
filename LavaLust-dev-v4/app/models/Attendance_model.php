@@ -5,26 +5,77 @@ require_once APP_DIR . 'models/Base_model.php';
 
 class Attendance_model extends Base_model
 {
+    public function activeTraineeByQrCode($qrCode)
+    {
+        return $this->db->table('trainees')
+            ->select('trainee_id')
+            ->where(['qr_code' => $qrCode, 'status' => 'active'])
+            ->get() ?: null;
+    }
+
+    public function enrollmentForClass($classId, $traineeId)
+    {
+        return $this->db->table('class_enrollments')
+            ->select('enrollment_id')
+            ->where(['class_id' => (int) $classId, 'trainee_id' => (int) $traineeId])
+            ->get() ?: null;
+    }
+
+    public function scheduleForToday($scheduleId, $classId)
+    {
+        return $this->row(
+            'SELECT schedule_id FROM training_schedules WHERE schedule_id = ? AND class_id = ? AND schedule_date = CURDATE()',
+            [(int) $scheduleId, (int) $classId]
+        );
+    }
+
+    public function scheduleForClassOnDate($scheduleId, $classId, $scheduleDate)
+    {
+        return $this->db->table('training_schedules')
+            ->select('schedule_id')
+            ->where([
+                'schedule_id' => (int) $scheduleId,
+                'class_id' => (int) $classId,
+                'schedule_date' => $scheduleDate,
+            ])
+            ->get() ?: null;
+    }
+
+    public function scheduleOptionsForToday(array $user)
+    {
+        if (($user['role'] ?? '') === 'instructor') {
+            return $this->rows(
+                'SELECT s.schedule_id AS id, s.class_id, CONCAT(s.schedule_date, " - ", s.start_time) AS label FROM training_schedules s JOIN training_classes c ON c.class_id = s.class_id WHERE s.schedule_date = CURDATE() AND c.instructor_id = ? ORDER BY s.start_time',
+                [(int) $user['user_id']]
+            );
+        }
+
+        return $this->rows(
+            'SELECT schedule_id AS id, class_id, CONCAT(schedule_date, " - ", start_time) AS label FROM training_schedules WHERE schedule_date = CURDATE() ORDER BY start_time'
+        );
+    }
+
     public function attendanceClasses(array $user)
     {
-        $sql = "SELECT class_id, class_name FROM training_classes WHERE status = 'active'";
-        $values = [];
+        $query = $this->db->table('training_classes')
+            ->select('class_id, class_name')
+            ->where('status', 'active');
         if ($user['role'] === 'instructor') {
-            $sql .= ' AND instructor_id = ?';
-            $values[] = (int) $user['user_id'];
+            $query->where('instructor_id', (int) $user['user_id']);
         }
-        return $this->rows($sql . ' ORDER BY class_name', $values);
+        return $query->order_by('class_name')->get_all();
     }
 
     public function attendanceClass($classId, array $user)
     {
-        $sql = "SELECT class_id, class_name FROM training_classes WHERE class_id = ? AND status = 'active'";
-        $values = [(int) $classId];
+        $query = $this->db->table('training_classes')
+            ->select('class_id, class_name')
+            ->where('class_id', (int) $classId)
+            ->where('status', 'active');
         if ($user['role'] === 'instructor') {
-            $sql .= ' AND instructor_id = ?';
-            $values[] = (int) $user['user_id'];
+            $query->where('instructor_id', (int) $user['user_id']);
         }
-        return $this->row($sql, $values);
+        return $query->get() ?: null;
     }
 
     public function attendanceSchedules($classId)
@@ -67,20 +118,37 @@ class Attendance_model extends Base_model
 
     public function scanAttendance($qrCode, $action, $classId, $scheduleId, $userId)
     {
-        $trainee = $this->row("SELECT trainee_id, first_name, last_name FROM trainees WHERE qr_code = ? AND status = 'active' LIMIT 1", [$qrCode]);
+        $trainee = $this->db->table('trainees')
+            ->select('trainee_id, first_name, last_name')
+            ->where('qr_code', $qrCode)
+            ->where('status', 'active')
+            ->limit(1)
+            ->get();
         if (!$trainee) {
             return ['error' => 'No active trainee matches that QR code.'];
         }
 
         $today = date('Y-m-d');
-        $existing = $this->row('SELECT attendance_id, time_in, time_out, status FROM attendance_records WHERE trainee_id = ? AND attendance_date = ? AND class_id <=> ? LIMIT 1', [(int) $trainee['trainee_id'], $today, $classId ?: null]);
+        $existingQuery = $this->db->table('attendance_records')
+            ->select('attendance_id, time_in, time_out, status')
+            ->where('trainee_id', (int) $trainee['trainee_id'])
+            ->where('attendance_date', $today);
+        if ($classId) {
+            $existingQuery->where('class_id', $classId);
+        } else {
+            $existingQuery->where_null('class_id');
+        }
+        $existing = $existingQuery->limit(1)->get();
         if ($action === 'in') {
             if ($existing && $existing['time_in']) {
                 return ['error' => 'This trainee already has a time-in for today.'];
             }
             $status = 'Present';
             if ($scheduleId) {
-                $schedule = $this->row('SELECT start_time FROM training_schedules WHERE schedule_id = ?', [(int) $scheduleId]);
+                $schedule = $this->db->table('training_schedules')
+                    ->select('start_time')
+                    ->where('schedule_id', (int) $scheduleId)
+                    ->get();
                 if ($schedule && date('H:i:s') > $schedule['start_time']) {
                     $status = 'Late';
                 }

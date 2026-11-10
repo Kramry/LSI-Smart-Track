@@ -32,8 +32,8 @@ class SmartTrack_api extends Base
         $service = $this->notificationService();
         $this->jsonResponse([
             'history' => $service->history([
-                'channel' => is_scalar($_GET['channel'] ?? null) ? trim((string) $_GET['channel']) : '',
-                'status' => is_scalar($_GET['status'] ?? null) ? trim((string) $_GET['status']) : '',
+                'channel' => is_scalar($this->queryParams()['channel'] ?? null) ? trim((string) $this->queryParams()['channel']) : '',
+                'status' => is_scalar($this->queryParams()['status'] ?? null) ? trim((string) $this->queryParams()['status']) : '',
             ]),
             'settings' => $service->settings(),
             'ready' => $service->isReady(),
@@ -56,7 +56,7 @@ class SmartTrack_api extends Base
         if (!$announcementId || !$channels || !in_array($mode, ['all', 'batch', 'selected'], true)) {
             return $this->jsonResponse(['message' => 'Choose an announcement, recipients, and notification channel.'], 422);
         }
-        $announcement = $this->recordModel->row('SELECT announcement_id, title, content, published_at, status FROM announcements WHERE announcement_id = ?', [$announcementId]);
+        $announcement = $this->recordModel->announcementForNotifications($announcementId);
         if (!$announcement || $announcement['status'] !== 'published') {
             return $this->jsonResponse(['message' => 'Only published announcements can be sent.'], 422);
         }
@@ -76,11 +76,11 @@ class SmartTrack_api extends Base
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can retry notifications.'], 403);
         }
-        $notification = $this->recordModel->row('SELECT announcement_id FROM announcement_notifications WHERE id = ? AND status = "failed"', [(int) $id]);
+        $notification = $this->recordModel->failedNotification((int) $id);
         if (!$notification) {
             return $this->jsonResponse(['message' => 'Only failed notifications can be retried.'], 404);
         }
-        $this->recordModel->execute('UPDATE announcement_notifications SET status = "pending", error_message = NULL WHERE id = ?', [(int) $id]);
+        $this->recordModel->retryNotification((int) $id);
         $result = $this->notificationService()->processAnnouncement((int) $notification['announcement_id']);
         $this->jsonResponse(['message' => 'Notification retry completed.', 'data' => $result]);
     }
@@ -90,14 +90,11 @@ class SmartTrack_api extends Base
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can delete notification history.'], 403);
         }
-        $notification = $this->recordModel->row(
-            'SELECT id FROM announcement_notifications WHERE id = ?',
-            [(int) $id]
-        );
+        $notification = $this->recordModel->notificationExists((int) $id);
         if (!$notification) {
             return $this->jsonResponse(['message' => 'Notification history record not found.'], 404);
         }
-        $this->recordModel->execute('DELETE FROM announcement_notifications WHERE id = ?', [(int) $id]);
+        $this->recordModel->deleteNotification((int) $id);
         $this->jsonResponse(['message' => 'Notification history record deleted.']);
     }
 
@@ -107,7 +104,7 @@ class SmartTrack_api extends Base
             return $this->jsonResponse(['message' => 'Only administrators can change notification settings.'], 403);
         }
         $email = $this->input('email_enabled') ? 1 : 0;
-        $this->recordModel->execute('INSERT INTO notification_settings (id, email_enabled) VALUES (1, ?) ON DUPLICATE KEY UPDATE email_enabled = VALUES(email_enabled)', [$email]);
+        $this->recordModel->saveNotificationSettings($email);
         $this->jsonResponse(['message' => 'Notification settings saved.']);
     }
 
@@ -171,6 +168,8 @@ class SmartTrack_api extends Base
             ], 422);
         }
 
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $this->apiLibrary()->rate_limit('login-ip:' . hash('sha256', $ip), 30, 300);
         $account = $username !== '' ? $this->userModel->userByUsername($username) : null;
 
         if (!$account || $account['status'] !== 'active' || !password_verify($password, $account['password'])) {
@@ -185,10 +184,13 @@ class SmartTrack_api extends Base
         ];
 
         $this->session->regenerate_on_login(true);
-        $this->session->set_userdata('user', $user);
         $csrf = bin2hex(random_bytes(32));
         $this->session->set_userdata('csrf', $csrf);
-        $this->user = $user;
+        $tokens = $this->apiLibrary()->issue_tokens([
+            'id' => $user['user_id'],
+            'role' => $user['role'],
+        ]);
+        $this->setRefreshTokenCookie($tokens['refresh_token']);
 
         $this->jsonResponse([
             'ok' => true,
@@ -196,6 +198,9 @@ class SmartTrack_api extends Base
                 'authenticated' => true,
                 'user' => $user,
                 'csrf' => $csrf,
+                'access_token' => $tokens['access_token'],
+                'expires_in' => $tokens['expires_in'],
+                'token_type' => $tokens['token_type'],
             ],
             'message' => '',
         ]);
@@ -227,7 +232,7 @@ class SmartTrack_api extends Base
         }
         $username = trim((string) $this->input('username'));
         $email = strtolower(trim((string) $this->input('email')));
-        $role = trim((string) $this->input('role'));
+        $requestedRole = trim((string) $this->input('role'));
         $sex = trim((string) $this->input('sex'));
         $dateOfBirth = trim((string) $this->input('date_of_birth'));
         $address = trim((string) $this->input('address'));
@@ -247,8 +252,8 @@ class SmartTrack_api extends Base
         if ($lastName === '' || strlen($lastName) > 100) {
             $errors['last_name'] = 'Enter your last name.';
         }
-        if (!in_array($role, ['trainee', 'instructor', 'staff'], true)) {
-            $role = 'trainee';
+        if ($requestedRole !== '' && $requestedRole !== 'trainee') {
+            $errors['role'] = 'Public registration is limited to trainee accounts.';
         }
         if (!in_array($sex, ['Male', 'Female', 'Other'], true)) {
             $errors['sex'] = 'Select your sex.';
@@ -273,7 +278,7 @@ class SmartTrack_api extends Base
         }
         if ($programId !== '' && !ctype_digit($programId)) {
             $errors['program_id'] = 'Select a valid training program.';
-        } elseif ($programId !== '' && !$this->recordModel->row("SELECT program_id FROM training_programs WHERE program_id = ? AND status = 'active'", [(int) $programId])) {
+        } elseif ($programId !== '' && !$this->recordModel->isActiveProgram((int) $programId)) {
             $errors['program_id'] = 'Select a valid training program.';
         }
         if (strlen($password) < 10 || strlen($password) > 255) {
@@ -295,7 +300,7 @@ class SmartTrack_api extends Base
             $this->jsonResponse(['message' => 'That email address is already registered.', 'errors' => ['email' => 'Use another email address.']], 422);
         }
 
-        $this->userModel->createUser($name, $username, $password, $role, $email);
+        $this->userModel->createUser($name, $username, $password, 'trainee', $email);
         $account = $this->userModel->userByUsername($username);
         $this->userModel->createTraineeForUser((int) $account['user_id'], [
             'first_name' => $firstName,
@@ -327,6 +332,11 @@ class SmartTrack_api extends Base
             $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
         }
 
+        $refreshToken = (string) ($_COOKIE['smarttrack_refresh'] ?? '');
+        if ($refreshToken !== '') {
+            $this->apiLibrary()->revoke_refresh_token($refreshToken);
+        }
+        $this->clearRefreshTokenCookie();
         $this->session->sess_destroy();
         $this->jsonResponse([
             'ok' => true,
@@ -338,24 +348,45 @@ class SmartTrack_api extends Base
     public function apiRefresh()
     {
         $api = $this->apiLibrary();
-        $api->require_method('POST');
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
+        }
 
+        if (!$this->validCsrf()) {
+            return $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
+        }
         $body = $api->body();
-        $refreshToken = $body['refresh_token'] ?? '';
+        $refreshToken = (string) ($_COOKIE['smarttrack_refresh'] ?? ($body['refresh_token'] ?? ''));
 
         if (empty($refreshToken)) {
-            $api->respond_error('Refresh token is required.', 400);
+            return $this->jsonResponse(['message' => 'Refresh token is required.'], 401);
+        }
+
+        $segments = explode('.', $refreshToken);
+        $refreshPayload = count($segments) === 3
+            ? json_decode(base64_decode(strtr($segments[1], '-_', '+/')), true)
+            : null;
+        $subject = is_array($refreshPayload) ? ($refreshPayload['sub'] ?? null) : null;
+        $account = is_scalar($subject) && ctype_digit((string) $subject)
+            ? $this->userModel->apiUserById((int) $subject)
+            : null;
+        if (!$account || $account['status'] !== 'active') {
+            $this->clearRefreshTokenCookie();
+            return $this->jsonResponse(['message' => 'Invalid or expired refresh token.'], 401);
         }
 
         $result = $api->refresh_jwt($refreshToken);
 
         if (!$result) {
-            $api->respond_error('Invalid or expired refresh token.', 401);
+            $this->clearRefreshTokenCookie();
+            return $this->jsonResponse(['message' => 'Invalid or expired refresh token.'], 401);
         }
 
-        $api->respond([
+        $this->setRefreshTokenCookie($result['refresh_token']);
+        $this->jsonResponse([
             'access_token' => $result['access_token'],
-            'refresh_token' => $result['refresh_token'],
+            'expires_in' => $result['expires_in'],
+            'token_type' => $result['token_type'],
         ]);
     }
 
@@ -460,10 +491,10 @@ class SmartTrack_api extends Base
                 ['name' => 'notes', 'label' => 'Notes', 'type' => 'textarea'],
             ];
         } elseif ($section === 'my_certificates' && $user['role'] === 'trainee') {
-            $trainee = $this->model->row('SELECT trainee_id FROM trainees WHERE user_id = ?', [(int) $user['user_id']]);
+            $trainee = $this->certificateModel->traineeForUser((int) $user['user_id']);
             if ($trainee) {
-                $records = $this->model->rows('SELECT c.*, p.program_name, cl.class_name FROM certificates c JOIN training_programs p ON p.program_id = c.program_id JOIN training_classes cl ON cl.class_id = c.class_id WHERE c.trainee_id = ? ORDER BY c.issue_date DESC', [(int) $trainee['trainee_id']]);
-                $eligibilityRecords = $this->model->rows('SELECT e.*, p.program_name, cl.class_name FROM certificate_eligibility e JOIN training_programs p ON p.program_id = e.program_id JOIN training_classes cl ON cl.class_id = e.class_id WHERE e.trainee_id = ? ORDER BY e.updated_at DESC', [(int) $trainee['trainee_id']]);
+                $records = $this->certificateModel->traineeCertificates((int) $trainee['trainee_id']);
+                $eligibilityRecords = $this->certificateModel->traineeEligibilityRecords((int) $trainee['trainee_id']);
             }
             $columns = ['certificate_number', 'program_name', 'class_name', 'issue_date', 'status'];
             $key = 'certificate_id';
@@ -485,7 +516,7 @@ class SmartTrack_api extends Base
                 'document_requirements' => $this->documentModel->documentRequirements(),
                 'signatories' => $this->certificateModel->signatories(),
                 'signatory_accounts' => $this->certificateModel->signatoryAccounts(),
-                'certificate_classes' => $this->recordModel->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+                'certificate_classes' => $this->recordModel->certificateClassOptions(),
                 'can_configure_certificates' => true,
                 'can_manage' => false,
                 'records' => [],
@@ -556,9 +587,7 @@ class SmartTrack_api extends Base
             'can_scan_attendance' => $section === 'attendance' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true),
             'attendance_options' => $section === 'attendance' ? [
                 'classes' => $this->model->options('classes', $user),
-                'schedules' => $user['role'] === 'instructor'
-                    ? $this->model->rows('SELECT s.schedule_id AS id, s.class_id, CONCAT(s.schedule_date, " - ", s.start_time) AS label FROM training_schedules s JOIN training_classes c ON c.class_id = s.class_id WHERE s.schedule_date = CURDATE() AND c.instructor_id = ? ORDER BY s.start_time', [(int) $user['user_id']])
-                    : $this->model->rows('SELECT schedule_id AS id, class_id, CONCAT(schedule_date, " - ", start_time) AS label FROM training_schedules WHERE schedule_date = CURDATE() ORDER BY start_time'),
+                'schedules' => $this->attendanceModel->scheduleOptionsForToday($user),
             ] : [],
             'attendance_followups' => $section === 'attendance' && in_array($user['role'], ['administrator', 'staff', 'instructor'], true)
                 ? $this->model->absenceFollowUps($user)
@@ -570,24 +599,14 @@ class SmartTrack_api extends Base
             'certificate_stats' => $section === 'certificates' ? $this->certificateModel->certificateStats() : null,
             'assessment_options' => $section === 'assessments' ? [
                 'trainees' => $this->model->options('trainees', $user),
-                'classes' => $this->model->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+                'classes' => $this->assessmentModel->classOptions(),
             ] : [],
         ]);
     }
 
     private function authenticatedApiUser()
     {
-        if ($this->user) {
-            return $this->user;
-        }
-
-        $token = $this->apiLibrary()->get_jwt_data();
-        $user = is_array($token) ? ($token['custom_data'] ?? []) : [];
-        if (!isset($user['user_id'], $user['role'])) {
-            return null;
-        }
-        $this->user = $user;
-        return $user;
+        return $this->apiUserFromToken();
     }
 
     // API wrappers that call the actual controller methods

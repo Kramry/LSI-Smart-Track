@@ -9,144 +9,333 @@ class Record_model extends Base_model
     {
         $userId = (int) $user['user_id'];
         $role = $user['role'];
-        $queries = [
-            'users' => 'SELECT user_id, full_name, username, role, status, created_at FROM users',
-            'trainees' => 'SELECT t.trainee_id, t.first_name, t.last_name, t.sex, t.date_of_birth, t.address, t.email, t.contact_number, t.course, t.status, t.qr_code, t.user_id, t.program_id, p.program_name FROM trainees t LEFT JOIN training_programs p ON p.program_id = t.program_id',
-            'programs' => 'SELECT program_id, program_code, program_name, description, status FROM training_programs',
-            'classes' => 'SELECT c.class_id, c.class_name, c.program_id, p.program_name, c.instructor_id, u.full_name AS instructor_name, c.start_date, c.end_date, c.status FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id LEFT JOIN users u ON u.user_id = c.instructor_id',
-            'schedules' => 'SELECT s.schedule_id, s.class_id, c.class_name, s.schedule_date, s.start_time, s.end_time FROM training_schedules s LEFT JOIN training_classes c ON c.class_id = s.class_id',
-            'enrollments' => 'SELECT e.enrollment_id, e.class_id, c.class_name, e.trainee_id, CONCAT(t.first_name, \' \', t.last_name) AS trainee_name, e.enrolled_at, CASE WHEN NOT EXISTS (SELECT 1 FROM trainee_fees tf WHERE tf.trainee_id = e.trainee_id AND tf.class_id = e.class_id AND tf.fee_kind = \'registration\') THEN \'Pending payment\' WHEN (SELECT COALESCE(SUM(GREATEST(tf.amount_due - COALESCE((SELECT SUM(CASE WHEN pay.entry_type = \'payment\' THEN pay.amount WHEN pay.entry_type = \'reversal\' THEN -pay.amount ELSE 0 END) FROM payments pay WHERE pay.trainee_fee_id = tf.trainee_fee_id), 0), 0)), 0) FROM trainee_fees tf WHERE tf.trainee_id = e.trainee_id AND tf.class_id = e.class_id AND tf.fee_kind = \'registration\') > 0 THEN \'Pending payment\' ELSE \'Paid\' END AS registration_payment_status FROM class_enrollments e JOIN training_classes c ON c.class_id = e.class_id JOIN trainees t ON t.trainee_id = e.trainee_id',
-            'attendance' => 'SELECT a.attendance_id, a.trainee_id, CONCAT(t.first_name, \' \', t.last_name) AS trainee_name, a.class_id, c.class_name, a.schedule_id, a.attendance_date, a.time_in, a.time_out, a.status, a.remarks FROM attendance_records a JOIN trainees t ON t.trainee_id = a.trainee_id LEFT JOIN training_classes c ON c.class_id = a.class_id',
-            'documents' => 'SELECT d.document_id, d.trainee_id, d.class_id, COALESCE(CONCAT(t.first_name, \' \', t.last_name), \'Institution\') AS trainee_name, d.document_name, d.upload_date, d.review_status, d.status, d.access_level FROM trainee_documents d LEFT JOIN trainees t ON t.trainee_id = d.trainee_id',
-            'announcements' => 'SELECT a.announcement_id, a.title, a.content, a.status, a.created_at, u.full_name AS author FROM announcements a LEFT JOIN users u ON u.user_id = a.user_id',
-            'inquiries' => 'SELECT i.inquiry_id, i.trainee_id, CONCAT(t.first_name, \' \', t.last_name) AS trainee_name, i.subject, i.message, i.reply, i.status, i.created_at FROM inquiries i JOIN trainees t ON t.trainee_id = i.trainee_id',
-            'activity' => 'SELECT l.log_id, l.user_id, COALESCE(u.full_name, \'System\') AS user_name, l.action, l.details, l.created_at FROM activity_logs l LEFT JOIN users u ON u.user_id = l.user_id LIMIT 200',
-        ];
 
-        if (!isset($queries[$section])) {
-            return [];
+        if ($section === 'users') {
+            return $this->db->table('users')
+                ->select('user_id, full_name, username, role, status, created_at')
+                ->get_all();
         }
 
-        $sql = $queries[$section];
-        if ($section === 'trainees' && $role === 'trainee') {
-            return $this->rows($sql . ' WHERE t.user_id = ? LIMIT 1', [$userId]);
-        }
         if ($section === 'trainees' && $role === 'instructor') {
-            return $this->rows(
-                'SELECT DISTINCT t.trainee_id, t.first_name, t.last_name, t.sex, t.contact_number, t.course, t.status, t.qr_code, t.user_id, t.program_id, p.program_name FROM trainees t JOIN class_enrollments e ON e.trainee_id = t.trainee_id JOIN training_classes c ON c.class_id = e.class_id LEFT JOIN training_programs p ON p.program_id = t.program_id WHERE c.instructor_id = ? ORDER BY t.last_name, t.first_name',
-                [$userId]
-            );
+            $rows = $this->db->table('trainees')
+                ->select('trainees.trainee_id, trainees.first_name, trainees.last_name, trainees.sex, trainees.contact_number, trainees.course, trainees.status, trainees.qr_code, trainees.user_id, trainees.program_id, training_programs.program_name')
+                ->join('class_enrollments', 'class_enrollments.trainee_id = trainees.trainee_id')
+                ->join('training_classes', 'training_classes.class_id = class_enrollments.class_id')
+                ->left_join('training_programs', 'training_programs.program_id = trainees.program_id')
+                ->where('training_classes.instructor_id', $userId)
+                ->group_by(['trainees.trainee_id', 'trainees.first_name', 'trainees.last_name', 'trainees.sex', 'trainees.contact_number', 'trainees.course', 'trainees.status', 'trainees.qr_code', 'trainees.user_id', 'trainees.program_id', 'training_programs.program_name'])
+                ->get_all();
+            usort($rows, static function ($left, $right) {
+                $lastName = strcasecmp($left['last_name'], $right['last_name']);
+                return $lastName !== 0 ? $lastName : strcasecmp($left['first_name'], $right['first_name']);
+            });
+            return $rows;
         }
-        if ($section === 'classes' && $role === 'instructor') {
-            return $this->rows($sql . ' WHERE c.instructor_id = ?', [$userId]);
+
+        if ($section === 'trainees') {
+            $query = $this->db->table('trainees')
+                ->select('trainees.trainee_id, trainees.first_name, trainees.last_name, trainees.sex, trainees.date_of_birth, trainees.address, trainees.email, trainees.contact_number, trainees.course, trainees.status, trainees.qr_code, trainees.user_id, trainees.program_id, training_programs.program_name')
+                ->left_join('training_programs', 'training_programs.program_id = trainees.program_id');
+            if ($role === 'trainee') {
+                return $query->where('trainees.user_id', $userId)->limit(1)->get_all();
+            }
+            return $query->get_all();
         }
-        if ($section === 'classes' && $role === 'trainee') {
-            return $this->rows($sql . ' JOIN class_enrollments e ON e.class_id = c.class_id WHERE e.trainee_id = (SELECT trainee_id FROM trainees WHERE user_id = ? LIMIT 1)', [$userId]);
+
+        if ($section === 'programs') {
+            return $this->db->table('training_programs')
+                ->select('program_id, program_code, program_name, description, status')
+                ->get_all();
         }
-        if ($section === 'attendance' && $role === 'trainee') {
-            return $this->rows($sql . ' WHERE t.user_id = ?', [$userId]);
+
+        if ($section === 'classes') {
+            $query = $this->db->table('training_classes')
+                ->select('training_classes.class_id, training_classes.class_name, training_classes.program_id, training_programs.program_name, training_classes.instructor_id, users.full_name AS instructor_name, training_classes.start_date, training_classes.end_date, training_classes.status')
+                ->join('training_programs', 'training_programs.program_id = training_classes.program_id')
+                ->left_join('users', 'users.user_id = training_classes.instructor_id');
+            if ($role === 'instructor') {
+                return $query->where('training_classes.instructor_id', $userId)->get_all();
+            }
+            if ($role === 'trainee') {
+                return $this->rows(
+                    'SELECT c.class_id, c.class_name, c.program_id, p.program_name, c.instructor_id, u.full_name AS instructor_name, c.start_date, c.end_date, c.status FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id LEFT JOIN users u ON u.user_id = c.instructor_id JOIN class_enrollments e ON e.class_id = c.class_id WHERE e.trainee_id = (SELECT trainee_id FROM trainees WHERE user_id = ? LIMIT 1)',
+                    [$userId]
+                );
+            }
+            return $query->get_all();
         }
-        if ($section === 'attendance' && $role === 'instructor') {
-            return $this->rows($sql . ' JOIN training_classes owned_class ON owned_class.class_id = a.class_id WHERE owned_class.instructor_id = ?', [$userId]);
-        }
-        if ($section === 'documents' && $role === 'trainee') {
-            return $this->rows($sql . " WHERE d.access_level <> 'staff' AND (t.user_id = ? OR (d.access_level = 'class' AND d.class_id IN (SELECT e.class_id FROM class_enrollments e JOIN trainees mine ON mine.trainee_id = e.trainee_id WHERE mine.user_id = ?)))", [$userId, $userId]);
-        }
-        if ($section === 'documents' && $role === 'instructor') {
-            return $this->rows($sql . " JOIN training_classes c ON c.class_id = d.class_id WHERE d.trainee_id IS NOT NULL AND d.access_level <> 'staff' AND c.instructor_id = ?", [$userId]);
-        }
-        if ($section === 'announcements' && $role !== 'administrator' && $role !== 'staff') {
-            return $this->rows("SELECT announcement_id, title, content, status, created_at, NULL AS author FROM announcements WHERE status = 'published' ORDER BY created_at DESC");
-        }
-        if ($section === 'inquiries' && $role === 'trainee') {
-            return $this->rows($sql . ' WHERE t.user_id = ?', [$userId]);
-        }
+
         if ($section === 'schedules' && $role === 'instructor') {
-            return $this->rows($sql . ' JOIN training_classes owned_class ON owned_class.class_id = s.class_id WHERE owned_class.instructor_id = ?', [$userId]);
+            return $this->db->table('training_schedules')
+                ->select('training_schedules.schedule_id, training_schedules.class_id, training_classes.class_name, training_schedules.schedule_date, training_schedules.start_time, training_schedules.end_time')
+                ->left_join('training_classes', 'training_classes.class_id = training_schedules.class_id')
+                ->join('training_classes owned_class', 'owned_class.class_id = training_schedules.class_id')
+                ->where('owned_class.instructor_id', $userId)
+                ->get_all();
         }
-        if ($section === 'enrollments' && $role === 'instructor') {
-            return $this->rows($sql . ' WHERE c.instructor_id = ?', [$userId]);
+
+        if ($section === 'schedules') {
+            return $this->db->table('training_schedules')
+                ->select('training_schedules.schedule_id, training_schedules.class_id, training_classes.class_name, training_schedules.schedule_date, training_schedules.start_time, training_schedules.end_time')
+                ->left_join('training_classes', 'training_classes.class_id = training_schedules.class_id')
+                ->get_all();
         }
-        return $this->rows($sql);
+
+        if ($section === 'announcements' && $role !== 'administrator' && $role !== 'staff') {
+            $rows = $this->db->table('announcements')
+                ->select('announcement_id, title, content, status, created_at')
+                ->where('status', 'published')
+                ->order_by('created_at', 'DESC')
+                ->get_all();
+            foreach ($rows as &$row) {
+                $row['author'] = null;
+            }
+            unset($row);
+            return $rows;
+        }
+
+        if ($section === 'announcements') {
+            return $this->db->table('announcements')
+                ->select('announcements.announcement_id, announcements.title, announcements.content, announcements.status, announcements.created_at, users.full_name AS author')
+                ->left_join('users', 'users.user_id = announcements.user_id')
+                ->get_all();
+        }
+
+        if ($section === 'enrollments') {
+            $sql = 'SELECT e.enrollment_id, e.class_id, c.class_name, e.trainee_id, CONCAT(t.first_name, \' \', t.last_name) AS trainee_name, e.enrolled_at, CASE WHEN NOT EXISTS (SELECT 1 FROM trainee_fees tf WHERE tf.trainee_id = e.trainee_id AND tf.class_id = e.class_id AND tf.fee_kind = \'registration\') THEN \'Pending payment\' WHEN (SELECT COALESCE(SUM(GREATEST(tf.amount_due - COALESCE((SELECT SUM(CASE WHEN pay.entry_type = \'payment\' THEN pay.amount WHEN pay.entry_type = \'reversal\' THEN -pay.amount ELSE 0 END) FROM payments pay WHERE pay.trainee_fee_id = tf.trainee_fee_id), 0), 0)), 0) FROM trainee_fees tf WHERE tf.trainee_id = e.trainee_id AND tf.class_id = e.class_id AND tf.fee_kind = \'registration\') > 0 THEN \'Pending payment\' ELSE \'Paid\' END AS registration_payment_status FROM class_enrollments e JOIN training_classes c ON c.class_id = e.class_id JOIN trainees t ON t.trainee_id = e.trainee_id';
+            if ($role === 'instructor') {
+                return $this->rows($sql . ' WHERE c.instructor_id = ?', [$userId]);
+            }
+            return $this->rows($sql);
+        }
+
+        if ($section === 'attendance') {
+            $query = $this->db->table('attendance_records')
+                ->select('attendance_records.attendance_id, attendance_records.trainee_id, trainees.first_name, trainees.last_name, attendance_records.class_id, training_classes.class_name, attendance_records.schedule_id, attendance_records.attendance_date, attendance_records.time_in, attendance_records.time_out, attendance_records.status, attendance_records.remarks')
+                ->join('trainees', 'trainees.trainee_id = attendance_records.trainee_id')
+                ->left_join('training_classes', 'training_classes.class_id = attendance_records.class_id');
+            if ($role === 'trainee') {
+                $query->where('trainees.user_id', $userId);
+            } elseif ($role === 'instructor') {
+                $query->join('training_classes owned_class', 'owned_class.class_id = attendance_records.class_id')
+                    ->where('owned_class.instructor_id', $userId);
+            }
+            return $this->addTraineeName($query->get_all());
+        }
+
+        if ($section === 'documents') {
+            if ($role === 'trainee') {
+                return $this->rows("SELECT d.document_id, d.trainee_id, d.class_id, COALESCE(CONCAT(t.first_name, ' ', t.last_name), 'Institution') AS trainee_name, d.document_name, d.upload_date, d.review_status, d.status, d.access_level FROM trainee_documents d LEFT JOIN trainees t ON t.trainee_id = d.trainee_id WHERE d.access_level <> 'staff' AND (t.user_id = ? OR (d.access_level = 'class' AND d.class_id IN (SELECT e.class_id FROM class_enrollments e JOIN trainees mine ON mine.trainee_id = e.trainee_id WHERE mine.user_id = ?)))", [$userId, $userId]);
+            }
+            $query = $this->db->table('trainee_documents')
+                ->select('trainee_documents.document_id, trainee_documents.trainee_id, trainee_documents.class_id, trainees.first_name, trainees.last_name, trainee_documents.document_name, trainee_documents.upload_date, trainee_documents.review_status, trainee_documents.status, trainee_documents.access_level')
+                ->left_join('trainees', 'trainees.trainee_id = trainee_documents.trainee_id');
+            if ($role === 'instructor') {
+                $query->join('training_classes', 'training_classes.class_id = trainee_documents.class_id')
+                    ->where_not_null('trainee_documents.trainee_id')
+                    ->where('trainee_documents.access_level', '<>', 'staff')
+                    ->where('training_classes.instructor_id', $userId);
+            }
+            return $this->addTraineeName($query->get_all(), 'Institution');
+        }
+
+        if ($section === 'inquiries') {
+            $query = $this->db->table('inquiries')
+                ->select('inquiries.inquiry_id, inquiries.trainee_id, trainees.first_name, trainees.last_name, inquiries.subject, inquiries.message, inquiries.reply, inquiries.status, inquiries.created_at')
+                ->join('trainees', 'trainees.trainee_id = inquiries.trainee_id');
+            if ($role === 'trainee') {
+                $query->where('trainees.user_id', $userId);
+            }
+            return $this->addTraineeName($query->get_all());
+        }
+
+        if ($section === 'activity') {
+            $rows = $this->db->table('activity_logs')
+                ->select('activity_logs.log_id, activity_logs.user_id, users.full_name AS user_name, activity_logs.action, activity_logs.details, activity_logs.created_at')
+                ->left_join('users', 'users.user_id = activity_logs.user_id')
+                ->limit(200)
+                ->get_all();
+            foreach ($rows as &$row) {
+                $row['user_name'] = $row['user_name'] ?? 'System';
+            }
+            unset($row);
+            return $rows;
+        }
+
+        return [];
     }
 
     public function options($section, $user = null)
     {
-        $queries = [
-            'programs' => 'SELECT program_id AS id, program_name AS label FROM training_programs WHERE status = \'active\' ORDER BY program_name',
-            'trainees' => "SELECT trainee_id AS id, CONCAT(first_name, ' ', last_name) AS label FROM trainees WHERE status = 'active' ORDER BY last_name, first_name",
-            'classes' => 'SELECT class_id AS id, class_name AS label FROM training_classes WHERE status = \'active\' ORDER BY class_name',
-            'instructors' => "SELECT user_id AS id, full_name AS label FROM users WHERE role = 'instructor' AND status = 'active' ORDER BY full_name",
-            'schedules' => "SELECT schedule_id AS id, CONCAT(schedule_date, ' - ', start_time) AS label FROM training_schedules ORDER BY schedule_date DESC",
-            'user_accounts' => "SELECT user_id AS id, CONCAT(full_name, ' (', username, ')') AS label FROM users WHERE role = 'trainee' AND status = 'active' ORDER BY full_name",
-        ];
-        if (!isset($queries[$section])) {
-            return [];
+        if ($section === 'programs') {
+            return $this->db->table('training_programs')
+                ->select('program_id AS id, program_name AS label')
+                ->where('status', 'active')
+                ->order_by('program_name')
+                ->get_all();
         }
-        if ($user && $user['role'] === 'instructor' && $section === 'classes') {
-            return $this->rows('SELECT class_id AS id, class_name AS label FROM training_classes WHERE status = \'active\' AND instructor_id = ? ORDER BY class_name', [(int) $user['user_id']]);
+        if ($section === 'classes') {
+            $query = $this->db->table('training_classes')
+                ->select('class_id AS id, class_name AS label')
+                ->where('status', 'active');
+            if ($user && $user['role'] === 'instructor') {
+                $query->where('instructor_id', (int) $user['user_id']);
+            }
+            return $query->order_by('class_name')->get_all();
         }
-        if ($user && $user['role'] === 'instructor' && $section === 'trainees') {
-            return $this->rows("SELECT DISTINCT t.trainee_id AS id, CONCAT(t.first_name, ' ', t.last_name) AS label FROM trainees t JOIN class_enrollments e ON e.trainee_id = t.trainee_id JOIN training_classes c ON c.class_id = e.class_id WHERE t.status = 'active' AND c.instructor_id = ? ORDER BY label", [(int) $user['user_id']]);
+        if ($section === 'certificate_classes') {
+            return $this->certificateClassOptions();
         }
-        if ($user && $user['role'] === 'instructor' && $section === 'schedules') {
-            return $this->rows("SELECT s.schedule_id AS id, CONCAT(s.schedule_date, ' - ', s.start_time) AS label FROM training_schedules s JOIN training_classes c ON c.class_id = s.class_id WHERE c.instructor_id = ? ORDER BY s.schedule_date DESC", [(int) $user['user_id']]);
+        if ($section === 'instructors') {
+            return $this->db->table('users')
+                ->select('user_id AS id, full_name AS label')
+                ->where(['role' => 'instructor', 'status' => 'active'])
+                ->order_by('full_name')
+                ->get_all();
         }
-        if ($user && $user['role'] === 'trainee' && $section === 'trainees') {
-            return $this->rows("SELECT trainee_id AS id, CONCAT(first_name, ' ', last_name) AS label FROM trainees WHERE status = 'active' AND user_id = ?", [(int) $user['user_id']]);
+
+        if ($section === 'trainees') {
+            $query = $this->db->table('trainees')
+                ->select('trainees.trainee_id AS id, trainees.first_name, trainees.last_name')
+                ->where('trainees.status', 'active');
+            if ($user && $user['role'] === 'instructor') {
+                $query->join('class_enrollments', 'class_enrollments.trainee_id = trainees.trainee_id')
+                    ->join('training_classes', 'training_classes.class_id = class_enrollments.class_id')
+                    ->where('training_classes.instructor_id', (int) $user['user_id'])
+                    ->group_by(['trainees.trainee_id', 'trainees.first_name', 'trainees.last_name']);
+            } elseif ($user && $user['role'] === 'trainee') {
+                $query->where('trainees.user_id', (int) $user['user_id']);
+            }
+            $rows = $query->get_all();
+            if (!$user || $user['role'] !== 'trainee') {
+                usort($rows, static function ($left, $right) use ($user) {
+                    if ($user && $user['role'] === 'instructor') {
+                        $firstName = strcasecmp($left['first_name'], $right['first_name']);
+                        return $firstName !== 0 ? $firstName : strcasecmp($left['last_name'], $right['last_name']);
+                    }
+                    $lastName = strcasecmp($left['last_name'], $right['last_name']);
+                    return $lastName !== 0 ? $lastName : strcasecmp($left['first_name'], $right['first_name']);
+                });
+            }
+            return $this->formatOptions($rows, static function ($row) {
+                return $row['first_name'] . ' ' . $row['last_name'];
+            });
         }
-        if ($user && $user['role'] === 'trainee' && $section === 'classes') {
-            return $this->rows('SELECT c.class_id AS id, c.class_name AS label FROM training_classes c JOIN class_enrollments e ON e.class_id = c.class_id JOIN trainees t ON t.trainee_id = e.trainee_id WHERE t.user_id = ?', [(int) $user['user_id']]);
+
+        if ($section === 'schedules') {
+            $query = $this->db->table('training_schedules')
+                ->select('training_schedules.schedule_id AS id, training_schedules.schedule_date, training_schedules.start_time');
+            if ($user && $user['role'] === 'instructor') {
+                $query->join('training_classes', 'training_classes.class_id = training_schedules.class_id')
+                    ->where('training_classes.instructor_id', (int) $user['user_id']);
+            } elseif ($user && $user['role'] === 'trainee') {
+                $query->join('class_enrollments', 'class_enrollments.class_id = training_schedules.class_id')
+                    ->join('trainees', 'trainees.trainee_id = class_enrollments.trainee_id')
+                    ->where('trainees.user_id', (int) $user['user_id']);
+            }
+            $rows = $query->order_by('training_schedules.schedule_date', 'DESC')->get_all();
+            return $this->formatOptions($rows, static function ($row) {
+                return $row['schedule_date'] . ' - ' . $row['start_time'];
+            });
         }
-        if ($user && $user['role'] === 'trainee' && $section === 'schedules') {
-            return $this->rows("SELECT s.schedule_id AS id, CONCAT(s.schedule_date, ' - ', s.start_time) AS label FROM training_schedules s JOIN class_enrollments e ON e.class_id = s.class_id JOIN trainees t ON t.trainee_id = e.trainee_id WHERE t.user_id = ? ORDER BY s.schedule_date DESC", [(int) $user['user_id']]);
+
+        if ($section === 'user_accounts') {
+            $rows = $this->db->table('users')
+                ->select('user_id AS id, full_name, username')
+                ->where(['role' => 'trainee', 'status' => 'active'])
+                ->order_by('full_name')
+                ->get_all();
+            return $this->formatOptions($rows, static function ($row) {
+                return $row['full_name'] . ' (' . $row['username'] . ')';
+            });
         }
-        return $this->rows($queries[$section]);
+
+        return [];
     }
 
-    public function saveRecord($table, $primaryKey, array $data, $id = null)
+    public function announcementForNotifications($announcementId)
     {
-        if (isset($data['password']) && $data['password'] !== '') {
-            $data['password'] = password_hash($data['password'], PASSWORD_DEFAULT);
-        } elseif (isset($data['password'])) {
-            unset($data['password']);
-        }
-
-        if (!$data) {
-            return $id;
-        }
-        $columns = array_keys($data);
-        if ($id) {
-            $sets = implode(', ', array_map(static function ($column) {
-                return '`' . $column . '` = ?';
-            }, $columns));
-            $this->execute("UPDATE `{$table}` SET {$sets} WHERE `{$primaryKey}` = ?", array_merge(array_values($data), [(int) $id]));
-            return (int) $id;
-        }
-
-        $quoted = implode(', ', array_map(static function ($column) {
-            return '`' . $column . '`';
-        }, $columns));
-        $marks = implode(', ', array_fill(0, count($columns), '?'));
-        $this->execute("INSERT INTO `{$table}` ({$quoted}) VALUES ({$marks})", array_values($data));
-        return (int) $this->row('SELECT LAST_INSERT_ID() AS id')['id'];
+        return $this->db->table('announcements')
+            ->select('announcement_id, title, content, published_at, status')
+            ->where('announcement_id', (int) $announcementId)
+            ->get() ?: null;
     }
 
-    public function findRecord($table, $primaryKey, $id)
+    public function failedNotification($notificationId)
     {
-        return $this->row("SELECT * FROM `{$table}` WHERE `{$primaryKey}` = ? LIMIT 1", [(int) $id]);
+        return $this->db->table('announcement_notifications')
+            ->select('announcement_id')
+            ->where(['id' => (int) $notificationId, 'status' => 'failed'])
+            ->get() ?: null;
     }
 
-    public function deleteRecord($table, $primaryKey, $id, $deactivate = false)
+    public function notificationExists($notificationId)
     {
-        if ($deactivate) {
-            return $this->execute("UPDATE `{$table}` SET status = 'inactive' WHERE `{$primaryKey}` = ?", [(int) $id]);
+        return $this->db->table('announcement_notifications')
+            ->select('id')
+            ->where('id', (int) $notificationId)
+            ->get() ?: null;
+    }
+
+    public function retryNotification($notificationId)
+    {
+        return $this->db->table('announcement_notifications')
+            ->where('id', (int) $notificationId)
+            ->update(['status' => 'pending', 'error_message' => null]);
+    }
+
+    public function deleteNotification($notificationId)
+    {
+        return $this->db->table('announcement_notifications')
+            ->where('id', (int) $notificationId)
+            ->delete();
+    }
+
+    public function saveNotificationSettings($emailEnabled)
+    {
+        return $this->execute(
+            'INSERT INTO notification_settings (id, email_enabled) VALUES (1, ?) ON DUPLICATE KEY UPDATE email_enabled = VALUES(email_enabled)',
+            [(int) (bool) $emailEnabled]
+        );
+    }
+
+    public function isActiveProgram($programId)
+    {
+        return (bool) $this->db->table('training_programs')
+            ->select('program_id')
+            ->where(['program_id' => (int) $programId, 'status' => 'active'])
+            ->get();
+    }
+
+    public function certificateClassOptions()
+    {
+        return $this->db->table('training_classes')
+            ->select('class_id AS id, class_name AS label')
+            ->order_by('class_name')
+            ->get_all();
+    }
+
+    private function addTraineeName(array $rows, $nullFallback = null)
+    {
+        foreach ($rows as &$row) {
+            $name = $row['first_name'] === null || $row['last_name'] === null
+                ? $nullFallback
+                : $row['first_name'] . ' ' . $row['last_name'];
+            $position = array_search('first_name', array_keys($row), true);
+            $row = array_slice($row, 0, $position, true)
+                + ['trainee_name' => $name]
+                + array_slice($row, $position + 2, null, true);
         }
-        return $this->execute("DELETE FROM `{$table}` WHERE `{$primaryKey}` = ?", [(int) $id]);
+        unset($row);
+        return $rows;
     }
 
-    public function logActivity($userId, $action, $details)
+    private function formatOptions(array $rows, callable $label)
     {
-        $this->execute('INSERT INTO activity_logs (user_id, action, details) VALUES (?, ?, ?)', [$userId, $action, $details]);
+        $options = [];
+        foreach ($rows as $row) {
+            $options[] = ['id' => $row['id'], 'label' => $label($row)];
+        }
+        return $options;
     }
 }

@@ -6,24 +6,34 @@ class User_model extends Base_model
 {
     public function userByUsername($username)
     {
-        return $this->row(
-            'SELECT user_id, full_name, username, email, password, role, status FROM users WHERE username = ? LIMIT 1',
-            [$username]
-        );
+        return $this->db->table('users')
+            ->select('user_id, full_name, username, email, password, role, status')
+            ->where('username', $username)
+            ->limit(1)
+            ->get() ?: null;
     }
 
     public function userByEmail($email)
     {
-        return $this->row(
-            'SELECT user_id FROM users WHERE email = ? LIMIT 1',
-            [$email]
-        );
+        return $this->db->table('users')
+            ->select('user_id')
+            ->where('email', $email)
+            ->limit(1)
+            ->get() ?: null;
+    }
+
+    public function apiUserById($userId)
+    {
+        return $this->db->table('users')
+            ->select('user_id, full_name, username, role, status')
+            ->where('user_id', (int) $userId)
+            ->limit(1)
+            ->get() ?: null;
     }
 
     public function userCount()
     {
-        $record = $this->row('SELECT COUNT(*) AS total FROM users');
-        return (int) ($record['total'] ?? 0);
+        return (int) $this->db->table('users')->count();
     }
 
     public function createInitialAdmin($name, $username, $password)
@@ -44,28 +54,60 @@ class User_model extends Base_model
 
     public function createTraineeForUser($userId, array $data)
     {
-        $this->execute(
-            'INSERT INTO trainees (first_name, last_name, sex, date_of_birth, address, email, contact_number, course, program_id, status, user_id, qr_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [
-                $data['first_name'],
-                $data['last_name'],
-                $data['sex'],
-                $data['date_of_birth'] ?: null,
-                $data['address'] ?: null,
-                $data['email'] ?: null,
-                $data['contact_number'],
-                $data['course'],
-                $data['program_id'] ?: null,
-                'active',
-                (int) $userId,
-                'LSI-' . strtoupper(bin2hex(random_bytes(6))),
-            ]
-        );
+        $this->db->table('trainees')->insert([
+            'first_name' => $data['first_name'],
+            'last_name' => $data['last_name'],
+            'sex' => $data['sex'],
+            'date_of_birth' => $data['date_of_birth'] ?: null,
+            'address' => $data['address'] ?: null,
+            'email' => $data['email'] ?: null,
+            'contact_number' => $data['contact_number'],
+            'course' => $data['course'],
+            'program_id' => $data['program_id'] ?: null,
+            'status' => 'active',
+            'user_id' => (int) $userId,
+            'qr_code' => 'LSI-' . strtoupper(bin2hex(random_bytes(6))),
+        ]);
     }
 
     public function traineeForUser($userId)
     {
-        return $this->row('SELECT * FROM trainees WHERE user_id = ? LIMIT 1', [(int) $userId]);
+        return $this->db->table('trainees')
+            ->where('user_id', (int) $userId)
+            ->limit(1)
+            ->get() ?: null;
+    }
+
+    public function updateFullName($userId, $name)
+    {
+        return $this->db->table('users')
+            ->where('user_id', (int) $userId)
+            ->update(['full_name' => $name]);
+    }
+
+    public function updateTraineeProfile($traineeId, $firstName, $lastName, $contactNumber)
+    {
+        return $this->db->table('trainees')
+            ->where('trainee_id', (int) $traineeId)
+            ->update([
+                'first_name' => $firstName,
+                'last_name' => $lastName,
+                'contact_number' => $contactNumber,
+            ]);
+    }
+
+    public function passwordForUser($userId)
+    {
+        return $this->db->table('users')
+            ->select('password')
+            ->where('user_id', (int) $userId)
+            ->get() ?: null;
+    }
+
+    public function updatePassword($userId, $passwordHash)
+    {
+        return $this->db->table('users')
+            ->where('user_id', (int) $userId)
+            ->update(['password' => $passwordHash]);
     }
 }

@@ -19,7 +19,10 @@ class NotificationService
         if (!$this->tableExists('notification_settings')) {
             return ['email_enabled' => false, 'ready' => false];
         }
-        $row = $this->row('SELECT email_enabled FROM notification_settings WHERE id = 1');
+        $row = $this->db->table('notification_settings')
+            ->select('email_enabled')
+            ->where('id', 1)
+            ->get();
         return [
             'email_enabled' => (bool) ($row['email_enabled'] ?? false),
             'ready' => $this->tableExists('announcement_notifications'),
@@ -28,23 +31,28 @@ class NotificationService
 
     public function recipients($mode, $classId = null, array $traineeIds = [])
     {
-        $sql = "SELECT DISTINCT t.trainee_id, t.first_name, t.last_name, t.email, t.contact_number
-                FROM trainees t";
-        $values = [];
+        $query = $this->db->table('trainees')
+            ->select('trainees.trainee_id, trainees.first_name, trainees.last_name, trainees.email, trainees.contact_number');
         if ($mode === 'batch') {
-            $sql .= ' JOIN class_enrollments e ON e.trainee_id = t.trainee_id WHERE e.class_id = ?';
-            $values[] = (int) $classId;
+            $query->join('class_enrollments', 'class_enrollments.trainee_id = trainees.trainee_id')
+                ->where('class_enrollments.class_id', (int) $classId);
         } elseif ($mode === 'selected') {
             $ids = array_values(array_filter(array_map('intval', $traineeIds), static function ($id) { return $id > 0; }));
             if (!$ids) {
                 return [];
             }
-            $sql .= ' WHERE t.trainee_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')';
-            $values = $ids;
-        } else {
-            $sql .= " WHERE t.status = 'active'";
+            $query->in('trainees.trainee_id', $ids);
         }
-        return $this->rows($sql . " AND t.status = 'active' ORDER BY t.last_name, t.first_name", $values);
+        $recipients = $query
+            ->where('trainees.status', 'active')
+            ->group_by(['trainees.trainee_id', 'trainees.first_name', 'trainees.last_name', 'trainees.email', 'trainees.contact_number'])
+            ->order_by('trainees.last_name')
+            ->get_all();
+        usort($recipients, static function ($left, $right) {
+            $lastName = strcasecmp($left['last_name'], $right['last_name']);
+            return $lastName !== 0 ? $lastName : strcasecmp($left['first_name'], $right['first_name']);
+        });
+        return $recipients;
     }
 
     public function queue($announcement, array $recipients, array $channels)
@@ -72,16 +80,20 @@ class NotificationService
 
     public function processAnnouncement($announcementId)
     {
-        $rows = $this->rows(
-            "SELECT n.*, a.title, a.content, a.attachment, a.published_at, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name
-             FROM announcement_notifications n JOIN announcements a ON a.announcement_id = n.announcement_id
-             JOIN trainees t ON t.trainee_id = n.trainee_id
-             WHERE n.announcement_id = ? AND n.channel = 'email' AND n.status IN ('pending', 'failed')
-             ORDER BY n.id LIMIT 500",
-            [(int) $announcementId]
-        );
+        $rows = $this->db->table('announcement_notifications')
+            ->select('announcement_notifications.id, announcement_notifications.recipient, announcements.title, announcements.content, announcements.attachment, announcements.published_at, trainees.first_name, trainees.last_name')
+            ->join('announcements', 'announcements.announcement_id = announcement_notifications.announcement_id')
+            ->join('trainees', 'trainees.trainee_id = announcement_notifications.trainee_id')
+            ->where('announcement_notifications.announcement_id', (int) $announcementId)
+            ->where('announcement_notifications.channel', 'email')
+            ->in('announcement_notifications.status', ['pending', 'failed'])
+            ->order_by('announcement_notifications.id')
+            ->limit(500)
+            ->get_all();
         $results = ['sent' => 0, 'failed' => 0, 'pending' => 0];
         foreach ($rows as $notification) {
+            $notification['trainee_name'] = trim($notification['first_name'] . ' ' . $notification['last_name']);
+            unset($notification['first_name'], $notification['last_name']);
             $result = $this->brevo->send(
                 $notification['recipient'],
                 $notification['trainee_name'],
@@ -92,7 +104,9 @@ class NotificationService
                 $this->execute('UPDATE announcement_notifications SET status = "sent", provider_message_id = ?, error_message = NULL, sent_at = NOW() WHERE id = ?', [$result['provider_message_id'] ?? null, (int) $notification['id']]);
                 $results['sent']++;
             } else {
-                $this->execute('UPDATE announcement_notifications SET status = "failed", error_message = ? WHERE id = ?', [substr((string) ($result['error'] ?? 'Provider error'), 0, 1000), (int) $notification['id']]);
+                $this->db->table('announcement_notifications')
+                    ->where('id', (int) $notification['id'])
+                    ->update(['status' => 'failed', 'error_message' => substr((string) ($result['error'] ?? 'Provider error'), 0, 1000)]);
                 $results['failed']++;
             }
         }
@@ -104,21 +118,25 @@ class NotificationService
         if (!$this->tableExists('announcement_notifications')) {
             return [];
         }
-        $where = [];
-        $values = [];
+        $query = $this->db->table('announcement_notifications')
+            ->select('announcement_notifications.id, announcement_notifications.channel, announcement_notifications.recipient, announcement_notifications.status, announcement_notifications.error_message, announcement_notifications.sent_at, announcement_notifications.created_at, announcements.title, trainees.first_name, trainees.last_name')
+            ->join('announcements', 'announcements.announcement_id = announcement_notifications.announcement_id')
+            ->join('trainees', 'trainees.trainee_id = announcement_notifications.trainee_id');
         if (!empty($filters['channel']) && $filters['channel'] === 'email') {
-            $where[] = 'n.channel = ?';
-            $values[] = $filters['channel'];
+            $query->where('announcement_notifications.channel', $filters['channel']);
         }
         if (!empty($filters['status']) && in_array($filters['status'], ['pending', 'sent', 'failed'], true)) {
-            $where[] = 'n.status = ?';
-            $values[] = $filters['status'];
+            $query->where('announcement_notifications.status', $filters['status']);
         }
-        $sql = 'SELECT n.id, n.channel, n.recipient, n.status, n.error_message, n.sent_at, n.created_at, a.title, CONCAT(t.first_name, " ", t.last_name) AS trainee_name FROM announcement_notifications n JOIN announcements a ON a.announcement_id = n.announcement_id JOIN trainees t ON t.trainee_id = n.trainee_id';
-        if ($where) {
-            $sql .= ' WHERE ' . implode(' AND ', $where);
+        $rows = $query->order_by('announcement_notifications.created_at', 'DESC')
+            ->limit(500)
+            ->get_all();
+        foreach ($rows as &$row) {
+            $row['trainee_name'] = trim($row['first_name'] . ' ' . $row['last_name']);
+            unset($row['first_name'], $row['last_name']);
         }
-        return $this->rows($sql . ' ORDER BY n.created_at DESC LIMIT 500', $values);
+        unset($row);
+        return $rows;
     }
 
     private function emailHtml(array $announcement)

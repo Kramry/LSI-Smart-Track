@@ -55,6 +55,15 @@ class Errors
 		$template = ! empty($template) ? $template : 'error_404';
 		$heading =  ! empty($heading) ? $heading : '404 Page Not Found';
 		$message =  ! empty($message) ? $message : 'The page you requested was not found.';
+		if ($this->is_api_request()) {
+			http_response_code(404);
+			header('Content-Type: application/json; charset=UTF-8');
+			echo json_encode([
+				'ok' => false,
+				'message' => 'The requested API endpoint was not found. Please verify the backend deployment and sign in again.'
+			], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+			exit;
+		}
 		$this->show_error($heading, $message, $template, 404);
 	}
 
@@ -69,6 +78,15 @@ class Errors
 	 */
 	public function show_error($heading, $message, $template, $code = 500)
 	{
+		if ($this->is_api_request()) {
+			http_response_code($code);
+			header('Content-Type: application/json; charset=UTF-8');
+			echo json_encode([
+				'ok' => false,
+				'message' => $message ?: 'The API request failed. Please try again later.'
+			], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+			exit;
+		}
 		$template_path = config_item('error_view_path');
 		if (empty($template_path))
 		{
@@ -78,6 +96,12 @@ class Errors
 		http_response_code($code);
 		require_once($template_path.$template.'.php');
 		exit();
+	}
+
+	private function is_api_request()
+	{
+		$request_path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+		return is_string($request_path) && preg_match('#(?:^|/)api(?:/|$)#', $request_path) === 1;
 	}
 
 	/**

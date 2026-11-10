@@ -233,33 +233,37 @@ class Api
     /**
      * API body
      *
-     * @return void
+     * @param boolean $sanitize Whether to HTML-escape string values
+     * @return array
      */
-    public function body()
+    public function body($sanitize = true)
     {
         $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
 
         if (stripos($contentType, 'application/json') !== false) {
             $input = json_decode(file_get_contents('php://input'), true);
-            return is_array($input) ? $this->sanitize_input($input) : [];
+            $input = is_array($input) ? $input : [];
+            return $sanitize ? $this->sanitize_input($input) : $input;
         }
 
         if ($_POST) {
-            return $this->sanitize_input($_POST);
+            return $sanitize ? $this->sanitize_input($_POST) : $_POST;
         }
 
         parse_str(file_get_contents('php://input'), $formData);
-        return $this->sanitize_input($formData ?? []);
+        $formData = $formData ?? [];
+        return $sanitize ? $this->sanitize_input($formData) : $formData;
     }
 
     /**
      * get_query_params
      *
-     * @return void
+     * @param boolean $sanitize Whether to HTML-escape string values
+     * @return array
      */
-    public function get_query_params()
+    public function get_query_params($sanitize = true)
     {
-        return $this->sanitize_input($_GET);
+        return $sanitize ? $this->sanitize_input($_GET) : $_GET;
     }
 
     /**
@@ -384,7 +388,11 @@ class Api
     public function respond($data, $code = 200)
     {
         http_response_code($code);
-        echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        header('Content-Type: application/json; charset=UTF-8');
+        echo json_encode(
+            $data,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+        );
         exit;
     }
 

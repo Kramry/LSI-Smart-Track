@@ -202,7 +202,6 @@ $labels = [
                             <label>Password<input type="password" name="password" autocomplete="new-password" required minlength="10" placeholder="Password"></label>
                             <label>Confirm password<input type="password" name="password_confirmation" autocomplete="new-password" required minlength="10" placeholder="Confirm password"></label>
                         </div>
-                        <label>Role<select name="role" required><option value="trainee">Trainee</option><option value="instructor">Instructor</option><option value="staff">Staff</option></select></label>
                         <button class="button primary" type="submit">Create account <span aria-hidden="true">&#8599;</span></button>
                     </form>
                     <a class="setup-link" href="<?= $e(

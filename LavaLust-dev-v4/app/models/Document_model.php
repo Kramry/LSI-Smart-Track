@@ -5,9 +5,95 @@ require_once APP_DIR . 'models/Base_model.php';
 
 class Document_model extends Base_model
 {
+    public function traineeById($traineeId)
+    {
+        return $this->db->table('trainees')
+            ->select('trainee_id')
+            ->where('trainee_id', (int) $traineeId)
+            ->get() ?: null;
+    }
+
+    public function classForDocumentScope($classId, $instructorId = null)
+    {
+        $query = $this->db->table('training_classes')
+            ->select('class_id')
+            ->where('class_id', (int) $classId);
+        if ($instructorId !== null) {
+            $query->where('instructor_id', (int) $instructorId);
+        }
+        return $query->get() ?: null;
+    }
+
+    public function instructorOwnsClass($classId, $instructorId)
+    {
+        return (bool) $this->classForDocumentScope($classId, $instructorId);
+    }
+
+    public function traineeEnrolledInClass($classId, $userId)
+    {
+        return (bool) $this->db->table('class_enrollments e')
+            ->select('e.enrollment_id')
+            ->join('trainees t', 't.trainee_id = e.trainee_id')
+            ->where('e.class_id', (int) $classId)
+            ->where('t.user_id', (int) $userId)
+            ->get();
+    }
+
+    public function createUploadedDocument(array $document)
+    {
+        return $this->execute(
+            'INSERT INTO trainee_documents (trainee_id, class_id, uploaded_by, document_name, file_path, upload_date, status, review_status, access_level) VALUES (?, ?, ?, ?, ?, CURDATE(), ?, ?, ?)',
+            [
+                $document['trainee_id'],
+                $document['class_id'],
+                (int) $document['uploaded_by'],
+                $document['document_name'],
+                $document['file_path'],
+                $document['status'],
+                $document['review_status'],
+                $document['access_level'],
+            ]
+        );
+    }
+
+    public function deleteDocument($documentId)
+    {
+        return $this->db->table('trainee_documents')
+            ->where('document_id', (int) $documentId)
+            ->delete();
+    }
+
+    public function updateDocumentStatus($documentId, $status)
+    {
+        return $this->db->table('trainee_documents')
+            ->where('document_id', (int) $documentId)
+            ->update(['status' => $status]);
+    }
+
+    public function reviewDocument($documentId, $decision, $reviewedBy)
+    {
+        return $this->execute(
+            'UPDATE trainee_documents SET review_status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE document_id = ?',
+            [$decision, (int) $reviewedBy, (int) $documentId]
+        );
+    }
+
+    public function classById($classId)
+    {
+        return $this->db->table('training_classes')
+            ->select('class_id')
+            ->where('class_id', (int) $classId)
+            ->get() ?: null;
+    }
+
     public function documentById($id)
     {
-        return $this->row('SELECT d.*, t.user_id AS trainee_user_id FROM trainee_documents d LEFT JOIN trainees t ON t.trainee_id = d.trainee_id WHERE d.document_id = ? LIMIT 1', [(int) $id]);
+        return $this->db->table('trainee_documents d')
+            ->select('d.*, t.user_id AS trainee_user_id')
+            ->left_join('trainees t', 't.trainee_id = d.trainee_id')
+            ->where('d.document_id', (int) $id)
+            ->limit(1)
+            ->get() ?: null;
     }
 
     public function documentStats(array $user)
@@ -16,20 +102,29 @@ class Document_model extends Base_model
 
         if ($isAdminOrStaff) {
             return [
-                'total' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents")['total'] ?? 0),
-                'active' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE status = 'active'")['total'] ?? 0),
-                'archived' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE status = 'archived'")['total'] ?? 0),
-                'pending_review' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE trainee_id IS NOT NULL AND review_status = 'pending'")['total'] ?? 0),
-                'private' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE access_level = 'private'")['total'] ?? 0),
-                'class' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE access_level = 'class'")['total'] ?? 0),
-                'staff' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents WHERE access_level = 'staff'")['total'] ?? 0),
+                'total' => (int) $this->db->table('trainee_documents')->count(),
+                'active' => (int) $this->db->table('trainee_documents')->where('status', 'active')->count(),
+                'archived' => (int) $this->db->table('trainee_documents')->where('status', 'archived')->count(),
+                'pending_review' => (int) $this->db->table('trainee_documents')->where_not_null('trainee_id')->where('review_status', 'pending')->count(),
+                'private' => (int) $this->db->table('trainee_documents')->where('access_level', 'private')->count(),
+                'class' => (int) $this->db->table('trainee_documents')->where('access_level', 'class')->count(),
+                'staff' => (int) $this->db->table('trainee_documents')->where('access_level', 'staff')->count(),
             ];
         }
 
         if ($user['role'] === 'instructor') {
             return [
-                'total' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents d JOIN training_classes c ON c.class_id = d.class_id WHERE c.instructor_id = ?", [(int) $user['user_id']])['total'] ?? 0),
-                'active' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainee_documents d JOIN training_classes c ON c.class_id = d.class_id WHERE c.instructor_id = ? AND d.status = 'active'", [(int) $user['user_id']])['total'] ?? 0),
+                'total' => (int) ($this->db->table('trainee_documents d')
+                    ->select_count('d.document_id', 'total')
+                    ->join('training_classes c', 'c.class_id = d.class_id')
+                    ->where('c.instructor_id', (int) $user['user_id'])
+                    ->get()['total'] ?? 0),
+                'active' => (int) ($this->db->table('trainee_documents d')
+                    ->select_count('d.document_id', 'total')
+                    ->join('training_classes c', 'c.class_id = d.class_id')
+                    ->where('c.instructor_id', (int) $user['user_id'])
+                    ->where('d.status', 'active')
+                    ->get()['total'] ?? 0),
             ];
         }
 
@@ -145,22 +240,43 @@ class Document_model extends Base_model
 
     public function traineeRequirementById($requirementId, $userId)
     {
-        return $this->row('SELECT r.requirement_id, r.class_id, r.required_document_name FROM certificate_document_requirements r JOIN class_enrollments e ON e.class_id = r.class_id JOIN trainees t ON t.trainee_id = e.trainee_id WHERE r.requirement_id = ? AND t.user_id = ? LIMIT 1', [(int) $requirementId, (int) $userId]);
+        return $this->db->table('certificate_document_requirements r')
+            ->select('r.requirement_id, r.class_id, r.required_document_name')
+            ->join('class_enrollments e', 'e.class_id = r.class_id')
+            ->join('trainees t', 't.trainee_id = e.trainee_id')
+            ->where('r.requirement_id', (int) $requirementId)
+            ->where('t.user_id', (int) $userId)
+            ->limit(1)
+            ->get() ?: null;
+    }
+
+    public function requirementClassById($requirementId)
+    {
+        return $this->db->table('certificate_document_requirements')
+            ->select('class_id')
+            ->where('requirement_id', (int) $requirementId)
+            ->get() ?: null;
     }
 
     public function addDocumentRequirement($classId, $documentName, $createdBy)
     {
-        $this->execute('INSERT INTO certificate_document_requirements (class_id, required_document_name, created_by) VALUES (?, ?, ?)', [
-            (int) $classId,
-            $documentName,
-            (int) $createdBy,
+        $this->db->table('certificate_document_requirements')->insert([
+            'class_id' => (int) $classId,
+            'required_document_name' => $documentName,
+            'created_by' => (int) $createdBy,
         ]);
-        $requirement = $this->row('SELECT requirement_id FROM certificate_document_requirements WHERE class_id = ? AND required_document_name = ?', [(int) $classId, $documentName]);
+        $requirement = $this->db->table('certificate_document_requirements')
+            ->select('requirement_id')
+            ->where('class_id', (int) $classId)
+            ->where('required_document_name', $documentName)
+            ->get();
         return (int) ($requirement['requirement_id'] ?? 0);
     }
 
     public function deleteDocumentRequirement($requirementId)
     {
-        return $this->execute('DELETE FROM certificate_document_requirements WHERE requirement_id = ?', [(int) $requirementId]);
+        return $this->db->table('certificate_document_requirements')
+            ->where('requirement_id', (int) $requirementId)
+            ->delete();
     }
 }

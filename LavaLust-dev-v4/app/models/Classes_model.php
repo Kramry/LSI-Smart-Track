@@ -61,14 +61,54 @@ class Classes_model extends Base_model
 
     public function classById($classId, array $user)
     {
-        $roomSelect = $this->columnExists('training_classes', 'room') ? 'c.room' : 'NULL AS room';
-        $sql = "SELECT c.class_id, c.class_name, {$roomSelect}, c.start_date, c.end_date, c.status, c.instructor_id, p.program_id, p.program_name FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id WHERE c.class_id = ?";
-        $values = [(int) $classId];
-        if (($user['role'] ?? '') === 'instructor') {
-            $sql .= ' AND c.instructor_id = ?';
-            $values[] = (int) $user['user_id'];
+        if (!$this->columnExists('training_classes', 'room')) {
+            $sql = 'SELECT c.class_id, c.class_name, NULL AS room, c.start_date, c.end_date, c.status, c.instructor_id, p.program_id, p.program_name FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id WHERE c.class_id = ?';
+            $values = [(int) $classId];
+            if (($user['role'] ?? '') === 'instructor') {
+                $sql .= ' AND c.instructor_id = ?';
+                $values[] = (int) $user['user_id'];
+            }
+            return $this->row($sql, $values);
         }
-        return $this->row($sql, $values);
+
+        $query = $this->db->table('training_classes c')
+            ->select('c.class_id, c.class_name, c.room, c.start_date, c.end_date, c.status, c.instructor_id, p.program_id, p.program_name')
+            ->join('training_programs p', 'p.program_id = c.program_id')
+            ->where('c.class_id', (int) $classId);
+        if (($user['role'] ?? '') === 'instructor') {
+            $query->where('c.instructor_id', (int) $user['user_id']);
+        }
+        return $query->get() ?: null;
+    }
+
+    public function createClass(array $data)
+    {
+        return $this->db->table('training_classes')->insert($this->classFields($data));
+    }
+
+    public function updateClass($classId, array $data)
+    {
+        return $this->db->table('training_classes')
+            ->where('class_id', (int) $classId)
+            ->update($this->classFields($data));
+    }
+
+    public function deleteClass($classId)
+    {
+        return $this->db->table('training_classes')
+            ->where('class_id', (int) $classId)
+            ->delete();
+    }
+
+    private function classFields(array $data)
+    {
+        $fields = [];
+        foreach (['class_name', 'program_id', 'instructor_id', 'start_date', 'end_date', 'status'] as $field) {
+            if (array_key_exists($field, $data)) {
+                $fields[$field] = $data[$field];
+            }
+        }
+        return $fields;
     }
 
     public function schedules($classId)
@@ -146,12 +186,12 @@ class Classes_model extends Base_model
         if (!$this->columnExists('announcements', 'class_id')) {
             return [];
         }
-        return $this->rows(
-            'SELECT a.announcement_id, a.title, a.content, a.created_at, a.status, u.full_name AS author
-             FROM announcements a LEFT JOIN users u ON u.user_id = a.user_id
-             WHERE a.class_id = ? ORDER BY a.created_at DESC',
-            [(int) $classId]
-        );
+        return $this->db->table('announcements a')
+            ->select('a.announcement_id, a.title, a.content, a.created_at, a.status, u.full_name AS author')
+            ->left_join('users u', 'u.user_id = a.user_id')
+            ->where('a.class_id', (int) $classId)
+            ->order_by('a.created_at', 'DESC')
+            ->get_all();
     }
 
     public function quickStats($classId)

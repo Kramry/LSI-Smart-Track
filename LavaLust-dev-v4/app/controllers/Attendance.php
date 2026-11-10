@@ -52,8 +52,10 @@ class Attendance extends Base
             }
             $this->jsonResponse(['message' => 'That class is not available to your account.'], 404);
         }
-        $qrTrainee = $this->model->row('SELECT trainee_id FROM trainees WHERE qr_code = ? AND status = \'active\'', [$qrCode]);
-        $enrolled = $qrTrainee ? $this->model->row('SELECT enrollment_id FROM class_enrollments WHERE class_id = ? AND trainee_id = ?', [(int) $classId, (int) $qrTrainee['trainee_id']]) : null;
+        $qrTrainee = $this->attendanceModel->activeTraineeByQrCode($qrCode);
+        $enrolled = $qrTrainee
+            ? $this->attendanceModel->enrollmentForClass((int) $classId, (int) $qrTrainee['trainee_id'])
+            : null;
         if (!$enrolled) {
             if ($this->apiRequest) {
                 $this->jsonResponse([
@@ -63,7 +65,7 @@ class Attendance extends Base
             }
             return $this->actionError('That trainee is not enrolled in the selected class.', 'manage/attendance');
         }
-        if ($scheduleId && !$this->model->row('SELECT schedule_id FROM training_schedules WHERE schedule_id = ? AND class_id = ? AND schedule_date = CURDATE()', [(int) $scheduleId, (int) $classId])) {
+        if ($scheduleId && !$this->attendanceModel->scheduleForToday((int) $scheduleId, (int) $classId)) {
             if ($this->apiRequest) {
                 $this->jsonResponse([
                     'message' => 'Choose a session scheduled for this class today.',

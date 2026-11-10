@@ -22,7 +22,10 @@ class Dashboard_model extends Base_model
             }
             return [
                 'trainees' => 1,
-                'programs' => (int) ($this->row('SELECT COUNT(DISTINCT program_id) AS total FROM trainees WHERE user_id = ?', [(int) $user['user_id']])['total'] ?? 0),
+                'programs' => (int) ($this->db->table('trainees')
+                    ->select('COUNT(DISTINCT program_id) AS total')
+                    ->where('user_id', (int) $user['user_id'])
+                    ->row_array()['total'] ?? 0),
                 'present_today' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE trainee_id = ? AND attendance_date = CURDATE() AND status IN ('Present', 'Late')", [(int) $trainee['trainee_id']])['total'] ?? 0),
                 'follow_up' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE trainee_id = ? AND status = 'Absent' AND attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)", [(int) $trainee['trainee_id']])['total'] ?? 0),
             ];
@@ -30,15 +33,31 @@ class Dashboard_model extends Base_model
         if ($user['role'] === 'instructor') {
             $id = (int) $user['user_id'];
             return [
-                'trainees' => (int) ($this->row("SELECT COUNT(DISTINCT t.trainee_id) AS total FROM trainees t JOIN class_enrollments e ON e.trainee_id = t.trainee_id JOIN training_classes c ON c.class_id = e.class_id WHERE c.instructor_id = ? AND t.status = 'active'", [$id])['total'] ?? 0),
-                'programs' => (int) ($this->row("SELECT COUNT(DISTINCT program_id) AS total FROM training_classes WHERE instructor_id = ? AND status = 'active'", [$id])['total'] ?? 0),
+                'trainees' => (int) ($this->db->table('trainees t')
+                    ->select('COUNT(DISTINCT t.trainee_id) AS total')
+                    ->join('class_enrollments e', 'e.trainee_id = t.trainee_id')
+                    ->join('training_classes c', 'c.class_id = e.class_id')
+                    ->where('c.instructor_id', $id)
+                    ->where('t.status', 'active')
+                    ->row_array()['total'] ?? 0),
+                'programs' => (int) ($this->db->table('training_classes')
+                    ->select('COUNT(DISTINCT program_id) AS total')
+                    ->where('instructor_id', $id)
+                    ->where('status', 'active')
+                    ->row_array()['total'] ?? 0),
                 'present_today' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records a JOIN training_classes c ON c.class_id = a.class_id WHERE c.instructor_id = ? AND a.attendance_date = CURDATE() AND a.status IN ('Present', 'Late')", [$id])['total'] ?? 0),
                 'follow_up' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records a JOIN training_classes c ON c.class_id = a.class_id WHERE c.instructor_id = ? AND a.status = 'Absent' AND a.attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)", [$id])['total'] ?? 0),
             ];
         }
         return [
-            'trainees' => (int) ($this->row("SELECT COUNT(*) AS total FROM trainees WHERE status = 'active'")['total'] ?? 0),
-            'programs' => (int) ($this->row("SELECT COUNT(*) AS total FROM training_programs WHERE status = 'active'")['total'] ?? 0),
+            'trainees' => (int) ($this->db->table('trainees')
+                ->select('COUNT(*) AS total')
+                ->where('status', 'active')
+                ->row_array()['total'] ?? 0),
+            'programs' => (int) ($this->db->table('training_programs')
+                ->select('COUNT(*) AS total')
+                ->where('status', 'active')
+                ->row_array()['total'] ?? 0),
             'present_today' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE attendance_date = CURDATE() AND status IN ('Present', 'Late')")['total'] ?? 0),
             'follow_up' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE status = 'Absent' AND attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)")['total'] ?? 0),
         ];
@@ -62,9 +81,12 @@ class Dashboard_model extends Base_model
 
     public function announcements()
     {
-        return $this->rows(
-            "SELECT announcement_id, title, content, created_at FROM announcements WHERE status = 'published' ORDER BY created_at DESC LIMIT 5"
-        );
+        return $this->db->table('announcements')
+            ->select('announcement_id, title, content, created_at')
+            ->where('status', 'published')
+            ->order_by('created_at', 'DESC')
+            ->limit(5)
+            ->result_array();
     }
 
     public function dashboardChartData(array $user)
@@ -78,15 +100,15 @@ class Dashboard_model extends Base_model
             $date = date('Y-m-d', strtotime("-$i days"));
             $dateLabel = date('M j', strtotime("-$i days"));
 
-            $sql = "SELECT COUNT(*) AS total FROM attendance_records WHERE attendance_date = ?";
-            $values = [$date];
-
+            $query = $this->db->table('attendance_records a')
+                ->select('COUNT(*) AS total')
+                ->where('a.attendance_date', $date);
             if ($isInstructor) {
-                $sql .= " AND class_id IN (SELECT class_id FROM training_classes WHERE instructor_id = ?)";
-                $values[] = (int) $user['user_id'];
+                $query->join('training_classes c', 'c.class_id = a.class_id')
+                    ->where('c.instructor_id', (int) $user['user_id']);
             }
 
-            $total = (int) ($this->row($sql, $values)['total'] ?? 0);
+            $total = (int) ($query->row_array()['total'] ?? 0);
 
             $weeklyData[] = [
                 'date' => $dateLabel,
@@ -120,17 +142,14 @@ class Dashboard_model extends Base_model
         // Program-level statistics (admin/staff only)
         $programData = [];
         if ($isAdminOrStaff) {
-            $programRows = $this->rows(
-                "SELECT p.program_id, p.program_name, p.program_code,
-                        COUNT(DISTINCT t.trainee_id) AS trainee_count,
-                        COUNT(DISTINCT a.attendance_id) AS attendance_count
-                 FROM training_programs p
-                 LEFT JOIN trainees t ON t.program_id = p.program_id AND t.status = 'active'
-                 LEFT JOIN attendance_records a ON t.trainee_id = a.trainee_id
-                 WHERE p.status = 'active'
-                 GROUP BY p.program_id, p.program_name, p.program_code
-                 ORDER BY attendance_count DESC"
-            );
+            $programRows = $this->db->table('training_programs p')
+                ->select('p.program_id, p.program_name, p.program_code, COUNT(DISTINCT t.trainee_id) AS trainee_count, COUNT(DISTINCT a.attendance_id) AS attendance_count')
+                ->left_join('trainees t', "t.program_id = p.program_id AND t.status = 'active'")
+                ->left_join('attendance_records a', 't.trainee_id = a.trainee_id')
+                ->where('p.status', 'active')
+                ->group_by(['p.program_id', 'p.program_name', 'p.program_code'])
+                ->order_by('attendance_count', 'DESC')
+                ->result_array();
 
             foreach ($programRows as $row) {
                 $programData[] = [

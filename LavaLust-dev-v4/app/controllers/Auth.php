@@ -101,7 +101,6 @@ class Auth extends Base
         $programId = trim((string) $this->input('program_id'));
         $password = (string) $this->input('password');
         $passwordConfirmation = (string) $this->input('password_confirmation');
-        $role = trim((string) $this->input('role'));
 
         if ($name === '' || !preg_match('/^[A-Za-z0-9_.-]{4,50}$/', $username) || strlen($password) < 10) {
             $this->render('register', ['error' => 'Enter a name, a username of 4-50 valid characters, and a password with at least 10 characters.']);
@@ -111,10 +110,6 @@ class Auth extends Base
         if ($password !== $passwordConfirmation) {
             $this->render('register', ['error' => 'Passwords do not match.']);
             return;
-        }
-
-        if (!in_array($role, ['trainee', 'instructor', 'staff'], true)) {
-            $role = 'trainee';
         }
 
         if ($this->userModel->userByUsername($username)) {
@@ -127,22 +122,20 @@ class Auth extends Base
             return;
         }
 
-        $this->userModel->createUser($name, $username, $password, $role, $email !== '' ? $email : null);
+        $this->userModel->createUser($name, $username, $password, 'trainee', $email !== '' ? $email : null);
         $account = $this->userModel->userByUsername($username);
 
-        if ($role === 'trainee' || $sex !== '' || $dateOfBirth !== '' || $address !== '' || $contactNumber !== '' || $course !== '' || $programId !== '') {
-            $this->userModel->createTraineeForUser((int) $account['user_id'], [
-                'first_name' => $name,
-                'last_name' => '',
-                'sex' => $sex,
-                'date_of_birth' => $dateOfBirth !== '' ? $dateOfBirth : null,
-                'address' => $address !== '' ? $address : null,
-                'email' => $email !== '' ? $email : null,
-                'contact_number' => $contactNumber !== '' ? $contactNumber : null,
-                'course' => $course !== '' ? $course : null,
-                'program_id' => $programId !== '' ? (int) $programId : null,
-            ]);
-        }
+        $this->userModel->createTraineeForUser((int) $account['user_id'], [
+            'first_name' => $name,
+            'last_name' => '',
+            'sex' => $sex,
+            'date_of_birth' => $dateOfBirth !== '' ? $dateOfBirth : null,
+            'address' => $address !== '' ? $address : null,
+            'email' => $email !== '' ? $email : null,
+            'contact_number' => $contactNumber !== '' ? $contactNumber : null,
+            'course' => $course !== '' ? $course : null,
+            'program_id' => $programId !== '' ? (int) $programId : null,
+        ]);
 
         $this->notice('Account created successfully. Please sign in.');
         redirect($this->url(''));

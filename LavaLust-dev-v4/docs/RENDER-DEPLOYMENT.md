@@ -52,6 +52,8 @@ Set these in **Render → Environment** (they are not read from a file):
 | `DB_NAME` | database name |
 | `DB_CHARSET` | `utf8mb4` |
 | `BASE_URL` | `https://lsi-smart-track.onrender.com` |
+| `JWT_SECRET` | any long random string required by the LavaLust API helper |
+| `REFRESH_TOKEN_KEY` | a different long random string used to hash refresh tokens |
 | `SMARTTRACK_FRONTEND_URL` | `https://lsi-vue-frontend.onrender.com` |
 | `SMARTTRACK_FRONTEND_ORIGIN` | `https://lsi-vue-frontend.onrender.com` |
 | `SESSION_COOKIE_SAMESITE` | `None` |

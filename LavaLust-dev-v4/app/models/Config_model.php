@@ -7,17 +7,27 @@ class Config_model extends Base_model
 {
     public function getConfig($key, $default = null)
     {
-        $config = $this->row('SELECT config_value FROM certificate_config WHERE config_key = ?', [$key]);
+        $config = $this->db->table('certificate_config')
+            ->select('config_value')
+            ->where('config_key', $key)
+            ->get();
         return $config ? $config['config_value'] : $default;
     }
 
     public function updateConfig($key, $value, $description = null)
     {
-        $check = $this->row('SELECT config_id FROM certificate_config WHERE config_key = ?', [$key]);
+        $check = $this->db->table('certificate_config')
+            ->select('config_id')
+            ->where('config_key', $key)
+            ->get();
         if ($check) {
             $this->execute('UPDATE certificate_config SET config_value = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE config_key = ?', [$value, $description, $key]);
         } else {
-            $this->execute('INSERT INTO certificate_config (config_key, config_value, description) VALUES (?, ?, ?)', [$key, $value, $description]);
+            $this->db->table('certificate_config')->insert([
+                'config_key' => $key,
+                'config_value' => $value,
+                'description' => $description,
+            ]);
         }
     }
 }

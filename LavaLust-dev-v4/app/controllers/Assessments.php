@@ -12,8 +12,9 @@ class Assessments extends Base
         }
 
         $editing = null;
-        if (array_key_exists('edit', $_GET)) {
-            $editId = is_scalar($_GET['edit']) ? (string) $_GET['edit'] : '';
+        $query = $this->queryParams();
+        if (array_key_exists('edit', $query)) {
+            $editId = is_scalar($query['edit']) ? (string) $query['edit'] : '';
             if (!ctype_digit($editId) || !(int) $editId || !($editing = $this->assessmentModel->assessmentById((int) $editId))) {
                 show_404();
                 return;
@@ -27,11 +28,11 @@ class Assessments extends Base
             'primary_key' => 'assessment_id',
             'options' => [
                 'trainees' => $this->recordModel->options('trainees', $this->user),
-                'classes' => $this->recordModel->rows('SELECT class_id AS id, class_name AS label FROM training_classes ORDER BY class_name'),
+                'classes' => $this->assessmentModel->classOptions(),
             ],
             'columns' => ['trainee_name', 'trainee_number', 'program_name', 'class_name', 'assessment_name', 'outcome', 'assessment_date', 'assessor_name', 'notes'],
-            'assessment_class_id' => is_scalar($_GET['class_id'] ?? '') && ctype_digit((string) ($_GET['class_id'] ?? ''))
-                ? (int) $_GET['class_id']
+            'assessment_class_id' => is_scalar($query['class_id'] ?? '') && ctype_digit((string) ($query['class_id'] ?? ''))
+                ? (int) $query['class_id']
                 : 0,
         ]);
     }
@@ -56,7 +57,7 @@ class Assessments extends Base
                 return $this->actionError('The assessment record could not be found.', 'manage/assessments', 404);
             }
         }
-        $enrollment = $this->recordModel->row('SELECT enrollment_id FROM class_enrollments WHERE trainee_id = ? AND class_id = ?', [$traineeId, $classId]);
+        $enrollment = $this->assessmentModel->enrollmentForTraineeClass($traineeId, $classId);
         if ($this->user['role'] === 'instructor' && !$this->attendanceModel->attendanceClass($classId, $this->user)) {
             return $this->actionError('That class is not assigned to your instructor account.', 'manage/assessments', 403);
         }
@@ -79,12 +80,7 @@ class Assessments extends Base
         }
 
         $duplicate = $editing
-            ? $this->recordModel->row('SELECT assessment_id FROM training_assessments WHERE trainee_id = ? AND class_id = ? AND assessment_name = ? AND assessment_id <> ?', [
-                $traineeId,
-                $classId,
-                $name,
-                (int) $editing['assessment_id'],
-            ])
+            ? $this->assessmentModel->duplicateAssessment($traineeId, $classId, $name, (int) $editing['assessment_id'])
             : null;
         if ($duplicate) {
             return $this->actionError('That trainee already has an assessment with this name in the selected class.', 'manage/assessments');

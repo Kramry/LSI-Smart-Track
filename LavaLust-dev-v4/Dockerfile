@@ -3,7 +3,8 @@ ARG PHP_VERSION=8.5
 FROM php:${PHP_VERSION}-apache
 
 # The SmartTrack schema and every query in SmartTrack_model are MySQL specific.
-RUN docker-php-ext-install pdo pdo_mysql
+# Xendit and Gemini both use cURL, so install it in the backend image as well.
+RUN docker-php-ext-install pdo pdo_mysql curl
 
 # mod_rewrite drives the fronilet controller routes (/login, /manage/..., /documents/...).
 RUN a2enmod rewrite headers

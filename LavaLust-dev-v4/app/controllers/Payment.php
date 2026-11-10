@@ -88,8 +88,8 @@ class Payment extends Base
         if ($expected === '' || !hash_equals($expected, $provided)) {
             return $this->jsonResponse(['message' => 'Invalid webhook token.'], 401);
         }
-        $payload = json_decode((string) file_get_contents('php://input'), true);
-        if (!is_array($payload)) {
+        $payload = $this->apiLibrary()->body(false);
+        if (!$payload) {
             return $this->jsonResponse(['message' => 'Invalid webhook payload.'], 400);
         }
         $eventData = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
@@ -116,7 +116,8 @@ class Payment extends Base
         if (!$this->requireUser() || ($this->user['role'] ?? '') !== 'trainee') {
             return $this->jsonResponse(['message' => 'Only trainees can check their online payments.'], 403);
         }
-        $reference = trim((string) ($_GET['reference_id'] ?? ''));
+        $query = $this->apiLibrary()->get_query_params(false);
+        $reference = trim((string) ($query['reference_id'] ?? ''));
         if ($reference === '') {
             return $this->jsonResponse(['message' => 'Payment reference is required.'], 422);
         }
@@ -240,7 +241,8 @@ class Payment extends Base
         }
 
         $this->paymentModel->synchronizeEnrollmentFees();
-        $view = is_scalar($_GET['view'] ?? null) ? (string) $_GET['view'] : 'cashier';
+        $query = $this->queryParams();
+        $view = is_scalar($query['view'] ?? null) ? (string) $query['view'] : 'cashier';
         if (!in_array($view, ['cashier', 'fees', 'bonds', 'reports'], true)) {
             return $this->jsonResponse(['message' => 'Choose a valid payment section.'], 422);
         }
@@ -251,13 +253,13 @@ class Payment extends Base
             $data['recent_payments'] = $this->paymentModel->recentPayments();
         } elseif ($view === 'fees') {
             $data['fee_types'] = $this->paymentModel->feeTypes();
-            $data['programs'] = $this->recordModel->rows('SELECT program_id, program_name FROM training_programs ORDER BY program_name');
-            $data['classes'] = $this->recordModel->rows('SELECT c.class_id, c.class_name, c.program_id, p.program_name FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id ORDER BY p.program_name, c.class_name');
+            $data['programs'] = $this->paymentModel->feeSetupPrograms();
+            $data['classes'] = $this->paymentModel->feeSetupClasses();
         } elseif ($view === 'bonds') {
             $data['bonds'] = $this->paymentModel->bondTransactions();
         } else {
-            $start = $this->validDateInput($_GET['start_date'] ?? '') ?: date('Y-m-01');
-            $end = $this->validDateInput($_GET['end_date'] ?? '') ?: date('Y-m-d');
+            $start = $this->validDateInput($query['start_date'] ?? '') ?: date('Y-m-01');
+            $end = $this->validDateInput($query['end_date'] ?? '') ?: date('Y-m-d');
             if ($start > $end) {
                 return $this->jsonResponse(['message' => 'The report start date must be before its end date.'], 422);
             }
@@ -282,7 +284,8 @@ class Payment extends Base
         }
 
         $this->paymentModel->synchronizeEnrollmentFees();
-        $view = is_scalar($_GET['view'] ?? null) ? (string) $_GET['view'] : 'cashier';
+        $query = $this->queryParams();
+        $view = is_scalar($query['view'] ?? null) ? (string) $query['view'] : 'cashier';
         if (!in_array($view, ['cashier', 'fees', 'bonds', 'reports'], true)) {
             $view = 'cashier';
         }
@@ -296,19 +299,19 @@ class Payment extends Base
             'bonds' => $view === 'bonds' ? $this->paymentModel->bondTransactions() : [],
             'summary' => $view === 'reports' ? $this->paymentModel->reportSummary() : [],
             'outstanding' => $view === 'reports' ? $this->paymentModel->outstandingReport() : [],
-            'programs' => $view === 'fees' ? $this->recordModel->rows('SELECT program_id, program_name FROM training_programs ORDER BY program_name') : [],
-            'classes' => $view === 'fees' ? $this->recordModel->rows('SELECT c.class_id, c.class_name, p.program_name FROM training_classes c JOIN training_programs p ON p.program_id = c.program_id ORDER BY p.program_name, c.class_name') : [],
+            'programs' => $view === 'fees' ? $this->paymentModel->feeSetupPrograms() : [],
+            'classes' => $view === 'fees' ? $this->paymentModel->feeSetupClasses(false) : [],
         ];
-        if ($view === 'fees' && isset($_GET['edit'])) {
-            $edit = is_scalar($_GET['edit']) ? (string) $_GET['edit'] : '';
+        if ($view === 'fees' && isset($query['edit'])) {
+            $edit = is_scalar($query['edit']) ? (string) $query['edit'] : '';
             if (!ctype_digit($edit) || !(int) $edit || !($data['editing_fee'] = $this->paymentModel->feeType((int) $edit))) {
                 show_404();
                 return;
             }
         }
         if ($view === 'reports') {
-            $start = $this->validDateInput($_GET['start_date'] ?? '') ?: date('Y-m-01');
-            $end = $this->validDateInput($_GET['end_date'] ?? '') ?: date('Y-m-d');
+            $start = $this->validDateInput($query['start_date'] ?? '') ?: date('Y-m-01');
+            $end = $this->validDateInput($query['end_date'] ?? '') ?: date('Y-m-d');
             $data['start_date'] = $start;
             $data['end_date'] = $end;
             $data['report_rows'] = $this->paymentModel->reportRows($start, $end);
@@ -367,8 +370,8 @@ class Payment extends Base
         $name = trim((string) $this->input('fee_name'));
         $amount = $this->validAmount($this->input('amount'));
         $dueDate = trim((string) $this->input('due_date'));
-        $program = $programId ? $this->recordModel->row('SELECT program_id FROM training_programs WHERE program_id = ?', [$programId]) : null;
-        $class = $classId ? $this->recordModel->row('SELECT class_id, program_id FROM training_classes WHERE class_id = ?', [$classId]) : null;
+        $program = $programId ? $this->paymentModel->feeSetupProgram($programId) : null;
+        $class = $classId ? $this->paymentModel->feeSetupClass($classId) : null;
         if (!$amount || $name === '' || mb_strlen($name) > 150 || !in_array($kind, ['registration', 'bond'], true)
             || (!$program && !$class) || ($program && $class && (int) $program['program_id'] !== (int) $class['program_id'])
             || ($programId && !$program) || ($classId && !$class) || ($dueDate !== '' && !$this->validDateInput($dueDate))) {
@@ -381,7 +384,7 @@ class Payment extends Base
             'fee_name' => $name,
             'amount' => $amount,
             'due_date' => $dueDate ?: null,
-            'required_for_certificate' => isset($_POST['required_for_certificate']) ? 1 : 0,
+            'required_for_certificate' => $this->input('required_for_certificate') ? 1 : 0,
             'is_active' => 1,
         ];
         $id = $this->paymentModel->saveFeeType($data, (int) $this->user['user_id'], $feeTypeId ? (int) $feeTypeId : null);
@@ -665,13 +668,14 @@ class Payment extends Base
         if (!$this->requireUser() || !$this->isPaymentStaff()) {
             return $this->deny('Only administrator or staff accounts can export payment reports.');
         }
-        $start = $this->validDateInput($_GET['start_date'] ?? '') ?: date('Y-m-01');
-        $end = $this->validDateInput($_GET['end_date'] ?? '') ?: date('Y-m-d');
+        $query = $this->queryParams();
+        $start = $this->validDateInput($query['start_date'] ?? '') ?: date('Y-m-01');
+        $end = $this->validDateInput($query['end_date'] ?? '') ?: date('Y-m-d');
         if ($start > $end) {
             return $this->actionError('The report start date must be before its end date.', 'payments?view=reports');
         }
-        $format = (string) ($_GET['format'] ?? 'csv');
-        $outstanding = (string) ($_GET['report'] ?? '') === 'outstanding';
+        $format = (string) ($query['format'] ?? 'csv');
+        $outstanding = (string) ($query['report'] ?? '') === 'outstanding';
         $rows = $outstanding ? $this->paymentModel->outstandingReport() : $this->paymentModel->reportRows($start, $end);
         if ($format === 'pdf') {
             $pdf = SmartTrackPdf::create('L');

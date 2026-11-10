@@ -19,7 +19,7 @@ class Analytics extends Base
         if (!$this->requireUser() || !$this->canViewAnalytics($this->user)) {
             return $this->deny('Analytics is available to administrator, staff, and instructor accounts.');
         }
-        $filters = $this->validatedFilters($_GET);
+        $filters = $this->validatedFilters($this->queryParams());
         if (!$filters['success']) {
             return $this->actionError($filters['message'], 'manage/analytics');
         }
@@ -44,15 +44,15 @@ class Analytics extends Base
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
             return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
-        $user = $this->user;
-        if (!$user) {
-            $user = $this->authenticatedApiUser();
+        if (!$this->requireUser()) {
+            return;
         }
+        $user = $this->user;
         if (!$this->canViewAnalytics($user)) {
             return $this->jsonResponse(['message' => 'Analytics is available to administrator, staff, and instructor accounts.'], 403);
         }
 
-        $result = $this->validatedFilters($_GET);
+        $result = $this->validatedFilters($this->queryParams());
         if (!$result['success']) {
             return $this->jsonResponse(['message' => $result['message']], 422);
         }
@@ -68,15 +68,15 @@ class Analytics extends Base
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
             return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
-        $user = $this->user;
-        if (!$user) {
-            $user = $this->authenticatedApiUser();
+        if (!$this->requireUser()) {
+            return;
         }
+        $user = $this->user;
         if (!$this->canViewAnalytics($user)) {
             return $this->jsonResponse(['message' => 'Analytics is available to administrator, staff, and instructor accounts.'], 403);
         }
 
-        $result = $this->validatedFilters($_GET);
+        $result = $this->validatedFilters($this->queryParams());
         if (!$result['success']) {
             return $this->jsonResponse(['message' => $result['message']], 422);
         }
@@ -102,15 +102,15 @@ class Analytics extends Base
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
         }
-        $user = $this->user;
-        if (!$user) {
-            $user = $this->authenticatedApiUser();
+        if (!$this->requireUser()) {
+            return;
         }
+        $user = $this->user;
         if (!$this->canViewAnalytics($user)) {
             return $this->jsonResponse(['message' => 'Analytics is available to administrator, staff, and instructor accounts.'], 403);
         }
 
-        $result = $this->validatedFilters($_GET);
+        $result = $this->validatedFilters($this->queryParams());
         if (!$result['success']) {
             return $this->jsonResponse(['message' => $result['message']], 422);
         }
@@ -162,19 +162,6 @@ class Analytics extends Base
             throw new RuntimeException('Gemini analytics rate limit directory is not writable.');
         }
         return $directory . DIRECTORY_SEPARATOR . hash('sha256', $key) . '.txt';
-    }
-
-    private function authenticatedApiUser()
-    {
-        $token = $this->apiLibrary()->require_jwt();
-        $customData = is_array($token['custom_data'] ?? null) ? $token['custom_data'] : [];
-
-        return [
-            'user_id' => isset($customData['user_id']) ? (int) $customData['user_id'] : (int) ($token['sub'] ?? 0),
-            'role' => isset($customData['role']) && is_string($customData['role'])
-                ? $customData['role']
-                : (string) ($token['role'] ?? ''),
-        ];
     }
 
     private function canViewAnalytics(array $user)
