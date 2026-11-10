@@ -1,5 +1,12 @@
 ARG PHP_VERSION=8.4
 
+FROM composer:2 AS vendor
+WORKDIR /app
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --optimize-autoloader --no-interaction
+RUN php vendor/tecnickcom/tc-lib-pdf-font/util/build_fonts.php \
+    && test -d vendor/tecnickcom/tc-lib-pdf-font/target/fonts
+
 FROM php:${PHP_VERSION}-apache
 
 # The SmartTrack schema and every query in SmartTrack_model are MySQL specific.
@@ -18,6 +25,7 @@ RUN sed -ri 's!^(\s*AllowOverride)\s+None!\1 All!g' /etc/apache2/apache2.conf
 
 # Application files
 COPY . /var/www/html/
+COPY --from=vendor /app/vendor/ /var/www/html/vendor/
 
 # Apache vhost: document root is public/, everything else is routed to the front controller.
 COPY docker/apache-smarttrack.conf /etc/apache2/sites-available/000-default.conf
