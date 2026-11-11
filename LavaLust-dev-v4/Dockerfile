@@ -13,9 +13,9 @@ FROM php:${PHP_VERSION}-apache
 # In the official PHP image, cURL is already available; attempting to rebuild it via
 # docker-php-ext-install can fail during deployment. Install only the MySQL PDO drivers.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libcurl4-openssl-dev \
+    && apt-get install -y --no-install-recommends libcurl4-openssl-dev libzip-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && docker-php-ext-install pdo pdo_mysql
+    && docker-php-ext-install pdo pdo_mysql zip
 
 # mod_rewrite drives the fronilet controller routes (/login, /manage/..., /documents/...).
 RUN a2enmod rewrite headers

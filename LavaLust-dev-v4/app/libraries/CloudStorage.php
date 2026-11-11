@@ -101,6 +101,23 @@ class CloudStorage
         return false;
     }
 
+    /** Download a private object to a temporary local path for processing. */
+    public function download($remotePath, $localPath)
+    {
+        if (!$this->isEnabled() || $this->provider !== 'aws') return false;
+        try {
+            $this->s3Client()->getObject([
+                'Bucket' => $this->config['bucket'],
+                'Key' => $this->objectKey((string) $remotePath),
+                'SaveAs' => $localPath,
+            ]);
+            return is_file($localPath) && is_readable($localPath);
+        } catch (Aws\Exception\AwsException $e) {
+            error_log('S3 AI document download failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     /**
      * Delete from AWS S3
      */

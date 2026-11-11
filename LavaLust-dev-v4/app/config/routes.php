@@ -56,6 +56,14 @@ $router->post('/logout', 'Auth::logout');
 
 # DASHBOARD & MODULES
 $router->get('/dashboard', 'Dashboard::dashboard');
+$router->get('/manage/ai', 'Ai::manage');
+$router->get('/manage/ai/documents', 'Ai::documents');
+$router->post('/manage/ai/documents/upload', 'Ai::upload');
+$router->post('/manage/ai/documents/{id}/status', 'Ai::status');
+$router->post('/manage/ai/documents/{id}/delete', 'Ai::delete');
+$router->post('/manage/ai/chat', 'Ai::chat');
+$router->post('/manage/ai/test', 'Ai::test');
+$router->post('/manage/ai/feedback', 'Ai::feedback');
 # CLASSES (GET reads, POST mutations)
 $router->get('/manage/classes/{id}', 'Classes::detail');
 $router->get('/manage/classes', 'Classes::index');
@@ -144,6 +152,14 @@ $router->get('/certificates/{id}/download', 'Certificates::downloadCertificate')
 $router->get('/verify-certificate', 'Certificates::verifyCertificate');
 
 # API ENDPOINTS
+$router->get('/api/ai/categories', 'Ai::categories');
+$router->get('/api/ai/documents', 'Ai::documents');
+$router->post('/api/ai/documents', 'Ai::upload');
+$router->post('/api/ai/documents/{id}/status', 'Ai::status');
+$router->delete('/api/ai/documents/{id}', 'Ai::delete');
+$router->post('/api/ai/chat', 'Ai::chat');
+$router->post('/api/ai/test', 'Ai::test');
+$router->post('/api/ai/feedback', 'Ai::feedback');
 $router->get('/api/session', 'SmartTrack_api::apiSession');
 $router->get('/api/storage/status', 'SmartTrack_api::apiStorageStatus');
 $router->get('/api/registration-options', 'SmartTrack_api::apiRegistrationOptions');

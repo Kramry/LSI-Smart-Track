@@ -60,6 +60,15 @@ Set these in **Render → Environment** (they are not read from a file):
 | `SESSION_COOKIE_SECURE` | `true` |
 | `XENDIT_SECRET_KEY` | Xendit secret API key (backend environment only) |
 | `XENDIT_WEBHOOK_TOKEN` | Callback verification token configured for the Xendit webhook |
+| `GEMINI_API_KEY` | Google AI Studio Gemini API key (backend only; never add it to the Vue environment) |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` (or a File Search capable model enabled for the account) |
+| `CLOUD_STORAGE_ENABLED` | `true` for durable AI source documents on Render |
+| `CLOUD_STORAGE_PROVIDER` | `aws` |
+| `AWS_ACCESS_KEY_ID` | S3 IAM access key with private object access |
+| `AWS_SECRET_ACCESS_KEY` | S3 IAM secret |
+| `AWS_REGION` | S3 region |
+| `AWS_BUCKET` | Private S3 bucket name |
+| `AWS_PREFIX` | `smarttrack-documents/` |
 
 Render does not offer a managed MySQL service, so point `DB_*` at an external
 MySQL 8 host (Aiven, PlanetScale, DigitalOcean, or a private server). The
@@ -97,6 +106,54 @@ Xendit secret key and callback token belong only in the backend environment.
 Before deploying this payment update to an existing database, run
 `xendit-payment-upgrade.sql` once to add the nullable unique provider
 transaction ID column without deleting existing payment records.
+
+## Gemini AI knowledge base
+
+Run `ai-knowledge-base-upgrade.sql` once against the existing MySQL database
+after confirming the application `users` table is present. This additive script
+creates AI document categories, document metadata, File Search references,
+conversations, messages, feedback, and chat rate limit storage; it does not
+change existing tables. Deploy the app after setting `GEMINI_API_KEY` and
+`GEMINI_MODEL` in the backend Render service. Do not add the key to the Vue
+frontend's environment or source.
+
+AI source documents are stored outside the web root. Enable the existing private
+S3 storage integration for durable source copies across Render deploys. If S3 is
+not enabled, sources remain in the container's private runtime directory and
+may be lost when Render replaces the instance; the indexed File Search copy
+continues to exist, but replace/reactivate operations need the original source.
+The Docker image installs PHP ZIP support to extract DOCX text before indexing.
+
+In the Administrator Portal, open **AI Management**, upload only approved,
+current documents without unnecessary personal information, choose their role
+audience, and use **Test answer** before relying on the knowledge base. File
+Search stores are separated by audience. Trainees search only the public store;
+instructors, staff, and administrators receive progressively broader store
+access. Deactivating a document also removes its Gemini indexed document.
+
+The authenticated Vue client can use the existing bearer token with these
+backend routes:
+
+| Method and route | Use |
+| --- | --- |
+| `GET /api/ai/categories` | Load upload categories |
+| `GET /api/ai/documents?search=...` | Search library (administrator only) |
+| `POST /api/ai/documents` | Multipart upload (`document`, `title`, `category_id`, `audience`, `approved_for_ai=1`) (administrator only) |
+| `POST /api/ai/documents/{id}/status` | Activate or deactivate (administrator only) |
+| `DELETE /api/ai/documents/{id}` | Delete (administrator only) |
+| `POST /api/ai/chat` | Send `{ "message": "...", "conversation_id": 0, "timezone": "Asia/Manila" }` |
+| `POST /api/ai/test` | Test a response (administrator only) |
+| `POST /api/ai/feedback` | Save `{ "message_id": 1, "rating": "helpful" }` |
+
+Send the JWT in `Authorization: Bearer ...`. For cookie session requests, send
+the session CSRF token in `X-CSRF-Token`. The API never returns the Gemini key.
+
+The backend project is PHP and Google does not currently provide an official
+Google Gen AI SDK for PHP. Gemini requests therefore use Google's documented
+server-side REST API with cURL, which keeps the API key on the backend and
+supports the File Search endpoints. The REST integration uses the official
+File Search upload and Gemini's documented `generateContent` API with the
+File Search tool rather than an unofficial PHP SDK.
 
 ## Database
 

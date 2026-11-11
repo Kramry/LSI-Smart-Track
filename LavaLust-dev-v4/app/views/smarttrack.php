@@ -8,6 +8,7 @@ $isAuthPage = in_array($page, ['login', 'setup', 'register'], true);
 $canViewCharts = isset($charts) && in_array($user['role'] ?? '', ['administrator', 'staff', 'instructor'], true);
 $labels = [
     'dashboard' => 'Dashboard',
+    'ai_management' => 'AI Management',
     'users' => 'User accounts',
     'trainees' => 'Trainees',
     'programs' => 'Programs',
@@ -1976,6 +1977,7 @@ $labels = [
             <?php endif; ?>
         </div>
     </div>
+    <?php if (!empty($user) && !$isAuthPage): include APP_DIR . 'views/ai_chat_widget.php'; endif; ?>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
     <script src="https://unpkg.com/html5-qrcode" defer></script>
     <script src="<?= $e(

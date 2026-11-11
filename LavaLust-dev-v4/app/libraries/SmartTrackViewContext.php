@@ -33,6 +33,6 @@ class SmartTrackViewContext
 
     public static function viewName($page)
     {
-        return in_array($page, ['classes', 'class_detail'], true) ? $page : 'smarttrack';
+        return in_array($page, ['classes', 'class_detail', 'ai_management'], true) ? $page : 'smarttrack';
     }
 }

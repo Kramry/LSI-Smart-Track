@@ -30,13 +30,13 @@ class SmartTrackPermissions
 
     private const NAVIGATION = [
         'default' => [
-            'administrator' => self::ADMIN_STAFF_DEFAULT_NAVIGATION,
+            'administrator' => ['dashboard', 'ai_management', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity'],
             'staff' => self::ADMIN_STAFF_DEFAULT_NAVIGATION,
             'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'assessments', 'announcements', 'inquiries'],
             'trainee' => ['dashboard', 'attendance', 'documents', 'my_payments', 'assessments', 'my_certificates', 'announcements', 'inquiries'],
         ],
         'standalone' => [
-            'administrator' => self::ADMIN_STAFF_STANDALONE_NAVIGATION,
+            'administrator' => ['dashboard', 'ai_management', 'users', 'trainees', 'programs', 'classes', 'schedules', 'enrollments', 'attendance', 'documents', 'payments', 'analytics', 'certificates', 'certificates_to_sign', 'eligibility', 'assessments', 'certificate_config', 'announcements', 'inquiries', 'activity', 'profile'],
             'staff' => self::ADMIN_STAFF_STANDALONE_NAVIGATION,
             'instructor' => ['dashboard', 'classes', 'trainees', 'schedules', 'enrollments', 'attendance', 'documents', 'analytics', 'announcements', 'inquiries', 'profile'],
             'trainee' => ['dashboard', 'attendance', 'documents', 'my_payments', 'my_certificates', 'announcements', 'inquiries', 'profile'],

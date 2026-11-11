@@ -285,3 +285,179 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-ai-chat]').forEach((widget) => {
+        const toggle = widget.querySelector('.lsi-ai-toggle');
+        const panel = widget.querySelector('.lsi-ai-panel');
+        const close = widget.querySelector('[data-ai-close]');
+        const form = widget.querySelector('[data-ai-chat-form]');
+        const messages = widget.querySelector('[data-ai-messages]');
+        let conversationId = null;
+        const addBubble = (text, role) => {
+            const bubble = document.createElement('p');
+            bubble.className = `ai-bubble ${role}`;
+            bubble.textContent = text;
+            messages.appendChild(bubble);
+            messages.scrollTop = messages.scrollHeight;
+            return bubble;
+        };
+        toggle.addEventListener('click', () => {
+            const opening = panel.hidden;
+            panel.hidden = !opening;
+            toggle.setAttribute('aria-expanded', String(opening));
+            if (opening) panel.querySelector('textarea')?.focus();
+        });
+        close.addEventListener('click', () => {
+            panel.hidden = true;
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.focus();
+        });
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const input = form.elements.message;
+            const message = input.value.trim();
+            if (!message) return;
+            addBubble(message, 'user');
+            input.value = '';
+            const waiting = addBubble('Thinking…', 'assistant');
+            const button = form.querySelector('button[type="submit"]');
+            button.disabled = true;
+            try {
+                const response = await fetch(`${widget.dataset.base}manage/ai/chat`, {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': widget.dataset.csrf},
+                    body: JSON.stringify({message, conversation_id: conversationId, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Manila'}),
+                });
+                const result = await response.json();
+                const payload = result?.data && typeof result.data === 'object' ? result.data : result;
+                const answer = typeof payload?.answer === 'string' ? payload.answer.trim() : '';
+                waiting.textContent = response.ok
+                    ? (answer || 'The assistant returned an empty answer. Please try again.')
+                    : (result.message || 'The assistant is unavailable right now.');
+                if (response.ok && answer) {
+                    conversationId = payload.conversation_id;
+                    const feedback = document.createElement('div');
+                    feedback.className = 'ai-feedback';
+                    ['helpful', 'not_helpful'].forEach((rating) => {
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.textContent = rating === 'helpful' ? 'Helpful' : 'Not helpful';
+                        button.addEventListener('click', async () => {
+                            button.disabled = true;
+                            try {
+                                await fetch(`${widget.dataset.base}manage/ai/feedback`, {
+                                    method: 'POST', credentials: 'same-origin',
+                                    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': widget.dataset.csrf},
+                                    body: JSON.stringify({message_id: payload.message_id, rating}),
+                                });
+                                feedback.textContent = 'Thanks for your feedback.';
+                            } catch (_) { button.disabled = false; }
+                        });
+                        feedback.appendChild(button);
+                    });
+                    messages.appendChild(feedback);
+                }
+            } catch (_) {
+                waiting.textContent = 'The assistant is unavailable right now. Please try again.';
+            } finally {
+                button.disabled = false;
+                input.focus();
+                messages.scrollTop = messages.scrollHeight;
+            }
+        });
+    });
+
+    const admin = document.querySelector('[data-ai-admin]');
+    if (!admin) return;
+    const base = admin.dataset.base;
+    const headers = {'X-CSRF-Token': admin.dataset.csrf};
+    const rows = admin.querySelector('[data-ai-documents]');
+    const sayStatus = (node, message, isError = false) => {
+        node.textContent = message;
+        node.classList.toggle('error', isError);
+        node.classList.toggle('success', !isError);
+    };
+    admin.querySelector('[data-ai-upload]')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const status = admin.querySelector('[data-ai-upload-status]');
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        sayStatus(status, 'Uploading and indexing with Gemini File Search…');
+        try {
+            const response = await fetch(`${base}manage/ai/documents/upload`, {method: 'POST', credentials: 'same-origin', headers, body: new FormData(form)});
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || 'Upload failed.');
+            sayStatus(status, 'Document indexed successfully. Refreshing the library…');
+            window.location.reload();
+        } catch (error) { sayStatus(status, error.message, true); }
+        finally { button.disabled = false; }
+    });
+    admin.querySelector('[data-ai-test]')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const resultBox = admin.querySelector('[data-ai-test-result]');
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        resultBox.textContent = 'Testing…';
+        try {
+            const response = await fetch(`${base}manage/ai/test`, {method: 'POST', credentials: 'same-origin', headers: {...headers, 'Content-Type': 'application/json'}, body: JSON.stringify({message: form.elements.message.value})});
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || 'Test failed.');
+            resultBox.textContent = result.data?.answer || 'The assistant returned an empty answer.';
+        } catch (error) { resultBox.textContent = error.message; }
+        finally { button.disabled = false; }
+    });
+    admin.querySelector('[data-ai-search]')?.addEventListener('input', (event) => {
+        const query = event.currentTarget.value.trim().toLocaleLowerCase();
+        rows.querySelectorAll('tr').forEach((row) => { row.hidden = !row.textContent.toLocaleLowerCase().includes(query); });
+    });
+    rows?.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-ai-status]');
+        if (!button) return;
+        const row = button.closest('tr');
+        button.disabled = true;
+        try {
+            const response = await fetch(`${base}manage/ai/documents/${row.dataset.docId}/status`, {method: 'POST', credentials: 'same-origin', headers: {...headers, 'Content-Type': 'application/json'}, body: JSON.stringify({status: button.dataset.aiStatus})});
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || 'Status change failed.');
+            window.location.reload();
+        } catch (error) { window.alert(error.message); button.disabled = false; }
+    });
+    rows?.addEventListener('submit', async (event) => {
+        const form = event.target.closest('[data-ai-delete]');
+        if (!form) return;
+        event.preventDefault();
+        if (!window.confirm('Delete this document from the library and Gemini File Search?')) return;
+        const row = form.closest('tr');
+        try {
+            const response = await fetch(`${base}manage/ai/documents/${row.dataset.docId}/delete`, {method: 'POST', credentials: 'same-origin', headers});
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || 'Delete failed.');
+            row.remove();
+        } catch (error) { window.alert(error.message); }
+    });
+    rows?.addEventListener('change', async (event) => {
+        const input = event.target.closest('[data-ai-replace]');
+        if (!input?.files?.[0]) return;
+        const row = input.closest('tr');
+        const formData = new FormData();
+        formData.set('document', input.files[0]);
+        formData.set('title', row.dataset.title);
+        formData.set('category_id', row.dataset.category);
+        formData.set('audience', row.dataset.audience);
+        formData.set('version', String(Number(row.dataset.version || 1) + 1));
+        formData.set('approved_for_ai', '1');
+        input.disabled = true;
+        try {
+            const upload = await fetch(`${base}manage/ai/documents/upload`, {method: 'POST', credentials: 'same-origin', headers, body: formData});
+            const uploaded = await upload.json();
+            if (!upload.ok) throw new Error(uploaded.message || 'Replacement indexing failed.');
+            const deactivate = await fetch(`${base}manage/ai/documents/${row.dataset.docId}/status`, {method: 'POST', credentials: 'same-origin', headers: {...headers, 'Content-Type': 'application/json'}, body: JSON.stringify({status: 'inactive'})});
+            const result = await deactivate.json();
+            if (!deactivate.ok) throw new Error(result.message || 'The new version is indexed, but the old version could not be deactivated.');
+            window.location.reload();
+        } catch (error) { window.alert(error.message); input.disabled = false; input.value = ''; }
+    });
+});
