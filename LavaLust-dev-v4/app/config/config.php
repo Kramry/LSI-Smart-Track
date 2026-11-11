@@ -274,7 +274,7 @@ $config['cookie_secure']           = filter_var(
 );
 $config['cookie_expiration']       = 86400;
 $config['cookie_httponly']         = FALSE;
-$cookieSameSite = getenv('SESSION_COOKIE_SAMESITE') ?: 'Strict';
+$cookieSameSite = getenv('SESSION_COOKIE_SAMESITE') ?: ($config['cookie_secure'] ? 'None' : 'Lax');
 if (strcasecmp($cookieSameSite, 'None') === 0 && !$config['cookie_secure']) {
     $cookieSameSite = 'Lax';
 }
