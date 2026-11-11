@@ -263,15 +263,22 @@ $config['cookie_prefix']           = '';
 $config['cookie_domain']           = '';
 $config['cookie_path']             = '/';
 $secureCookieSetting = getenv('SESSION_COOKIE_SECURE');
+$forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
+$requestIsSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || $forwardedProto === 'https';
 $config['cookie_secure']           = filter_var(
     $secureCookieSetting === false
-        ? (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        ? $requestIsSecure
         : $secureCookieSetting,
     FILTER_VALIDATE_BOOLEAN
 );
 $config['cookie_expiration']       = 86400;
 $config['cookie_httponly']         = FALSE;
-$config['cookie_samesite']         = getenv('SESSION_COOKIE_SAMESITE') ?: 'Strict';
+$cookieSameSite = getenv('SESSION_COOKIE_SAMESITE') ?: 'Strict';
+if (strcasecmp($cookieSameSite, 'None') === 0 && !$config['cookie_secure']) {
+    $cookieSameSite = 'Lax';
+}
+$config['cookie_samesite']         = $cookieSameSite;
 
 /*
 |--------------------------------------------------------------------------

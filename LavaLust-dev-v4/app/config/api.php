@@ -146,7 +146,7 @@ $config['users_table_id'] = 'user_id';
 | a browser, so set your real domain in production.
 |
 */
-$frontendOrigin = trim((string) (getenv('SMARTTRACK_FRONTEND_ORIGIN') ?: ''));
+$frontendOrigin = trim((string) (getenv('SMARTTRACK_FRONTEND_URL') ?: getenv('SMARTTRACK_FRONTEND_ORIGIN') ?: ''));
 $config['allow_origin'] = $frontendOrigin === '' ? [] : [$frontendOrigin];
 
 /*
