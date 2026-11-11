@@ -36,6 +36,13 @@ class SmartTrackModelRegistry
             $assessmentModel = new Assessment_model($db);
             $timedAssessmentModel = new TimedAssessment_model($db);
         }
+        // Load timed assessment model for assessments/timed routes
+        if ($section === 'assessments/timed') {
+            require_once APP_DIR . 'models/Assessment_model.php';
+            require_once APP_DIR . 'models/TimedAssessment_model.php';
+            $assessmentModel = new Assessment_model($db);
+            $timedAssessmentModel = new TimedAssessment_model($db);
+        }
         if ($section === 'attendance') {
             require_once APP_DIR . 'models/Attendance_model.php';
             require_once APP_DIR . 'models/Dashboard_model.php';

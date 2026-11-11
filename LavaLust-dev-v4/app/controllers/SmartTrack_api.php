@@ -13,6 +13,7 @@ class SmartTrack_api extends Base
 
     public function apiSession()
     {
+        $this->requireRequestMethod('GET');
         return $this->jsonResponse([
             'ok' => true,
             'data' => [
@@ -26,6 +27,7 @@ class SmartTrack_api extends Base
 
     public function apiNotificationHistory()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return;
         }
@@ -43,6 +45,7 @@ class SmartTrack_api extends Base
 
     public function apiSendAnnouncement()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can send notifications.'], 403);
         }
@@ -91,6 +94,7 @@ class SmartTrack_api extends Base
 
     public function apiRetryNotification($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can retry notifications.'], 403);
         }
@@ -110,6 +114,7 @@ class SmartTrack_api extends Base
 
     public function apiDeleteNotification($id)
     {
+        $this->requireRequestMethod('DELETE');
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can delete notification history.'], 403);
         }
@@ -123,6 +128,7 @@ class SmartTrack_api extends Base
 
     public function apiSaveNotificationSettings()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can change notification settings.'], 403);
         }
@@ -133,6 +139,7 @@ class SmartTrack_api extends Base
 
     public function apiTestNotification()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can test notifications.'], 403);
         }
@@ -151,6 +158,7 @@ class SmartTrack_api extends Base
 
     public function apiStorageStatus()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -166,9 +174,7 @@ class SmartTrack_api extends Base
 
     public function apiLogin()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
         }
@@ -231,6 +237,7 @@ class SmartTrack_api extends Base
 
     public function apiRegistrationOptions()
     {
+        $this->requireRequestMethod('GET');
         return $this->jsonResponse([
             'programs' => $this->recordModel->options('programs'),
         ]);
@@ -238,9 +245,7 @@ class SmartTrack_api extends Base
 
     public function apiRegister()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
         }
@@ -344,9 +349,7 @@ class SmartTrack_api extends Base
 
     public function apiLogout()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser()) {
             return;
         }
@@ -370,9 +373,7 @@ class SmartTrack_api extends Base
     public function apiRefresh()
     {
         $api = $this->apiLibrary();
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
 
         if (!$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Your session expired. Refresh and try again.'], 403);
@@ -414,9 +415,7 @@ class SmartTrack_api extends Base
 
     public function apiDashboard()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         $user = $this->authenticatedApiUser();
         if (!$user) {
             return $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
@@ -437,6 +436,7 @@ class SmartTrack_api extends Base
 
     public function getTrainees()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->user) {
             return $this->jsonResponse(['message' => 'Sign in to view trainees.'], 401);
         }
@@ -449,9 +449,7 @@ class SmartTrack_api extends Base
 
     public function apiModule($section)
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         $user = $this->authenticatedApiUser();
         if (!$user) {
             return $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
@@ -704,9 +702,7 @@ class SmartTrack_api extends Base
 
     public function apiAttendanceClasses()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireAttendanceStaff()) {
             return;
         }
@@ -718,9 +714,7 @@ class SmartTrack_api extends Base
 
     public function apiAttendanceSchedules($classId)
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireAttendanceStaff()) {
             return;
         }
@@ -742,9 +736,7 @@ class SmartTrack_api extends Base
 
     public function apiTodayAttendance()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireAttendanceStaff()) {
             return;
         }
@@ -767,9 +759,7 @@ class SmartTrack_api extends Base
 
     public function apiReports()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         $user = $this->authenticatedApiUser();
         if (!$user) {
             return $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
@@ -786,9 +776,7 @@ class SmartTrack_api extends Base
 
     public function apiGenerateReport()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         $user = $this->authenticatedApiUser();
         if (!$user) {
             return $this->jsonResponse(['message' => 'Sign in to continue.'], 401);
@@ -911,6 +899,7 @@ class SmartTrack_api extends Base
 
     public function apiCertificatesToSign()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to sign certificates.');
         }
@@ -920,3 +909,5 @@ class SmartTrack_api extends Base
     }
 
 }
+
+

@@ -26,7 +26,8 @@ class Auth extends Base
 
     public function login()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$this->validCsrf()) {
+        $this->requireRequestMethod('POST');
+        if (!$this->validCsrf()) {
             $this->render('login', ['error' => 'Your session expired. Please try again.']);
             return;
         }
@@ -58,10 +59,11 @@ class Auth extends Base
             return;
         }
 
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        if ($this->request->method() === 'get') {
             $this->render('setup');
             return;
         }
+        $this->requireRequestMethod('POST');
         if (!$this->validCsrf()) {
             $this->render('setup', ['error' => 'Your session expired. Please try again.']);
             return;
@@ -81,10 +83,11 @@ class Auth extends Base
 
     public function register()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        if ($this->request->method() === 'get') {
             $this->render('register');
             return;
         }
+        $this->requireRequestMethod('POST');
         if (!$this->validCsrf()) {
             $this->render('register', ['error' => 'Your session expired. Please try again.']);
             return;
@@ -143,10 +146,16 @@ class Auth extends Base
 
     public function logout()
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST' && $this->validCsrf()) {
-            $this->session->unset_userdata(['smarttrack_user', 'smarttrack_csrf']);
+        $this->requireRequestMethod('POST');
+        if ($this->validCsrf()) {
+            $this->session->unset_userdata(['user', 'csrf', 'smarttrack_user', 'smarttrack_csrf']);
             $this->session->sess_destroy();
         }
         redirect($this->url(''));
     }
 }
+
+
+
+
+

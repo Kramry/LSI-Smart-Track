@@ -8,6 +8,7 @@ class Certificates extends Base
 {
     public function certificates()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to manage certificates.');
         }
@@ -38,6 +39,7 @@ class Certificates extends Base
 
     public function eligibility()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to manage certificate eligibility.');
         }
@@ -83,6 +85,7 @@ class Certificates extends Base
 
     public function reviewEligibility()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->authorizeCertificateAction('You are not allowed to review certificate eligibility.', 'manage/eligibility')) {
             return;
         }
@@ -127,6 +130,7 @@ class Certificates extends Base
 
     public function deleteEligibility($id)
     {
+        $this->requireRequestMethod($this->apiRequest ? 'DELETE' : 'POST');
         if (!$this->authorizeCertificateAction('You are not allowed to remove class enrollments.', 'manage/eligibility')) {
             return;
         }
@@ -154,6 +158,7 @@ class Certificates extends Base
 
     public function recalculateEligibility()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->authorizeCertificateAction('You are not allowed to recalculate eligibility.', 'manage/eligibility')) {
             return;
         }
@@ -181,6 +186,7 @@ class Certificates extends Base
 
     public function issueCertificate()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->authorizeCertificateAction('You are not allowed to issue certificates.', 'manage/eligibility')) {
             return;
         }
@@ -213,6 +219,7 @@ class Certificates extends Base
 
     public function certificatesToSign($id = null)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to sign certificates.');
         }
@@ -251,6 +258,7 @@ class Certificates extends Base
 
     public function previewCertificateForSigning($id)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to preview this certificate.');
         }
@@ -271,6 +279,7 @@ class Certificates extends Base
 
     public function signCertificate($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->authorizeCertificateAction('You are not allowed to sign certificates.', 'certificates/to-sign')) {
             return;
         }
@@ -305,6 +314,7 @@ class Certificates extends Base
 
     public function rejectCertificateSignature($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->authorizeCertificateAction('You are not allowed to return certificates for review.', 'certificates/to-sign')) {
             return;
         }
@@ -330,6 +340,7 @@ class Certificates extends Base
 
     public function resubmitCertificateForSigning($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->authorizeCertificateAction('You are not allowed to resubmit certificates.', 'manage/certificates')) {
             return;
         }
@@ -350,6 +361,7 @@ class Certificates extends Base
 
     public function certificateHistory($id)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to view certificate history.');
         }
@@ -455,6 +467,7 @@ class Certificates extends Base
 
     public function revokeCertificate()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->authorizeCertificateAction('You are not allowed to revoke certificates.', 'manage/certificates')) {
             return;
         }
@@ -485,12 +498,14 @@ class Certificates extends Base
             return $this->deny('You are not allowed to configure certificate templates.');
         }
 
-        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+        if ($this->request->method() === 'post') {
+            $this->requireRequestMethod('POST');
             if (!$this->validCsrf()) {
                 return $this->actionError('Your session expired. Refresh and try again.', 'manage/certificate-config', 403);
             }
             return $this->saveCertificateTemplate();
         }
+        $this->requireRequestMethod('GET');
 
         $template = null;
         if (array_key_exists('edit_template', $this->queryParams())) {
@@ -543,6 +558,7 @@ class Certificates extends Base
 
     public function saveCertificateSignatory()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->authorizeCertificateAction('Only administrators can configure certificate signatories.', 'manage/certificate-config', true)) {
             return;
         }
@@ -606,6 +622,7 @@ class Certificates extends Base
 
     public function deleteCertificateSignatory($id)
     {
+        $this->requireRequestMethod($this->apiRequest ? 'DELETE' : 'POST');
         if (!$this->authorizeCertificateAction('Only administrators can configure certificate signatories.', 'manage/certificate-config', true)) {
             return;
         }
@@ -887,6 +904,7 @@ class Certificates extends Base
 
     public function activateCertificateTemplate($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->authorizeCertificateAction('You are not allowed to activate certificate templates.', 'manage/certificate-config')) {
             return;
         }
@@ -907,6 +925,7 @@ class Certificates extends Base
 
     public function deleteCertificateTemplate($id)
     {
+        $this->requireRequestMethod($this->apiRequest ? 'DELETE' : 'POST');
         if (!$this->authorizeCertificateAction('You are not allowed to delete certificate templates.', 'manage/certificate-config')) {
             return;
         }
@@ -938,6 +957,7 @@ class Certificates extends Base
 
     public function certificateTemplateFile($id)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to preview certificate template files.');
         }
@@ -969,6 +989,7 @@ class Certificates extends Base
 
     public function myCertificates()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || $this->user['role'] !== 'trainee') {
             return $this->deny('Only trainees can access their certificates.');
         }
@@ -995,6 +1016,7 @@ class Certificates extends Base
 
     public function downloadCertificate($id)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -1046,6 +1068,7 @@ class Certificates extends Base
 
     public function apiVerifyCertificate()
     {
+        $this->requireRequestMethod('GET');
         $query = $this->queryParams();
         $qrCode = isset($query['qr']) && is_scalar($query['qr']) ? trim((string) $query['qr']) : '';
         $certificateNumber = isset($query['certificate_number']) && is_scalar($query['certificate_number'])
@@ -1091,6 +1114,7 @@ class Certificates extends Base
 
     public function verifyCertificate()
     {
+        $this->requireRequestMethod('GET');
         $query = $this->queryParams();
         $qrCode = isset($query['qr']) && is_scalar($query['qr']) ? trim((string) $query['qr']) : '';
         $certificateNumber = isset($query['certificate_number']) && is_scalar($query['certificate_number'])
@@ -1152,3 +1176,13 @@ class Certificates extends Base
         return $integer !== false && $integer > 0 ? $integer : null;
     }
 }
+
+
+
+
+
+
+
+
+
+

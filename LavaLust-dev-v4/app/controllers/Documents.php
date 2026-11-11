@@ -7,6 +7,7 @@ class Documents extends Base
 {
     public function uploadDocument()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->inRoleGroup('all_accounts')) {
             return $this->deny('You are not allowed to upload documents.');
         }
@@ -127,6 +128,7 @@ class Documents extends Base
 
     public function downloadDocument($id)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !ctype_digit((string) $id)) {
             return $this->deny('The document could not be found.');
         }
@@ -179,6 +181,7 @@ class Documents extends Base
 
     public function deleteDocument($id)
     {
+        $this->requireRequestMethod($this->apiRequest ? 'DELETE' : 'POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->inRoleGroup('administrative_staff')) {
             return $this->deny('You are not allowed to delete documents.');
         }
@@ -236,6 +239,7 @@ class Documents extends Base
 
     public function updateDocumentStatus($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->inRoleGroup('administrative_staff') || !$this->validCsrf()) {
             return $this->deny('You are not allowed to update document status.');
         }
@@ -269,6 +273,7 @@ class Documents extends Base
 
     public function reviewDocument($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || (!$this->inRoleGroup('administrative_staff') && !$this->inRoleGroup('teaching_staff')) || !$this->validCsrf()) {
             return $this->deny('You are not allowed to review uploaded requirements.');
         }
@@ -309,6 +314,7 @@ class Documents extends Base
 
     public function saveDocumentRequirement()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to configure required documents.');
         }
@@ -349,6 +355,7 @@ class Documents extends Base
 
     public function deleteDocumentRequirement($id)
     {
+        $this->requireRequestMethod($this->apiRequest ? 'DELETE' : 'POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to configure required documents.');
         }
@@ -376,3 +383,9 @@ class Documents extends Base
         }
     }
 }
+
+
+
+
+
+

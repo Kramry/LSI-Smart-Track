@@ -64,14 +64,18 @@ class TimedAssessment_model extends Base_model
 
     public function save(array $input, array $user): int
     {
+        error_log('TimedAssessment_model::save - Starting save process');
         $this->assertTeachingStaff($user);
+        error_log('TimedAssessment_model::save - Teaching staff assertion passed');
         $data = $this->validateAssessment($input);
+        error_log('TimedAssessment_model::save - Validation passed, data: ' . json_encode($data));
         $id = $data['id'];
         $this->begin();
 
         try {
             $previous = null;
             if ($id !== null) {
+                error_log('TimedAssessment_model::save - Updating existing assessment ID: ' . $id);
                 $previous = $this->assessmentById($id, $user, true);
                 if (!$previous) {
                     throw new TimedAssessmentNotFoundException('Timed assessment not found.');
@@ -84,10 +88,14 @@ class TimedAssessment_model extends Base_model
                         throw new TimedAssessmentConflictException('Published assessment schedule cannot be changed.');
                     }
                 }
+            } else {
+                error_log('TimedAssessment_model::save - Creating new assessment');
             }
 
             $this->assertClassAccess($data['class_id'], $user);
+            error_log('TimedAssessment_model::save - Class access assertion passed for class_id: ' . $data['class_id']);
             if ($previous) {
+                error_log('TimedAssessment_model::save - Executing UPDATE query');
                 $this->execute(
                     'UPDATE timed_assessments
                      SET class_id = ?, assessment_title = ?, assessment_type = ?, description = ?, instructions = ?,
@@ -102,6 +110,7 @@ class TimedAssessment_model extends Base_model
                 );
                 $this->writeAudit($id, null, 'assessment_updated', $this->auditValues($previous), $this->auditValues($data), $user);
             } else {
+                error_log('TimedAssessment_model::save - Executing INSERT query');
                 $this->execute(
                     'INSERT INTO timed_assessments
                      (class_id, created_by, assessment_title, assessment_type, description, instructions,
@@ -114,14 +123,17 @@ class TimedAssessment_model extends Base_model
                     ]
                 );
                 $id = (int) $this->db->last_id();
+                error_log('TimedAssessment_model::save - Insert completed, new ID: ' . $id);
                 if ($id < 1) {
                     throw new RuntimeException('Timed assessment insert did not return an ID.');
                 }
                 $this->writeAudit($id, null, 'assessment_created', null, $this->auditValues($data), $user);
             }
             $this->commit();
+            error_log('TimedAssessment_model::save - Transaction committed successfully');
             return (int) $id;
         } catch (Throwable $error) {
+            error_log('TimedAssessment_model::save - Error: ' . $error->getMessage() . ' in ' . $error->getFile() . ':' . $error->getLine());
             $this->rollback();
             throw $error;
         }

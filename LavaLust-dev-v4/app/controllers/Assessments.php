@@ -8,9 +8,7 @@ class Assessments extends Base
 {
     public function apiTimedAssessments()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -31,9 +29,7 @@ class Assessments extends Base
 
     public function apiSaveTimedAssessment()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser()) {
             return;
         }
@@ -42,18 +38,19 @@ class Assessments extends Base
         }
 
         try {
-            $id = $this->timedAssessmentModel->save($this->requestData(), $this->user);
+            $input = $this->requestData();
+            error_log('API save timed assessment input: ' . json_encode($input));
+            $id = $this->timedAssessmentModel->save($input, $this->user);
             return $this->jsonResponse(['timed_assessment_id' => $id, 'message' => 'Timed assessment saved.']);
         } catch (Throwable $error) {
+            error_log('API save timed assessment error: ' . $error->getMessage() . ' in ' . $error->getFile() . ':' . $error->getLine());
             return $this->handleTimedAssessmentError($error);
         }
     }
 
     public function apiPublishTimedAssessment($id)
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser()) {
             return;
         }
@@ -75,9 +72,7 @@ class Assessments extends Base
 
     public function apiCloseTimedAssessment($id)
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser()) {
             return;
         }
@@ -99,9 +94,7 @@ class Assessments extends Base
 
     public function apiSubmitTimedAssessment($id)
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser()) {
             return;
         }
@@ -123,9 +116,7 @@ class Assessments extends Base
 
     public function apiAdjustTimedAssessmentRecipient($id, $traineeId)
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser()) {
             return;
         }
@@ -148,9 +139,7 @@ class Assessments extends Base
 
     public function apiTimedAssessmentReport()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -619,3 +608,6 @@ class Assessments extends Base
         }
     }
 }
+
+
+

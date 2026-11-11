@@ -9,9 +9,9 @@ class AnalyticsServiceUnavailableException extends RuntimeException
 
 class Analytics extends Base
 {
-    public function before_action()
+    public function __construct()
     {
-        parent::before_action();
+        parent::__construct();
         $this->analyticsModel = $this->modelRegistry->loadOptional($this->db, 'Analytics_model');
         if (!$this->analyticsModel instanceof Analytics_model) {
             throw new RuntimeException('Analytics model initialization failed.');
@@ -45,9 +45,7 @@ class Analytics extends Base
 
     public function data()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireAnalyticsApiViewer()) {
             return;
         }
@@ -65,9 +63,7 @@ class Analytics extends Base
 
     public function aiInsights()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireAnalyticsApiViewer()) {
             return;
         }
@@ -99,9 +95,7 @@ class Analytics extends Base
 
     public function generateAiInsights()
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->requireAnalyticsApiViewer(true)) {
             return;
         }
@@ -275,3 +269,6 @@ class Analytics extends Base
         return $value;
     }
 }
+
+
+

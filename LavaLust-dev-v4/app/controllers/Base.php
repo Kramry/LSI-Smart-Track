@@ -28,8 +28,9 @@ class Base extends Controller
     protected ?SmartTrackAuth $auth = null;
     protected ?SmartTrackPermissions $permissions = null;
 
-    public function before_action()
+    public function __construct()
     {
+        parent::__construct();
         $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
         $this->apiRequest = is_string($requestPath)
             && preg_match('#(?:^|/)api(?:/|$)#', $requestPath) === 1;
@@ -46,6 +47,7 @@ class Base extends Controller
         $this->call->helper('url');
         $this->db = $this->call->database();
         $this->session = $this->call->library('session');
+        $this->api = $this->call->library('api');
 
         $this->modelRegistry = $this->call->library('SmartTrackModelRegistry');
         $apiModuleMatch = [];
@@ -80,6 +82,10 @@ class Base extends Controller
         $this->permissions = $this->call->library('SmartTrackPermissions');
 
         $this->user = $this->session->userdata('user');
+        if (($this->user === null || $this->user === false) && $this->session->userdata('smarttrack_user')) {
+            $this->user = $this->session->userdata('smarttrack_user');
+            $this->session->set_userdata('user', $this->user);
+        }
         if ($this->apiRequest) {
             $this->user = $this->apiUserFromToken();
         }
@@ -91,10 +97,24 @@ class Base extends Controller
 
     protected function apiLibrary()
     {
-        if ($this->api === null) {
-            $this->api = $this->call->library('api');
-        }
         return $this->api;
+    }
+
+    protected function requireRequestMethod(string $method)
+    {
+        $method = strtolower($method);
+        if ($this->request->method() === $method) {
+            return true;
+        }
+
+        $allowed = strtoupper($method);
+        if ($this->apiRequest) {
+            return $this->jsonResponse(['message' => 'Method not allowed.', 'errors' => []], 405);
+        }
+
+        http_response_code(405);
+        header('Allow: ' . $allowed);
+        exit('Method not allowed.');
     }
 
     protected function render($page, array $data = [])
@@ -119,11 +139,12 @@ class Base extends Controller
 
     protected function queryParams()
     {
-        return $this->apiRequest
-            ? $this->apiLibrary()->get_query_params(false)
-            : $_GET;
+        $query = [];
+        foreach (array_keys($_GET) as $key) {
+            $query[$key] = $this->request->get($key);
+        }
+        return $query;
     }
-
     protected function requestData()
     {
         if ($this->requestData !== null) {
@@ -136,7 +157,10 @@ class Base extends Controller
         }
 
         if ($_POST) {
-            $this->requestData = $_POST;
+            $this->requestData = [];
+            foreach (array_keys($_POST) as $key) {
+                $this->requestData[$key] = $this->request->post($key);
+            }
             return $this->requestData;
         }
 
@@ -152,7 +176,6 @@ class Base extends Controller
         $this->requestData = is_array($formData) ? $formData : [];
         return $this->requestData;
     }
-
     protected function jsonResponse(array $data, $status = 200)
     {
         if (!array_key_exists('ok', $data)) {
@@ -174,7 +197,7 @@ class Base extends Controller
             $data['errors'] = [];
         }
 
-        $this->apiLibrary()->respond($data, (int) $status);
+        $this->api->respond($data, (int) $status);
         exit;
     }
 
@@ -346,3 +369,9 @@ class Base extends Controller
         }
     }
 }
+
+
+
+
+
+

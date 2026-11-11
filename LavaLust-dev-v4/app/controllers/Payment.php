@@ -8,6 +8,7 @@ class Payment extends Base
 {
     public function apiCreateXenditPayment()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || ($this->user['role'] ?? '') !== 'trainee') {
             return $this->jsonResponse(['message' => 'Only trainees can start an online payment.'], 403);
         }
@@ -83,6 +84,7 @@ class Payment extends Base
 
     public function apiXenditWebhook()
     {
+        $this->requireRequestMethod('POST');
         // Xendit authenticates callbacks with x-callback-token; it does not define an HMAC signature header here.
         $expected = trim((string) getenv('XENDIT_WEBHOOK_TOKEN'));
         $provided = (string) ($_SERVER['HTTP_X_CALLBACK_TOKEN'] ?? '');
@@ -116,10 +118,11 @@ class Payment extends Base
 
     public function apiXenditPaymentStatus()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || ($this->user['role'] ?? '') !== 'trainee') {
             return $this->jsonResponse(['message' => 'Only trainees can check their online payments.'], 403);
         }
-        $query = $this->apiLibrary()->get_query_params(false);
+        $query = $this->queryParams();
         $reference = trim((string) ($query['reference_id'] ?? ''));
         if ($reference === '') {
             return $this->jsonResponse(['message' => 'Payment reference is required.'], 422);
@@ -232,9 +235,7 @@ class Payment extends Base
 
     public function apiData()
     {
-        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -294,6 +295,7 @@ class Payment extends Base
 
     public function payments()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->isPaymentStaff()) {
             return $this->deny('Only administrator or staff accounts can manage payments.');
         }
@@ -341,6 +343,7 @@ class Payment extends Base
 
     public function myPayments()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || ($this->user['role'] ?? '') !== 'trainee') {
             return $this->deny('Only trainees can view their own payment records.');
         }
@@ -372,6 +375,7 @@ class Payment extends Base
 
     public function saveFeeType()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->isPaymentStaff()) {
             return $this->deny('Only administrator or staff accounts can configure fees.');
         }
@@ -416,6 +420,7 @@ class Payment extends Base
 
     public function deactivateFeeType($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->isPaymentStaff()) {
             return $this->deny('Only administrator or staff accounts can configure fees.');
         }
@@ -432,6 +437,7 @@ class Payment extends Base
 
     public function recordPayment()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->isPaymentStaff()) {
             return $this->deny('Only administrator or staff accounts can record payments.');
         }
@@ -469,6 +475,7 @@ class Payment extends Base
 
     public function submitProof()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || ($this->user['role'] ?? '') !== 'trainee') {
             return $this->deny('Only trainees can submit proof for their own fees.');
         }
@@ -528,6 +535,7 @@ class Payment extends Base
 
     public function reviewProof($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->isPaymentStaff()) {
             return $this->deny('Only administrator or staff accounts can review payment proofs.');
         }
@@ -562,6 +570,7 @@ class Payment extends Base
 
     public function proofFile($id)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !ctype_digit((string) $id) || !(int) $id) {
             return $this->deny('Payment proof not found.');
         }
@@ -600,6 +609,7 @@ class Payment extends Base
 
     public function receipt($id)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !ctype_digit((string) $id) || !(int) $id) {
             return $this->deny('Receipt not found.');
         }
@@ -633,6 +643,7 @@ class Payment extends Base
 
     public function bondAction($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->isPaymentStaff()) {
             return $this->deny('Only administrator or staff accounts can process bonds.');
         }
@@ -665,6 +676,7 @@ class Payment extends Base
 
     public function reversePayment($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->isPaymentStaff()) {
             return $this->deny('Only administrator or staff accounts can reverse payments.');
         }
@@ -686,6 +698,7 @@ class Payment extends Base
 
     public function exportReport()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->isPaymentStaff()) {
             return $this->deny('Only administrator or staff accounts can export payment reports.');
         }
@@ -759,3 +772,5 @@ class Payment extends Base
         return $date && $date->format('Y-m-d') === $value ? $value : null;
     }
 }
+
+

@@ -6,6 +6,7 @@ class Dashboard extends Base
 {
     public function dashboard()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -25,6 +26,7 @@ class Dashboard extends Base
 
     public function module($section)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -120,6 +122,7 @@ class Dashboard extends Base
 
     public function save($section)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->canAccess($section) || !$this->canManage($section) || !$this->validCsrf()) {
             return $this->deny('You are not allowed to change this section.');
         }
@@ -379,14 +382,7 @@ class Dashboard extends Base
 
     public function delete($section, $id)
     {
-        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-            if ($this->apiRequest) {
-                return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-            }
-            http_response_code(405);
-            header('Allow: POST');
-            exit('Method not allowed.');
-        }
+        $this->requireRequestMethod($this->apiRequest ? 'DELETE' : 'POST');
         if (!$this->requireUser() || !$this->canAccess($section) || !$this->canManage($section) || !$this->validCsrf()) {
             return $this->deny('You are not allowed to delete records in this section.');
         }
@@ -424,3 +420,9 @@ class Dashboard extends Base
         redirect($this->url('manage/' . $section));
     }
 }
+
+
+
+
+
+

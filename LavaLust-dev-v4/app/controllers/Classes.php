@@ -5,14 +5,15 @@ require_once APP_DIR . 'controllers/Base.php';
 
 class Classes extends Base
 {
-    public function before_action()
+    public function __construct()
     {
-        parent::before_action();
+        parent::__construct();
         $this->classesModel = $this->modelRegistry->loadOptional($this->db, 'Classes_model');
     }
 
     public function index()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to view teaching classes.');
         }
@@ -43,6 +44,7 @@ class Classes extends Base
 
     public function detail($id)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->inRoleGroup('teaching_staff')) {
             return $this->deny('You are not allowed to view class details.');
         }
@@ -70,9 +72,7 @@ class Classes extends Base
 
     public function apiIndex()
     {
-        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -94,9 +94,7 @@ class Classes extends Base
 
     public function apiDetail($id)
     {
-        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -291,6 +289,7 @@ class Classes extends Base
 
     public function save()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->canManage('classes') || !$this->validCsrf()) {
             return $this->deny('You are not allowed to manage classes.');
         }
@@ -323,6 +322,7 @@ class Classes extends Base
 
     public function delete($id)
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf() || !$this->canManage('classes')) {
             return $this->deny('You are not allowed to delete classes.');
         }
@@ -352,9 +352,7 @@ class Classes extends Base
 
     public function apiSave()
     {
-        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->canManage('classes') || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'You are not allowed to manage classes.'], 403);
         }
@@ -385,9 +383,7 @@ class Classes extends Base
 
     public function apiDelete($id)
     {
-        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
+        $this->requireRequestMethod('DELETE');
         if (!$this->requireUser() || !$this->canManage('classes') || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'You are not allowed to delete classes.'], 403);
         }
@@ -412,3 +408,9 @@ class Classes extends Base
         }
     }
 }
+
+
+
+
+
+

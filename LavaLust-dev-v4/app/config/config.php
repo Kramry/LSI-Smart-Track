@@ -113,7 +113,7 @@ $config['proxy_enabled']           = FALSE;
 |   3 = All
 |
 */
-$config['log_threshold']            = 0;
+$config['log_threshold']            = 3;
 $config['log_dir']                  = 'runtime/logs/';
 
 /*

@@ -6,13 +6,9 @@ require_once APP_DIR . 'libraries/SmartTrackPdf.php';
 
 class Reports extends Base
 {
-    public function before_action()
-    {
-        parent::before_action();
-    }
-
     public function index()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser() || !$this->canAccessReports($this->user)) {
             return $this->deny('Reports are available to administrator and staff accounts.');
         }
@@ -33,13 +29,11 @@ class Reports extends Base
 
     public function generate()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->canAccessReports($this->user)) {
             return $this->deny('Reports are available to administrator and staff accounts.');
         }
 
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return $this->jsonResponse(['message' => 'Method not allowed.'], 405);
-        }
 
         if (!$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Invalid CSRF token.'], 403);
@@ -167,3 +161,7 @@ class Reports extends Base
         return $this->inRoleGroup('administrative_staff', $user);
     }
 }
+
+
+
+

@@ -6,6 +6,7 @@ class Profile extends Base
 {
     public function profile()
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -15,6 +16,7 @@ class Profile extends Base
 
     public function saveProfile()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf()) {
             return $this->deny('Your session expired. Sign in and try again.');
         }
@@ -49,7 +51,7 @@ class Profile extends Base
             $this->userModel->updateTraineeProfile((int) $trainee['trainee_id'], $firstName, $lastName, $contact);
         }
         $this->user['full_name'] = $name;
-        $this->session->set_userdata('smarttrack_user', $this->user);
+        $this->session->set_userdata('user', $this->user);
         $this->model->logActivity((int) $this->user['user_id'], 'Updated profile', 'Name changed');
         if ($this->apiRequest) {
             return $this->jsonResponse(['message' => 'Profile updated.', 'user' => $this->user]);
@@ -60,6 +62,7 @@ class Profile extends Base
 
     public function savePassword()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser() || !$this->validCsrf()) {
             return $this->deny('Your session expired. Sign in and try again.');
         }
@@ -92,3 +95,4 @@ class Profile extends Base
         return preg_match('/^[0-9\s\-\+\(\)]{7,20}$/', $contact) === 1;
     }
 }
+

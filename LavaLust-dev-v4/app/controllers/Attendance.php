@@ -6,6 +6,7 @@ class Attendance extends Base
 {
     public function scanAttendance()
     {
+        $this->requireRequestMethod('POST');
         if (!$this->requireUser()) {
             return;
         }
@@ -121,6 +122,7 @@ class Attendance extends Base
 
     public function exportReport($period)
     {
+        $this->requireRequestMethod('GET');
         if (!$this->requireUser()) {
             return;
         }
@@ -257,3 +259,5 @@ class Attendance extends Base
         return true;
     }
 }
+
+
