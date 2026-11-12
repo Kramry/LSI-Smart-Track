@@ -146,8 +146,25 @@ $config['users_table_id'] = 'user_id';
 | a browser, so set your real domain in production.
 |
 */
-$frontendOrigin = trim((string) (getenv('SMARTTRACK_FRONTEND_URL') ?: getenv('SMARTTRACK_FRONTEND_ORIGIN') ?: ''));
-$config['allow_origin'] = $frontendOrigin === '' ? [] : [$frontendOrigin];
+$frontendOrigins = ['https://lsi-vue-frontend.onrender.com'];
+foreach (['SMARTTRACK_FRONTEND_ORIGIN', 'SMARTTRACK_FRONTEND_URL'] as $originVariable) {
+    $configuredOrigin = trim((string) (getenv($originVariable) ?: ''));
+    if ($configuredOrigin === '') {
+        continue;
+    }
+
+    $originParts = parse_url($configuredOrigin);
+    if (!is_array($originParts) || empty($originParts['scheme']) || empty($originParts['host'])) {
+        continue;
+    }
+
+    $normalizedOrigin = strtolower($originParts['scheme']) . '://' . strtolower($originParts['host']);
+    if (isset($originParts['port'])) {
+        $normalizedOrigin .= ':' . (int) $originParts['port'];
+    }
+    $frontendOrigins[] = $normalizedOrigin;
+}
+$config['allow_origin'] = array_values(array_unique($frontendOrigins));
 
 /*
 |--------------------------------------------------------------------------
