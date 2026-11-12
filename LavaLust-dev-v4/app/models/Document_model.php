@@ -72,10 +72,25 @@ class Document_model extends Base_model
 
     public function reviewDocument($documentId, $decision, $reviewedBy)
     {
-        return $this->execute(
-            'UPDATE trainee_documents SET review_status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE document_id = ?',
-            [$decision, (int) $reviewedBy, (int) $documentId]
-        );
+        try {
+            return $this->execute(
+                'UPDATE trainee_documents SET review_status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE document_id = ?',
+                [$decision, (int) $reviewedBy, (int) $documentId]
+            );
+        } catch (Throwable $error) {
+            $message = strtolower($error->getMessage());
+            $missingAuditColumn = strpos($message, 'unknown column') !== false
+                && (strpos($message, 'reviewed_by') !== false || strpos($message, 'reviewed_at') !== false);
+            if (!$missingAuditColumn) {
+                throw $error;
+            }
+
+            error_log('Document review audit columns are unavailable; saving the review decision without audit metadata.');
+            return $this->execute(
+                'UPDATE trainee_documents SET review_status = ? WHERE document_id = ?',
+                [$decision, (int) $documentId]
+            );
+        }
     }
 
     public function classById($classId)
