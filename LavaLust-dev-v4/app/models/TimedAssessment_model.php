@@ -38,8 +38,9 @@ class TimedAssessment_model extends Base_model
     {
         $this->assertPortalRole($user);
         $now = $this->row('SELECT UTC_TIMESTAMP() AS server_time');
-        $this->notifyElapsedDeadlines($user);
-        $this->notifyDueSoon();
+        // Temporarily disabled notification calls to debug 500 error
+        // $this->notifyElapsedDeadlines($user);
+        // $this->notifyDueSoon();
 
         if (($user['role'] ?? '') === 'trainee') {
             return [

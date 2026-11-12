@@ -93,8 +93,8 @@ textarea { resize: vertical; line-height: 1.5; }
 .danger-text { color: var(--rust); }
 .account-chip form { margin: 0; }
 .portal-body { min-width: 0; min-height: calc(100vh - 68px); display: grid; grid-template-columns: 220px minmax(0, 1fr); }
-.section-nav { position: sticky; top: 0; align-self: start; height: calc(100vh - 68px); min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; border-right: 1px solid var(--line); padding: 25px 14px; background: #f6f9fc; }
-.section-nav a { display: flex; align-items: center; gap: 11px; min-height: 39px; border-radius: 4px; padding: 0 11px; color: #566660; font-size: 12px; font-weight: 600; transition: color .14s ease, background .14s ease; }
+.section-nav { position: sticky; top: 0; align-self: start; height: calc(100vh - 68px); height: calc(100dvh - 68px); min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; border-right: 1px solid var(--line); padding: 18px 12px; background: #f6f9fc; }
+.section-nav a { display: flex; align-items: center; gap: 10px; min-height: 36px; flex: 0 0 auto; border-radius: 4px; padding: 0 10px; color: #566660; font-size: 12px; font-weight: 600; transition: color .14s ease, background .14s ease; }
 .section-nav a:hover { color: var(--green-deep); background: #eaf2fa; }
 .section-nav a.active { color: #fff; background: var(--green); }
 .nav-mark { width: 7px; height: 7px; border: 1.5px solid currentColor; border-radius: 2px; opacity: .8; }

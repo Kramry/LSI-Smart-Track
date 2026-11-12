@@ -7,6 +7,7 @@ class Attendance_model extends Base_model
 {
     private static int $scanLimitCleanupCounter = 0;
     private static bool $redisFallbackLogged = false;
+    private static bool $scanLimitTableEnsured = false;
 
     public function activeTraineeByQrCode($qrCode)
     {
@@ -139,6 +140,23 @@ class Attendance_model extends Base_model
         return $this->rows($sql . ' ORDER BY a.attendance_date DESC, t.last_name, t.first_name LIMIT ' . $limit, $values);
     }
 
+    private function ensureScanRateLimitTable()
+    {
+        if (self::$scanLimitTableEnsured) {
+            return;
+        }
+
+        $this->execute(
+            'CREATE TABLE IF NOT EXISTS smarttrack_attendance_scan_limits (
+                rate_key CHAR(64) NOT NULL,
+                window_started_at DATETIME NOT NULL,
+                request_count INT UNSIGNED NOT NULL DEFAULT 0,
+                PRIMARY KEY (rate_key),
+                KEY idx_smarttrack_attendance_scan_window (window_started_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+        self::$scanLimitTableEnsured = true;
+    }
     public function consumeScanRateLimit(array $user, $ipAddress, $limit = 12, $windowSeconds = 60)
     {
         if (!$this->canManageAttendance($user)) {
@@ -180,6 +198,7 @@ class Attendance_model extends Base_model
             }
         }
 
+        $this->ensureScanRateLimitTable();
         $counters = [];
         foreach ($keys as $key) {
             $storedKey = hash('sha256', 'attendance-scan:' . $key);
