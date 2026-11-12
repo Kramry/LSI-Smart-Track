@@ -103,12 +103,14 @@ class Document_model extends Base_model
 
     public function documentById($id)
     {
-        return $this->db->table('trainee_documents d')
-            ->select('d.*, t.user_id AS trainee_user_id')
-            ->left_join('trainees t', 't.trainee_id = d.trainee_id')
-            ->where('d.document_id', (int) $id)
-            ->limit(1)
-            ->get() ?: null;
+        return $this->row(
+            'SELECT d.*, t.user_id AS trainee_user_id
+             FROM trainee_documents d
+             LEFT JOIN trainees t ON t.trainee_id = d.trainee_id
+             WHERE d.document_id = ?
+             LIMIT 1',
+            [(int) $id]
+        );
     }
 
     public function documentStats(array $user)
