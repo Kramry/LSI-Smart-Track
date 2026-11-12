@@ -35,6 +35,10 @@ class XenditService
                 'Accept: application/json',
             ],
         ];
+        if (strpos($path, '/v3/') === 0) {
+            $options[CURLOPT_HTTPHEADER][] = 'api-version: 2024-11-11';
+        }
+
         if ($method === 'POST') {
             $body = json_encode($payload);
             if ($body === false) {

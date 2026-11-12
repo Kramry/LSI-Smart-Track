@@ -148,6 +148,7 @@ class Payment extends Base
         }
         $sessionResult = $service->retrievePaymentSession($sessionId);
         if (!$sessionResult['ok']) {
+            error_log('Xendit payment session verification failed: ' . ($sessionResult['error'] ?? 'Unknown provider error.'));
             return ['ok' => false, 'http_status' => 502, 'message' => 'Unable to verify the payment session with Xendit.'];
         }
         $session = $sessionResult['data'];
@@ -172,6 +173,7 @@ class Payment extends Base
             }
             $requestResult = $service->retrievePaymentRequest($transactionId);
             if (!$requestResult['ok']) {
+                error_log('Xendit payment request verification failed: ' . ($requestResult['error'] ?? 'Unknown provider error.'));
                 return ['ok' => false, 'http_status' => 502, 'message' => 'Unable to verify the completed payment with Xendit.'];
             }
             $request = $requestResult['data'];
