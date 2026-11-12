@@ -11,10 +11,15 @@ class Attendance_model extends Base_model
 
     public function activeTraineeByQrCode($qrCode)
     {
-        return $this->db->table('trainees')
-            ->select('trainee_id')
-            ->where(['qr_code' => $qrCode, 'status' => 'active'])
-            ->get() ?: null;
+           $normalized = strtoupper(trim((string) $qrCode));
+
+            return $this->row(
+                'SELECT trainee_id, first_name, last_name
+                FROM trainees
+                WHERE status = ? AND UPPER(TRIM(qr_code)) = ?
+                LIMIT 1',
+                ['active', $normalized]
+            ) ?: null;
     }
 
     public function enrollmentForClass($classId, $traineeId, array $user)
