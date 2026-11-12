@@ -57,6 +57,7 @@ $router->post('/logout', 'Auth::logout');
 # DASHBOARD & MODULES
 $router->get('/dashboard', 'Dashboard::dashboard');
 $router->get('/manage/ai', 'Ai::manage');
+$router->get('/manage/ai_management', 'Ai::manage');
 $router->get('/manage/ai/documents', 'Ai::documents');
 $router->post('/manage/ai/documents/upload', 'Ai::upload');
 $router->post('/manage/ai/documents/{id}/status', 'Ai::status');
