@@ -179,7 +179,7 @@ class Payment extends Base
             $request = $requestResult['data'];
             if (($request['payment_request_id'] ?? '') !== $transactionId
                 || ($request['reference_id'] ?? '') !== $payment['reference_id']
-                || !$this->xenditAmountMatches($request['amount'] ?? null, $payment['amount'])
+                || !$this->xenditAmountMatches($request['request_amount'] ?? null, $payment['amount'])
                 || strtoupper((string) ($request['currency'] ?? '')) !== 'PHP') {
                 return ['ok' => false, 'http_status' => 422, 'message' => 'The Xendit transaction does not match this payment.'];
             }
