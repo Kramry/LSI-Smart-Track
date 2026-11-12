@@ -260,11 +260,14 @@ class Attendance_model extends Base_model
             return $this->scanFailure(422, 'Choose a session scheduled for this class today.', ['schedule_id' => 'This session is not scheduled for the selected class today.']);
         }
 
-        $trainee = $this->db->table('trainees')
-            ->select('trainee_id, first_name, last_name')
-            ->where(['qr_code' => (string) $qrCode, 'status' => 'active'])
-            ->limit(1)
-            ->get();
+        $normalizedQr = strtoupper(trim((string) $qrCode));
+        $trainee = $this->row(
+            'SELECT trainee_id, first_name, last_name
+             FROM trainees
+             WHERE status = ? AND UPPER(TRIM(qr_code)) = ?
+             LIMIT 1',
+            ['active', $normalizedQr]
+        );
         if (!$trainee) {
             return $this->scanFailure(422, 'No active trainee matches that QR code.', ['qr_code' => 'No active trainee matches this code.']);
         }
