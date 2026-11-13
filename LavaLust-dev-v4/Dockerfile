@@ -15,7 +15,9 @@ FROM php:${PHP_VERSION}-apache
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libcurl4-openssl-dev libzip-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && docker-php-ext-install pdo pdo_mysql zip
+    && docker-php-ext-install pdo pdo_mysql zip \
+    && docker-php-ext-enable zip \
+    && php -r "exit(extension_loaded('zip') ? 0 : 1);"
 
 # mod_rewrite drives the fronilet controller routes (/login, /manage/..., /documents/...).
 RUN a2enmod rewrite headers

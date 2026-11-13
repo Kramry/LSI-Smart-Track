@@ -59,7 +59,7 @@ class GeminiKnowledgeService
             if (empty($operation['done'])) throw new RuntimeException('Gemini document indexing is still processing.');
             if (!empty($operation['error'])) throw new RuntimeException('Gemini could not index the document.');
         }
-        $remoteName = $operation['response']['documentName'] ?? $operation['response']['document']['name'] ?? $operation['document']['name'] ?? '';
+        $remoteName = $operation['response']['name'] ?? $operation['response']['documentName'] ?? $operation['response']['document_name'] ?? $operation['response']['document']['name'] ?? $operation['documentName'] ?? $operation['document_name'] ?? $operation['document']['name'] ?? '';
         if ($remoteName === '') throw new RuntimeException('Gemini indexing completed without a document reference.');
         return $remoteName;
     }
