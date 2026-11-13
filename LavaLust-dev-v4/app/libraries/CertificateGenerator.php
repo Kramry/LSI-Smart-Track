@@ -143,15 +143,19 @@ class CertificateGenerator
         ];
         $body = strtr((string) ($settings['body_text'] ?? ''), $placeholders);
         $this->addText($this->plain($body), 42, 91, 213, 36, $font, '', 16, 'rgb(60,60,60)', 'C', 'C');
-        $this->pdf->page->addContent($this->pdf->graph->getLine(
-            88,
-            158,
-            143,
-            158,
-            ['lineWidth' => 0.3, 'lineColor' => 'rgb(150,150,150)']
-        ));
-        $this->addText($this->plain($settings['signatory_name'] ?? ''), 78, 161, 75, 7, $font, 'B', 12, 'rgb(45,50,60)', 'C');
-        $this->addText($this->plain($settings['signatory_title'] ?? ''), 78, 168, 75, 6, $font, '', 10, 'rgb(45,50,60)', 'C');
+        // The static template signer is a legacy fallback. When assigned signers
+        // exist, draw only their actual signing records below to avoid duplicates.
+        if (empty($data['signatories'])) {
+            $this->pdf->page->addContent($this->pdf->graph->getLine(
+                88,
+                158,
+                143,
+                158,
+                ['lineWidth' => 0.3, 'lineColor' => 'rgb(150,150,150)']
+            ));
+            $this->addText($this->plain($settings['signatory_name'] ?? ''), 78, 161, 75, 7, $font, 'B', 12, 'rgb(45,50,60)', 'C');
+            $this->addText($this->plain($settings['signatory_title'] ?? ''), 78, 168, 75, 6, $font, '', 10, 'rgb(45,50,60)', 'C');
+        }
         $this->addText('Certificate No. ' . $this->plain($data['certificate_number'] ?? ''), 190, 170, 82, 5, $font, '', 8, 'rgb(45,50,60)', 'R');
         $this->drawQrCode($data['verification_url'] ?? '', 256, 150, 24);
         $this->drawSignatures($data['signatories'] ?? []);

@@ -1132,13 +1132,12 @@ class Certificates extends Base
             return $this->actionError($message, 'dashboard', 422);
         }
 
-        $filePath = !empty($certificate['file_path']) ? $this->resolveCertificateAsset($certificate['file_path']) : null;
+        // Regenerate from the saved certificate snapshot so layout fixes and
+        // recovered durable assets are reflected in preview/downloads.
+        $certificate['file_path'] = $this->generateCertificatePDF($certificate);
+        $filePath = $this->resolveCertificateAsset($certificate['file_path']);
         if (!$filePath) {
-            $certificate['file_path'] = $this->generateCertificatePDF($certificate);
-            $filePath = $this->resolveCertificateAsset($certificate['file_path']);
-            if (!$filePath) {
-                throw new RuntimeException('The generated certificate PDF could not be found.');
-            }
+            throw new RuntimeException('The generated certificate PDF could not be found.');
         }
 
         $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $certificate['certificate_id'], 'download', 'Certificate downloaded by ' . $this->user['role']);
