@@ -417,6 +417,15 @@ class Certificates extends Base
                 throw new RuntimeException('The signed certificate data no longer matches its stored signature hash.');
             }
             $signaturePath = $this->resolveCertificateAsset($signatory['signature_path']);
+            if (!$signaturePath && !empty($signatory['signatory_id'])) {
+                $currentSignatory = $this->certificateModel->signatoryById((int) $signatory['signatory_id']);
+                if ($currentSignatory) {
+                    $signaturePath = $this->resolveCertificateAsset($currentSignatory['signature_path'] ?? '');
+                    if ($signaturePath) {
+                        error_log('Using the signatory current saved image to restore a missing certificate signature asset.');
+                    }
+                }
+            }
             if (!$signaturePath) {
                 error_log('A signed certificate is missing its stored signatory image; rendering a visible placeholder.');
                 $signatory['signature_image_missing'] = true;
