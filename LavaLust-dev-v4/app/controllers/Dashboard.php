@@ -395,7 +395,9 @@ class Dashboard extends Base
         if (!$existing) {
             return $this->deny('That record is not available to your account.');
         }
-        $deactivate = in_array($section, ['users', 'trainees'], true);
+        // Preserve program-linked classes, schedules, payments, and certificates.
+        // Programs are retired instead of hard-deleted so historical records remain valid.
+        $deactivate = in_array($section, ['users', 'trainees', 'programs'], true);
         if ($section === 'users' && (int) $id === (int) $this->user['user_id']) {
             return $this->deny('You cannot deactivate your own account.');
         }
@@ -412,11 +414,17 @@ class Dashboard extends Base
         if (in_array($section, ['enrollments', 'attendance', 'documents'], true)) {
             $this->recalculateEligibilityPair($existing['trainee_id'] ?? 0, $existing['class_id'] ?? 0);
         }
-        $this->recordModel->logActivity((int) $this->user['user_id'], 'Deleted ' . $section, 'Record #' . (int) $id . ($deactivate ? ' deactivated' : ' removed'));
+        $activity = $section === 'programs' ? 'Archived program' : 'Deleted ' . $section;
+        $this->recordModel->logActivity((int) $this->user['user_id'], $activity, 'Record #' . (int) $id . ($deactivate ? ' deactivated' : ' removed'));
         if ($this->apiRequest) {
-            return $this->jsonResponse(['message' => $deactivate ? 'Record deactivated.' : 'Record deleted.']);
+            $message = $section === 'programs'
+                ? 'Program archived. Its classes and historical records were retained.'
+                : ($deactivate ? 'Record deactivated.' : 'Record deleted.');
+            return $this->jsonResponse(['message' => $message]);
         }
-        $this->notice($deactivate ? 'Record deactivated.' : 'Record deleted.');
+        $this->notice($section === 'programs'
+            ? 'Program archived. Its classes and historical records were retained.'
+            : ($deactivate ? 'Record deactivated.' : 'Record deleted.'));
         redirect($this->url('manage/' . $section));
     }
 }

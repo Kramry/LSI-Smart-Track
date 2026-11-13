@@ -152,7 +152,7 @@ class Record_model extends Base_model
     public function deleteRecord($table, $key, $id, $deactivate = false)
     {
         $this->assertRecordKey($table, $key);
-        if ($deactivate && in_array($table, ['users', 'trainees'], true)) {
+        if ($deactivate && in_array($table, ['users', 'trainees', 'training_programs'], true)) {
             return $this->db->table($table)->where($key, (int) $id)->update(['status' => 'inactive']);
         }
         return $this->db->table($table)->where($key, (int) $id)->delete();
