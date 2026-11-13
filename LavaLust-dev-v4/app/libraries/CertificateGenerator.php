@@ -209,14 +209,15 @@ class CertificateGenerator
         $font = $this->font($this->template['settings']['font'] ?? 'helvetica');
         foreach ($signatories as $signatory) {
             $path = $signatory['signature_file_path'] ?? '';
-            if ($path === '' || !is_file($path)) {
-                throw new RuntimeException('A signed certificate is missing a signatory image.');
-            }
             $centerX = max(28, min($pageWidth - 28, (float) ($signatory['x_position'] ?? 50) * $pageWidth / 100));
             $topY = max(8, min($pageHeight - 38, (float) ($signatory['y_position'] ?? 80) * $pageHeight / 100));
             $signatureWidth = 42;
             $signatureHeight = 18;
-            $this->addImage($path, $centerX - ($signatureWidth / 2), $topY, $signatureWidth, $signatureHeight);
+            if ($path !== '' && is_file($path)) {
+                $this->addImage($path, $centerX - ($signatureWidth / 2), $topY, $signatureWidth, $signatureHeight);
+            } else {
+                $this->addText('Signature image unavailable', $centerX - 35, $topY + 5, 70, 5, $font, '', 7, 'rgb(160,70,50)', 'C');
+            }
             $this->addText($this->plain($signatory['signatory_name'] ?? ''), $centerX - 35, $topY + 18, 70, 5, $font, 'B', 9, 'rgb(45,50,60)', 'C');
             $this->addText($this->plain($signatory['signatory_position'] ?? ''), $centerX - 35, $topY + 23, 70, 4, $font, '', 8, 'rgb(45,50,60)', 'C');
             $signedAt = strtotime((string) ($signatory['signed_at'] ?? ''));

@@ -418,7 +418,8 @@ class Certificates extends Base
             }
             $signaturePath = $this->resolveCertificateAsset($signatory['signature_path']);
             if (!$signaturePath) {
-                throw new RuntimeException('A protected signatory image for this certificate is missing.');
+                error_log('A signed certificate is missing its stored signatory image; rendering a visible placeholder.');
+                $signatory['signature_image_missing'] = true;
             }
             $signatory['signature_file_path'] = $signaturePath;
         }
