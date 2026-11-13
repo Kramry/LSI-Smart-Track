@@ -10,7 +10,9 @@ class Profile extends Base
         if (!$this->requireUser()) {
             return;
         }
-        $trainee = $this->user['role'] === 'trainee' ? $this->userModel->traineeForUser($this->user['user_id']) : null;
+        $trainee = $this->user['role'] === 'trainee'
+            ? $this->db->from('trainees')->where('user_id', (int) $this->user['user_id'])->limit(1)->get()
+            : null;
         $this->render('profile', ['trainee' => $trainee]);
     }
 
@@ -20,7 +22,9 @@ class Profile extends Base
         if (!$this->requireUser() || !$this->validCsrf()) {
             return $this->deny('Your session expired. Sign in and try again.');
         }
-        $trainee = $this->user['role'] === 'trainee' ? $this->userModel->traineeForUser($this->user['user_id']) : null;
+        $trainee = $this->user['role'] === 'trainee'
+            ? $this->db->from('trainees')->where('user_id', (int) $this->user['user_id'])->limit(1)->get()
+            : null;
         $firstName = trim((string) $this->input('first_name'));
         $lastName = trim((string) $this->input('last_name'));
         $name = $trainee ? trim($firstName . ' ' . $lastName) : trim((string) $this->input('full_name'));
@@ -46,9 +50,13 @@ class Profile extends Base
                 return $this->render('profile', ['trainee' => $trainee, 'error' => 'Enter a valid contact number.']);
             }
         }
-        $this->userModel->updateFullName((int) $this->user['user_id'], $name);
+        $this->db->from('users')->where('user_id', (int) $this->user['user_id'])->update(['full_name' => $name]);
         if ($trainee) {
-            $this->userModel->updateTraineeProfile((int) $trainee['trainee_id'], $firstName, $lastName, $contact);
+            $this->db->from('trainees')->where('trainee_id', (int) $trainee['trainee_id'])->update([
+                'first_name' => $firstName,
+                'last_name' => $lastName,
+                'contact_number' => $contact,
+            ]);
         }
         $this->user['full_name'] = $name;
         $this->session->set_userdata('user', $this->user);
@@ -66,7 +74,11 @@ class Profile extends Base
         if (!$this->requireUser() || !$this->validCsrf()) {
             return $this->deny('Your session expired. Sign in and try again.');
         }
-        $account = $this->userModel->passwordForUser((int) $this->user['user_id']);
+        $account = $this->db->select('password')
+            ->from('users')
+            ->where('user_id', (int) $this->user['user_id'])
+            ->limit(1)
+            ->get();
         $current = (string) $this->input('current_password');
         $newPassword = (string) $this->input('new_password');
         if (!$account || !password_verify($current, $account['password']) || mb_strlen($newPassword) < 10) {
@@ -81,7 +93,9 @@ class Profile extends Base
             }
             return $this->render('profile', ['error' => 'The new password must be different from your current password.']);
         }
-        $this->userModel->updatePassword((int) $this->user['user_id'], password_hash($newPassword, PASSWORD_DEFAULT));
+        $this->db->from('users')->where('user_id', (int) $this->user['user_id'])->update([
+            'password' => password_hash($newPassword, PASSWORD_DEFAULT),
+        ]);
         $this->model->logActivity((int) $this->user['user_id'], 'Changed password', 'Password updated');
         if ($this->apiRequest) {
             return $this->jsonResponse(['message' => 'Password updated.']);

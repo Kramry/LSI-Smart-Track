@@ -27,15 +27,15 @@ class Classes extends Base
         $editingClass = null;
         $editId = $this->numericFilter($query['edit'] ?? '');
         if ($editId && $this->canManage('classes')) {
-            $editingClass = $this->classesModel->classById($editId, $this->user);
+            $editingClass = $this->classById($editId, $this->user);
         }
 
         $this->render('classes', [
             'title' => $this->user['role'] === 'instructor' ? 'My classes' : 'Classes',
             'classes' => $classes,
             'filters' => $filters,
-            'programs' => $this->recordModel->options('programs'),
-            'instructors' => $this->recordModel->options('instructors'),
+            'programs' => $this->programOptions(),
+            'instructors' => $this->instructorOptions(),
             'can_create' => $this->canManage('classes'),
             'show_create_form' => $this->canManage('classes') && (!empty($query['create']) || $editingClass),
             'editing_class' => $editingClass,
@@ -87,8 +87,8 @@ class Classes extends Base
         $classes = $this->buildClassList($this->user, $filters);
         return $this->jsonResponse([
             'classes' => $classes,
-            'programs' => $this->recordModel->options('programs'),
-            'instructors' => $this->recordModel->options('instructors'),
+            'programs' => $this->programOptions(),
+            'instructors' => $this->instructorOptions(),
         ]);
     }
 
@@ -138,22 +138,131 @@ class Classes extends Base
         return $classes;
     }
 
+    private function classById(int $classId, array $user)
+    {
+        $room = $this->hasClassRoomColumn() ? 'c.room' : 'NULL AS room';
+        $query = $this->db->select('c.class_id, c.class_name, ' . $room . ', c.start_date, c.end_date, c.status, c.instructor_id, p.program_id, p.program_name')
+            ->from('training_classes c')->join('training_programs p', 'p.program_id = c.program_id')
+            ->where('c.class_id', $classId);
+        if (($user['role'] ?? '') === 'instructor') {
+            $query->where('c.instructor_id', (int) $user['user_id']);
+        }
+        return $query->limit(1)->get() ?: null;
+    }
+
+    private function hasClassRoomColumn(): bool
+    {
+        $database = (string) (getenv('DB_NAME') ?: 'lsi-smart-track');
+        $result = $this->db->select('COUNT(*) AS total')->from('information_schema.COLUMNS')
+            ->where(['TABLE_SCHEMA' => $database, 'TABLE_NAME' => 'training_classes', 'COLUMN_NAME' => 'room'])
+            ->get();
+        return (int) ($result['total'] ?? 0) > 0;
+    }
+
+    private function programOptions(): array
+    {
+        return $this->db->select('program_id AS id, program_name AS label')->from('training_programs')
+            ->where('status', 'active')->order_by('program_name')->get_all();
+    }
+
+    private function instructorOptions(): array
+    {
+        return $this->db->select('user_id AS id, full_name AS label')->from('users')
+            ->where(['role' => 'instructor', 'status' => 'active'])->order_by('full_name')->get_all();
+    }
+
     private function loadClassDetail($classId, array $user)
     {
-        $class = $this->classesModel->classById($classId, $user);
+        $class = $this->classById((int) $classId, $user);
         if (!$class) {
             return null;
         }
         return [
             'class' => $class,
-            'schedules' => $this->classesModel->schedules($classId),
-            'roster' => $this->classesModel->roster($classId),
-            'attendance' => $this->classesModel->attendance($classId),
-            'assessments' => $this->classesModel->assessments($classId),
-            'documents' => $this->classesModel->documents($classId),
-            'announcements' => $this->classesModel->announcements($classId),
-            'quickStats' => $this->classesModel->quickStats($classId),
+            'schedules' => $this->db->select('schedule_id, schedule_date, start_time, end_time')->from('training_schedules')
+                ->where('class_id', (int) $classId)->order_by('schedule_date')->order_by('start_time')->get_all(),
+            'roster' => $this->classRoster($classId),
+            'attendance' => $this->classAttendance($classId),
+            'assessments' => $this->classAssessments($classId),
+            'documents' => $this->classDocuments($classId),
+            'announcements' => $this->classAnnouncements($classId),
+            'quickStats' => $this->classQuickStats($classId),
         ];
+    }
+
+    private function classRoster(int $classId): array
+    {
+        $rows = $this->db->select('t.trainee_id, t.first_name, t.last_name, t.email, COUNT(DISTINCT a.attendance_id) AS attendance_total, COUNT(DISTINCT CASE WHEN a.status IN (\'Present\', \'Late\') THEN a.attendance_id END) AS attendance_attended, COUNT(DISTINCT CASE WHEN ta.outcome = \'pass\' THEN ta.assessment_id END) AS assessments_passed, COUNT(DISTINCT CASE WHEN ta.outcome = \'fail\' THEN ta.assessment_id END) AS assessments_failed')
+            ->from('class_enrollments e')->join('trainees t', 't.trainee_id = e.trainee_id')
+            ->left_join('attendance_records a', 'a.trainee_id = e.trainee_id AND a.class_id = e.class_id')
+            ->left_join('training_assessments ta', 'ta.trainee_id = e.trainee_id AND ta.class_id = e.class_id')
+            ->where('e.class_id', $classId)
+            ->group_by(['t.trainee_id', 't.first_name', 't.last_name', 't.email'])
+            ->order_by('t.last_name')->order_by('t.first_name')->get_all();
+        foreach ($rows as &$row) $row['trainee_number'] = (string) $row['trainee_id'];
+        unset($row);
+        return $rows;
+    }
+
+    private function classAttendance(int $classId): array
+    {
+        return $this->db->select("a.attendance_date, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, a.status, a.time_in, a.time_out")
+            ->from('attendance_records a')->join('trainees t', 't.trainee_id = a.trainee_id')
+            ->where('a.class_id', $classId)->where('a.attendance_date', '>=', date('Y-m-d', strtotime('-6 days')))
+            ->order_by('a.attendance_date', 'DESC')->order_by('t.last_name')->order_by('t.first_name')->get_all();
+    }
+
+    private function classAssessments(int $classId): array
+    {
+        return $this->db->select("CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, a.assessment_name, a.outcome, a.assessment_date, a.notes")
+            ->from('training_assessments a')->join('trainees t', 't.trainee_id = a.trainee_id')
+            ->where('a.class_id', $classId)->order_by('a.assessment_date', 'DESC')->order_by('trainee_name')->get_all();
+    }
+
+    private function classDocuments(int $classId): array
+    {
+        return $this->db->select("d.document_id, d.document_name, d.upload_date, d.review_status, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name")
+            ->from('trainee_documents d')->left_join('trainees t', 't.trainee_id = d.trainee_id')
+            ->where('d.class_id', $classId)->order_by('d.upload_date', 'DESC')->get_all();
+    }
+
+    private function classAnnouncements(int $classId): array
+    {
+        if (!$this->hasDatabaseColumn('announcements', 'class_id')) return [];
+        return $this->db->select('a.announcement_id, a.title, a.content, a.created_at, a.status, u.full_name AS author')
+            ->from('announcements a')->left_join('users u', 'u.user_id = a.user_id')
+            ->where('a.class_id', $classId)->order_by('a.created_at', 'DESC')->get_all();
+    }
+
+    private function classQuickStats(int $classId): array
+    {
+        $attendance = $this->db->select("COALESCE(ROUND(SUM(CASE WHEN status IN ('Present', 'Late') THEN 1 ELSE 0 END) / NULLIF(COUNT(attendance_id), 0) * 100, 1), 0) AS attendance_rate")
+            ->from('attendance_records')->where('class_id', $classId)->get();
+        $passed = $this->db->from('training_assessments')->where(['class_id' => $classId, 'outcome' => 'pass'])->count();
+        $requirements = $this->db->select('r.required_document_name')->from('certificate_document_requirements r')
+            ->where('r.class_id', $classId)->get_all();
+        $pending = 0;
+        foreach ($requirements as $requirement) {
+            $approved = $this->db->from('trainee_documents')->where([
+                'class_id' => $classId,
+                'document_name' => $requirement['required_document_name'],
+                'review_status' => 'approved',
+            ])->count();
+            if (!$approved) $pending++;
+        }
+        return [
+            'attendance_rate' => $attendance['attendance_rate'] ?? 0,
+            'assessments_passed' => (int) $passed,
+            'pending_documents' => $pending,
+        ];
+    }
+
+    private function hasDatabaseColumn(string $table, string $column): bool
+    {
+        $database = (string) (getenv('DB_NAME') ?: 'lsi-smart-track');
+        $result = $this->db->select('COUNT(*) AS total')->from('information_schema.COLUMNS')
+            ->where(['TABLE_SCHEMA' => $database, 'TABLE_NAME' => $table, 'COLUMN_NAME' => $column])->get();
+        return (int) ($result['total'] ?? 0) > 0;
     }
 
     private function validateClassData(array $input)
@@ -243,15 +352,15 @@ class Classes extends Base
 
         try {
             if ($classId) {
-                if (!$this->classesModel->classById($classId, $user)) {
+                if (!$this->classById((int) $classId, $user)) {
                     $this->db->roll_back();
                     return ['success' => false, 'reason' => 'not_found'];
                 }
-                $this->classesModel->updateClass($classId, $data);
+                $this->db->from('training_classes')->where('class_id', (int) $classId)->update($this->classFields($data));
                 $savedId = $classId;
                 $action = 'Updated class';
             } else {
-                $this->classesModel->createClass($data);
+                $this->db->from('training_classes')->insert($this->classFields($data));
                 $savedId = (int) $this->db->last_id();
                 if ($savedId < 1) {
                     throw new RuntimeException('Class insert did not return a valid ID.');
@@ -259,7 +368,7 @@ class Classes extends Base
                 $action = 'Created class';
             }
 
-            $this->recordModel->logActivity((int) $user['user_id'], $action, 'Class #' . $savedId);
+            $this->logClassActivity((int) $user['user_id'], $action, 'Class #' . $savedId);
             $this->eligibilityModel->recalculateClassEligibility($savedId);
             if (!$this->db->commit()) {
                 throw new RuntimeException('Unable to commit the class transaction.');
@@ -287,6 +396,24 @@ class Classes extends Base
         return 'ongoing';
     }
 
+    private function classFields(array $data): array
+    {
+        $fields = [];
+        foreach (['class_name', 'program_id', 'instructor_id', 'start_date', 'end_date', 'status'] as $field) {
+            if (array_key_exists($field, $data)) $fields[$field] = $data[$field];
+        }
+        return $fields;
+    }
+
+    private function logClassActivity(int $userId, string $action, string $details): void
+    {
+        $this->db->from('activity_logs')->insert([
+            'user_id' => $userId,
+            'action' => $action,
+            'details' => $details,
+        ]);
+    }
+
     public function save()
     {
         $this->requireRequestMethod('POST');
@@ -302,7 +429,7 @@ class Classes extends Base
             return;
         }
 
-        if ($classId && !$this->classesModel->classById($classId, $this->user)) {
+        if ($classId && !$this->classById($classId, $this->user)) {
             return $this->deny('That class is not available to your account.');
         }
 
@@ -333,15 +460,15 @@ class Classes extends Base
         }
 
         $classId = (int) $id;
-        $class = $this->classesModel->classById($classId, $this->user);
+        $class = $this->classById($classId, $this->user);
 
         if (!$class) {
             return $this->deny('That class is not available to your account.');
         }
 
         try {
-            $this->classesModel->deleteClass($classId);
-            $this->recordModel->logActivity((int) $this->user['user_id'], 'Deleted class', 'Class #' . $classId);
+            $this->db->from('training_classes')->where('class_id', $classId)->delete();
+            $this->logClassActivity((int) $this->user['user_id'], 'Deleted class', 'Class #' . $classId);
             $this->notice('Class deleted.');
             redirect($this->url('manage/classes'));
         } catch (Throwable $error) {
@@ -393,15 +520,15 @@ class Classes extends Base
         }
 
         $classId = (int) $id;
-        $class = $this->classesModel->classById($classId, $this->user);
+        $class = $this->classById($classId, $this->user);
 
         if (!$class) {
             return $this->jsonResponse(['message' => 'That class is not available to your account.'], 404);
         }
 
         try {
-            $this->classesModel->deleteClass($classId);
-            $this->recordModel->logActivity((int) $this->user['user_id'], 'Deleted class', 'Class #' . $classId);
+            $this->db->from('training_classes')->where('class_id', $classId)->delete();
+            $this->logClassActivity((int) $this->user['user_id'], 'Deleted class', 'Class #' . $classId);
             return $this->jsonResponse(['message' => 'Class deleted.']);
         } catch (Throwable $error) {
             return $this->jsonResponse(['message' => 'The class could not be deleted. It may have related records.'], 422);

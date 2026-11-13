@@ -34,7 +34,13 @@ class Auth extends Base
 
         $username = trim((string) $this->input('username'));
         $password = (string) $this->input('password');
-        $account = $username !== '' ? $this->userModel->userByUsername($username) : null;
+        $account = $username !== ''
+            ? $this->db->select('user_id, full_name, username, email, password, role, status')
+                ->from('users')
+                ->where('username', $username)
+                ->limit(1)
+                ->get()
+            : null;
 
         if (!$account || $account['status'] !== 'active' || !password_verify($password, $account['password'])) {
             $this->render('login', ['error' => 'The username or password is incorrect.']);
@@ -54,7 +60,7 @@ class Auth extends Base
 
     public function setup()
     {
-        if ($this->userModel->userCount() > 0) {
+        if ((int) $this->db->from('users')->count() > 0) {
             $this->render('login', ['error' => 'Initial setup is already complete. Sign in to continue.']);
             return;
         }
@@ -77,7 +83,14 @@ class Auth extends Base
             return;
         }
 
-        $this->userModel->createInitialAdmin($name, $username, $password);
+        $this->db->from('users')->insert([
+            'full_name' => $name,
+            'username' => $username,
+            'password' => password_hash($password, PASSWORD_DEFAULT),
+            'role' => 'administrator',
+            'status' => 'active',
+            'created_at' => date('Y-m-d H:i:s'),
+        ]);
         redirect($this->url(''));
     }
 
@@ -115,7 +128,12 @@ class Auth extends Base
             return;
         }
 
-        if ($this->userModel->userByUsername($username)) {
+        $existingUser = $this->db->select('user_id')
+            ->from('users')
+            ->where('username', $username)
+            ->limit(1)
+            ->get();
+        if ($existingUser) {
             $this->render('register', ['error' => 'That username is already taken.']);
             return;
         }
@@ -125,10 +143,18 @@ class Auth extends Base
             return;
         }
 
-        $this->userModel->createUser($name, $username, $password, 'trainee', $email !== '' ? $email : null);
-        $account = $this->userModel->userByUsername($username);
+        $this->db->from('users')->insert([
+            'full_name' => $name,
+            'username' => $username,
+            'email' => $email !== '' ? $email : null,
+            'password' => password_hash($password, PASSWORD_DEFAULT),
+            'role' => 'trainee',
+            'status' => 'active',
+            'created_at' => date('Y-m-d H:i:s'),
+        ]);
+        $userId = (int) $this->db->last_id();
 
-        $this->userModel->createTraineeForUser((int) $account['user_id'], [
+        $this->db->from('trainees')->insert([
             'first_name' => $name,
             'last_name' => '',
             'sex' => $sex,
@@ -138,6 +164,9 @@ class Auth extends Base
             'contact_number' => $contactNumber !== '' ? $contactNumber : null,
             'course' => $course !== '' ? $course : null,
             'program_id' => $programId !== '' ? (int) $programId : null,
+            'status' => 'active',
+            'user_id' => $userId,
+            'qr_code' => 'LSI-' . strtoupper(bin2hex(random_bytes(6))),
         ]);
 
         $this->notice('Account created successfully. Please sign in.');

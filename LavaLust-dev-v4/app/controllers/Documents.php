@@ -14,13 +14,13 @@ class Documents extends Base
         $traineeId = (int) $this->input('trainee_id');
         $scope = $this->user['role'] === 'trainee' ? 'trainee' : $this->input('document_scope');
         if ($this->user['role'] === 'trainee') {
-            $trainee = $this->userModel->traineeForUser($this->user['user_id']);
+            $trainee = $this->db->from('trainees')->where('user_id', (int) $this->user['user_id'])->limit(1)->get();
             $traineeId = (int) ($trainee['trainee_id'] ?? 0);
         }
         if ($scope === 'institution') {
             $traineeId = 0;
         }
-        $trainee = $traineeId ? $this->documentModel->traineeById($traineeId) : null;
+        $trainee = $traineeId ? $this->db->select('trainee_id')->from('trainees')->where('trainee_id', $traineeId)->limit(1)->get() : null;
         $file = $_FILES['document'] ?? null;
         if (($scope !== 'institution' && !$trainee) || !in_array($scope, ['trainee', 'institution'], true) || !$file || $file['error'] !== UPLOAD_ERR_OK || $file['size'] > 10 * 1024 * 1024) {
             return $this->actionError('Choose a valid document under 10 MB and a trainee record.', 'manage/documents');
@@ -48,7 +48,7 @@ class Documents extends Base
         }
         if ($access === 'class') {
             $instructorId = $this->user['role'] === 'instructor' ? (int) $this->user['user_id'] : null;
-            if (!$classId || !$this->documentModel->classForDocumentScope($classId, $instructorId)) {
+            if (!$classId || !$this->classForDocumentScope($classId, $instructorId)) {
                 return $this->actionError('Select a class you are permitted to share this document with.', 'manage/documents');
             }
         } elseif ($this->user['role'] !== 'trainee') {
@@ -97,7 +97,7 @@ class Documents extends Base
         }
 
         $reviewStatus = $this->user['role'] === 'trainee' ? 'pending' : 'approved';
-        $this->documentModel->createUploadedDocument([
+        $this->db->from('trainee_documents')->insert([
             'trainee_id' => $traineeId ?: null,
             'class_id' => $classId,
             'uploaded_by' => (int) $this->user['user_id'],
@@ -106,6 +106,7 @@ class Documents extends Base
             'status' => 'active',
             'review_status' => $reviewStatus,
             'access_level' => $access,
+            'upload_date' => date('Y-m-d'),
         ]);
         try {
             $this->recalculateEligibilityPair($traineeId, $classId);
@@ -132,14 +133,14 @@ class Documents extends Base
         if (!$this->requireUser() || !ctype_digit((string) $id)) {
             return $this->deny('The document could not be found.');
         }
-        $document = $this->documentModel->documentById((int) $id);
+        $document = $this->documentById((int) $id);
         $isAdmin = $this->inRoleGroup('administrative_staff');
         $isOwner = $document && $this->user['role'] === 'trainee' && $document['access_level'] !== 'staff' && (int) $document['trainee_user_id'] === (int) $this->user['user_id'];
         $isClassDocument = false;
         if ($document && $this->user['role'] === 'instructor' && !empty($document['trainee_id']) && $document['access_level'] !== 'staff' && !empty($document['class_id'])) {
-            $isClassDocument = $this->documentModel->instructorOwnsClass((int) $document['class_id'], (int) $this->user['user_id']);
+            $isClassDocument = $this->classForDocumentScope((int) $document['class_id'], (int) $this->user['user_id']);
         } elseif ($document && $this->user['role'] === 'trainee' && $document['access_level'] === 'class' && !empty($document['class_id'])) {
-            $isClassDocument = $this->documentModel->traineeEnrolledInClass((int) $document['class_id'], (int) $this->user['user_id']);
+            $isClassDocument = $this->traineeEnrolledInClass((int) $document['class_id'], (int) $this->user['user_id']);
         }
         if (!$document || (!$isAdmin && !$isOwner && !$isClassDocument)) {
             http_response_code(404);
@@ -186,7 +187,7 @@ class Documents extends Base
             return $this->deny('You are not allowed to delete documents.');
         }
 
-        $document = $this->documentModel->documentById((int) $id);
+        $document = $this->documentById((int) $id);
         if (!$document) {
             return $this->actionError('Document not found.', 'manage/documents', 404);
         }
@@ -196,7 +197,7 @@ class Documents extends Base
 
         try {
             $this->recordModel->transactional(function () use ($id, $document, $isCloud) {
-                if (!$this->documentModel->deleteDocument((int) $id)) {
+                if (!$this->db->from('trainee_documents')->where('document_id', (int) $id)->delete()) {
                     throw new RuntimeException('Unable to delete the document record.');
                 }
                 try {
@@ -252,12 +253,12 @@ class Documents extends Base
             return $this->actionError('Invalid status.', 'manage/documents');
         }
 
-        $document = $this->documentModel->documentById((int) $id);
+        $document = $this->documentById((int) $id);
         if (!$document) {
             return $this->actionError('Document not found.', 'manage/documents', 404);
         }
 
-        $this->documentModel->updateDocumentStatus((int) $id, $status);
+        $this->db->from('trainee_documents')->where('document_id', (int) $id)->update(['status' => $status]);
         try {
             $this->recalculateEligibilityPair($document['trainee_id'] ?? 0, $document['class_id'] ?? 0);
         } catch (Throwable $error) {
@@ -286,19 +287,32 @@ class Documents extends Base
             return $this->actionError('Choose approve or reject for this document.', 'manage/documents');
         }
 
-        $document = $this->documentModel->documentById((int) $id);
+        $document = $this->documentById((int) $id);
         if (!$document || empty($document['trainee_id'])) {
             return $this->actionError('Trainee requirement not found.', 'manage/documents', 404);
         }
         if (($this->user['role'] ?? '') === 'instructor' && (
             empty($document['class_id'])
             || $document['access_level'] === 'staff'
-            || !$this->documentModel->instructorOwnsClass((int) $document['class_id'], (int) $this->user['user_id'])
+            || !$this->classForDocumentScope((int) $document['class_id'], (int) $this->user['user_id'])
         )) {
             return $this->deny('You can only review trainee documents for your assigned classes.');
         }
 
-        $this->documentModel->reviewDocument((int) $id, $decision, (int) $this->user['user_id']);
+        try {
+            $this->db->from('trainee_documents')->where('document_id', (int) $id)->update([
+                'review_status' => $decision,
+                'reviewed_by' => (int) $this->user['user_id'],
+                'reviewed_at' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (Throwable $error) {
+            $message = strtolower($error->getMessage());
+            $missingAuditColumn = strpos($message, 'unknown column') !== false
+                && (strpos($message, 'reviewed_by') !== false || strpos($message, 'reviewed_at') !== false);
+            if (!$missingAuditColumn) throw $error;
+            error_log('Document review audit columns are unavailable; saving the review decision without audit metadata.');
+            $this->db->from('trainee_documents')->where('document_id', (int) $id)->update(['review_status' => $decision]);
+        }
         try {
             $this->recalculateEligibilityPair((int) $document['trainee_id'], (int) ($document['class_id'] ?? 0));
         } catch (Throwable $error) {
@@ -321,7 +335,7 @@ class Documents extends Base
 
         $classId = (int) $this->input('class_id');
         $documentName = trim((string) $this->input('required_document_name'));
-        $class = $this->documentModel->classById($classId);
+        $class = $this->db->select('class_id')->from('training_classes')->where('class_id', $classId)->limit(1)->get();
         if (!$class || $documentName === '' || mb_strlen($documentName) > 150) {
             return $this->actionError('Choose a class and enter a document name up to 150 characters.', 'manage/certificate-config');
         }
@@ -381,6 +395,27 @@ class Documents extends Base
             $this->notice('Required document removed.');
             return redirect($this->url('manage/certificate-config'));
         }
+    }
+
+    private function documentById(int $id)
+    {
+        return $this->db->select('d.*, t.user_id AS trainee_user_id')->from('trainee_documents d')
+            ->left_join('trainees t', 't.trainee_id = d.trainee_id')
+            ->where('d.document_id', $id)->limit(1)->get() ?: null;
+    }
+
+    private function classForDocumentScope(int $classId, ?int $instructorId = null): bool
+    {
+        $query = $this->db->select('class_id')->from('training_classes')->where('class_id', $classId);
+        if ($instructorId !== null) $query->where('instructor_id', $instructorId);
+        return (bool) $query->limit(1)->get();
+    }
+
+    private function traineeEnrolledInClass(int $classId, int $userId): bool
+    {
+        return (bool) $this->db->select('e.enrollment_id')->from('class_enrollments e')
+            ->join('trainees t', 't.trainee_id = e.trainee_id')
+            ->where('e.class_id', $classId)->where('t.user_id', $userId)->limit(1)->get();
     }
 }
 

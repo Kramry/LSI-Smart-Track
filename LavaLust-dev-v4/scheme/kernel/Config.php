@@ -158,5 +158,19 @@ class Config {
     public function set($item, $value)
 	{
 		$this->config[$item] = $value;
+		get_config([$item => $value]);
+	}
+
+	/**
+	 * Set a configuration item at runtime.
+	 *
+	 * @param string $item
+	 * @param mixed $value
+	 * @return $this
+	 */
+	public function set_item($item, $value)
+	{
+		$this->set($item, $value);
+		return $this;
 	}
 }

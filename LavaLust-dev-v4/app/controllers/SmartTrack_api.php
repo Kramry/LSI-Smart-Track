@@ -1,10 +1,13 @@
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 require_once APP_DIR . 'controllers/Base.php';
+require_once APP_DIR . 'controllers/ReportsQueries.php';
 require_once APP_DIR . 'libraries/SmartTrackPdf.php';
 
 class SmartTrack_api extends Base
 {
+    use ReportsQueries;
+
     private function notificationService()
     {
         require_once APP_DIR . 'libraries/NotificationService.php';
@@ -768,7 +771,7 @@ class SmartTrack_api extends Base
             return $this->jsonResponse(['message' => 'Reports are available to administrator and staff accounts.'], 403);
         }
         return $this->jsonResponse([
-            'reports' => $this->getReportsModel()->availableReports(),
+            'reports' => $this->availableReports(),
             'programs' => $this->recordModel->options('programs', $user),
             'classes' => $this->recordModel->options('classes', $user),
         ]);
@@ -814,14 +817,14 @@ class SmartTrack_api extends Base
                 'errors' => ['start_date' => 'Must not be later than the end date.'],
             ], 422);
         }
-        $availableReports = $this->getReportsModel()->availableReports();
+        $availableReports = $this->availableReports();
         if (!isset($availableReports[$reportType])) {
             return $this->jsonResponse(['message' => 'Invalid report type.'], 400);
         }
         if (!in_array($format, $availableReports[$reportType]['formats'])) {
             return $this->jsonResponse(['message' => 'Invalid format for this report type.'], 400);
         }
-        $data = $this->getReportsModel()->getReportData($reportType, $filters);
+        $data = $this->getReportData($reportType, $filters);
         if ($format === 'pdf') {
             $this->apiGeneratePDF($reportType, $data, $filters, $availableReports);
         } else {

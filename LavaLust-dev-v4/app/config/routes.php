@@ -65,6 +65,7 @@ $router->post('/manage/ai/documents/{id}/delete', 'Ai::delete');
 $router->post('/manage/ai/chat', 'Ai::chat');
 $router->post('/manage/ai/test', 'Ai::test');
 $router->post('/manage/ai/feedback', 'Ai::feedback');
+
 # CLASSES (GET reads, POST mutations)
 $router->get('/manage/classes/{id}', 'Classes::detail');
 $router->get('/manage/classes', 'Classes::index');
@@ -178,6 +179,7 @@ $router->get('/api/dashboard', 'SmartTrack_api::apiDashboard');
 $router->get('/api/analytics', 'Analytics::data');
 $router->get('/api/analytics/ai-insights', 'Analytics::aiInsights');
 $router->post('/api/analytics/ai-insights/generate', 'Analytics::generateAiInsights');
+
 # CLASSES API (GET reads, POST writes, DELETE deletes)
 $router->get('/api/classes', 'Classes::apiIndex');
 $router->get('/api/classes/{id}', 'Classes::apiDetail');

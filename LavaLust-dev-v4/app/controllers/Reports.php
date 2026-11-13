@@ -2,6 +2,7 @@
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 require_once APP_DIR . 'controllers/Base.php';
+require_once APP_DIR . 'controllers/ReportsQueries.php';
 require_once APP_DIR . 'libraries/SmartTrackPdf.php';
 
 class Reports extends Base
@@ -19,9 +20,11 @@ class Reports extends Base
             'navigation' => $this->navigationForUser(),
             'app_url' => $this->url(''),
             'csrf' => $this->session->userdata('csrf'),
-            'reports' => $this->getReportsModel()->availableReports(),
-            'programs' => $this->recordModel->options('programs', $this->user),
-            'classes' => $this->recordModel->options('classes', $this->user),
+            'reports' => $this->availableReports(),
+            'programs' => $this->db->select('program_id AS id, program_name AS label')
+                ->from('training_programs')->where('status', 'active')->order_by('program_name')->get_all(),
+            'classes' => $this->db->select('class_id AS id, class_name AS label')
+                ->from('training_classes')->where('status', 'active')->order_by('class_name')->get_all(),
         ];
 
         $this->call->view('reports', $data);
@@ -51,7 +54,7 @@ class Reports extends Base
             'method' => trim((string) $this->input('method')),
         ];
 
-        $availableReports = $this->getReportsModel()->availableReports();
+        $availableReports = $this->availableReports();
         if (!isset($availableReports[$reportType])) {
             return $this->jsonResponse(['message' => 'Invalid report type.'], 400);
         }
@@ -60,7 +63,7 @@ class Reports extends Base
             return $this->jsonResponse(['message' => 'Invalid format for this report type.'], 400);
         }
 
-        $data = $this->getReportsModel()->getReportData($reportType, $filters);
+        $data = $this->getReportData($reportType, $filters);
 
         if ($format === 'pdf') {
             $this->generatePDF($reportType, $data, $filters);
@@ -75,7 +78,7 @@ class Reports extends Base
             ob_end_clean();
         }
 
-        $availableReports = $this->getReportsModel()->availableReports();
+        $availableReports = $this->availableReports();
 
         $pdf = SmartTrackPdf::create('L');
         $pdf->setTitle('SmartTrack ' . $availableReports[$reportType]['name']);

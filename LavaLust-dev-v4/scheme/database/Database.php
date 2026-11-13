@@ -665,12 +665,23 @@ class Database {
     }
 
     /**
+     * Set the source table for a query (alias for table()).
+     *
+     * @param string $table_name
+     * @return $this
+     */
+    public function from($table_name)
+    {
+        return $this->table($table_name);
+    }
+
+    /**
      * Select
      *
      * @param  string $columns
      * @return object
      */
-    public function select($columns)
+    public function select($columns = '*')
     {
         $columns = explode(',', $columns);
         foreach ($columns as $key => $column) {

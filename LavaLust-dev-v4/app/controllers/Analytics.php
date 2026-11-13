@@ -28,7 +28,7 @@ class Analytics extends Base
             return $this->actionError($filters['message'], 'manage/analytics');
         }
         if (!empty($filters['filters']['class_id'])
-            && !$this->analyticsModel->classIsVisible((int) $filters['filters']['class_id'], $this->user)) {
+            && !$this->classIsVisible((int) $filters['filters']['class_id'], $this->user)) {
             return $this->actionError('The selected class is not available to your account.', 'manage/analytics');
         }
         $data = [
@@ -38,7 +38,7 @@ class Analytics extends Base
             'app_url' => $this->url(''),
             'csrf' => $this->session->userdata('csrf'),
             'filters' => $filters['filters'],
-            'classes' => $this->analyticsModel->classOptions($this->user),
+            'classes' => $this->classOptions($this->user),
         ];
         $this->call->view('analytics', $data);
     }
@@ -174,7 +174,8 @@ class Analytics extends Base
         if ($bearerToken === null) {
             $sessionUser = $this->session->userdata('user');
             $userId = is_array($sessionUser) ? (int) ($sessionUser['user_id'] ?? 0) : 0;
-            $account = $userId > 0 ? $this->userModel->apiUserById($userId) : null;
+            $account = $userId > 0 ? $this->db->select('user_id, full_name, username, role, status')
+                ->from('users')->where('user_id', $userId)->limit(1)->get() : null;
             $this->user = $account && ($account['status'] ?? '') === 'active'
                 ? [
                     'user_id' => (int) $account['user_id'],
@@ -210,7 +211,7 @@ class Analytics extends Base
             return null;
         }
         if (!empty($result['filters']['class_id'])
-            && !$this->analyticsModel->classIsVisible((int) $result['filters']['class_id'], $this->user)) {
+            && !$this->classIsVisible((int) $result['filters']['class_id'], $this->user)) {
             $this->jsonResponse(['message' => 'The selected class is not available to your account.'], 403);
             return null;
         }
@@ -221,6 +222,30 @@ class Analytics extends Base
     {
         return $this->inRoleGroup('teaching_staff', $user);
     }
+
+    private function classOptions(array $user): array
+    {
+        $query = $this->db->select('class_id, class_name')->from('training_classes');
+        if (($user['role'] ?? '') === 'instructor') {
+            $query->where('instructor_id', (int) $user['user_id']);
+        }
+        return $query->order_by('class_name')->get_all();
+    }
+
+    private function classIsVisible($classId, array $user): bool
+    {
+        if (!$this->canViewAnalytics($user)
+            || (!is_int($classId) && (!is_string($classId) || !ctype_digit($classId)))
+            || (int) $classId < 1) {
+            return false;
+        }
+        $query = $this->db->select('class_id')->from('training_classes')->where('class_id', (int) $classId);
+        if (($user['role'] ?? '') === 'instructor') {
+            $query->where('instructor_id', (int) $user['user_id']);
+        }
+        return (bool) $query->limit(1)->get();
+    }
+
 
     private function validatedFilters(array $input)
     {
