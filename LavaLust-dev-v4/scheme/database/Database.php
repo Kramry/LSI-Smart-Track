@@ -665,14 +665,18 @@ class Database {
     }
 
     /**
-     * Set the source table for a query (alias for table()).
+     * Set the source table for a query without discarding a preceding select().
+     *
+     * Unlike table(), this supports the documented select()->from() chain.
      *
      * @param string $table_name
      * @return $this
      */
     public function from($table_name)
     {
-        return $this->table($table_name);
+        $this->validate_identifier($table_name);
+        $this->table = $this->db_prefix . $table_name;
+        return $this;
     }
 
     /**
