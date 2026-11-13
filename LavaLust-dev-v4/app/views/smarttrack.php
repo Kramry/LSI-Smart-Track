@@ -1915,7 +1915,9 @@ $labels = [
     $app_url,
 ) ?>manage/<?= $e($section) ?>/delete/<?= $e(
     $record[$primary_key],
-) ?>" data-confirm="Delete or deactivate this record?"><input type="hidden" name="_csrf" value="<?= $e(
+) ?>" data-confirm="<?= $section === "programs"
+    ? "Permanently delete this program? Related classes and certificates will also be deleted, and trainees will be unassigned."
+    : "Delete or deactivate this record?" ?>"><input type="hidden" name="_csrf" value="<?= $e(
     $csrf,
 ) ?>"><button class="text-button danger-text" type="submit">Delete</button></form><?php endif; ?>
                                         </td><?php endif; ?></tr><?php endforeach; ?>
