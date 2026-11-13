@@ -392,13 +392,13 @@ class Certificates extends Base
         }
         $filePath = null;
         if (($template['mode'] ?? '') === 'upload') {
-            $filePath = $this->privateCertificatePath($template['file_path'] ?? '');
+            $filePath = $this->resolveCertificateAsset($template['file_path'] ?? '');
             if (!$filePath) {
                 throw new RuntimeException('The certificate background saved with this certificate is missing.');
             }
         }
         $template['settings'] = is_array($template['settings'] ?? null) ? $template['settings'] : [];
-        $logoPath = $this->privateCertificatePath($template['settings']['logo_path'] ?? '');
+        $logoPath = $this->resolveCertificateAsset($template['settings']['logo_path'] ?? '');
         if (!empty($template['settings']['logo_path']) && !$logoPath) {
             throw new RuntimeException('The institution logo saved with this certificate is missing.');
         }
@@ -413,7 +413,7 @@ class Certificates extends Base
             if (empty($signatory['hash_valid'])) {
                 throw new RuntimeException('The signed certificate data no longer matches its stored signature hash.');
             }
-            $signaturePath = $this->privateCertificatePath($signatory['signature_path']);
+            $signaturePath = $this->resolveCertificateAsset($signatory['signature_path']);
             if (!$signaturePath) {
                 throw new RuntimeException('A protected signatory image for this certificate is missing.');
             }
@@ -421,7 +421,7 @@ class Certificates extends Base
         }
         unset($signatory);
         if ($previewSignature) {
-            $signaturePath = $this->privateCertificatePath($previewSignature['signature_path']);
+            $signaturePath = $this->resolveCertificateAsset($previewSignature['signature_path']);
             if (!$signaturePath) {
                 throw new RuntimeException('Your protected signatory image is missing.');
             }
@@ -460,9 +460,61 @@ class Certificates extends Base
         if (file_put_contents($outputPath, $pdfData, LOCK_EX) === false) {
             throw new RuntimeException('The certificate PDF could not be saved.');
         }
-        $relativePath = 'runtime/uploads/certificates/' . $filename;
+        $relativePath = $this->storeCertificateAsset(
+            $outputPath,
+            'certificates/generated/' . $filename,
+            'application/pdf',
+            'runtime/uploads/certificates/' . $filename
+        );
+        if (strpos($relativePath, 'cloud://') === 0) {
+            @unlink($outputPath);
+        }
         $this->certificateModel->updateCertificateFilePath((int) $certificate['certificate_id'], $relativePath);
         return $relativePath;
+    }
+
+    /** Resolve a protected local certificate file or a durable cloud:// object. */
+    private function resolveCertificateAsset($storedPath)
+    {
+        $storedPath = (string) $storedPath;
+        if (strpos($storedPath, 'cloud://') !== 0) {
+            return $this->privateCertificatePath($storedPath);
+        }
+
+        $remotePath = substr($storedPath, strlen('cloud://'));
+        if ($remotePath === '' || strpos($remotePath, '..') !== false) {
+            return null;
+        }
+        $this->call->library('CloudStorage');
+        $storage = new CloudStorage();
+        if (!$storage->isEnabled()) {
+            return null;
+        }
+        $tempPath = tempnam(sys_get_temp_dir(), 'smarttrack-cert-');
+        if ($tempPath === false) {
+            return null;
+        }
+        if (!$storage->download($remotePath, $tempPath)) {
+            @unlink($tempPath);
+            return null;
+        }
+        register_shutdown_function(static function () use ($tempPath) {
+            if (is_file($tempPath)) {
+                @unlink($tempPath);
+            }
+        });
+        return $tempPath;
+    }
+
+    /** Upload a local certificate asset when cloud storage is available. */
+    private function storeCertificateAsset($localPath, $remotePath, $mime, $fallbackPath)
+    {
+        $this->call->library('CloudStorage');
+        $storage = new CloudStorage();
+        if ($storage->isEnabled() && $storage->upload($localPath, $remotePath, $mime)) {
+            return 'cloud://' . ltrim($remotePath, '/');
+        }
+        return $fallbackPath;
     }
 
     public function revokeCertificate()
@@ -688,7 +740,17 @@ class Certificates extends Base
         if (!$saved) {
             return ['path' => null, 'error' => 'The signature image could not be saved.'];
         }
-        return ['path' => 'runtime/uploads/certificates/signatures/' . $filename, 'error' => null];
+        $relativePath = 'runtime/uploads/certificates/signatures/' . $filename;
+        $storedPath = $this->storeCertificateAsset(
+            $destination,
+            'certificates/signatures/' . $filename,
+            'image/png',
+            $relativePath
+        );
+        if (strpos($storedPath, 'cloud://') === 0) {
+            @unlink($destination);
+        }
+        return ['path' => $storedPath, 'error' => null];
     }
 
     private function saveCertificateTemplate()
@@ -896,10 +958,21 @@ class Certificates extends Base
             return ['path' => null, 'error' => 'The protected certificate upload directory could not be created.'];
         }
         $filename = bin2hex(random_bytes(20)) . '.' . $extension;
-        if (!move_uploaded_file($upload['tmp_name'], $uploadDirectory . DIRECTORY_SEPARATOR . $filename)) {
+        $destination = $uploadDirectory . DIRECTORY_SEPARATOR . $filename;
+        if (!move_uploaded_file($upload['tmp_name'], $destination)) {
             return ['path' => null, 'error' => 'The uploaded file could not be saved.'];
         }
-        return ['path' => 'runtime/uploads/certificates/templates/' . $filename, 'error' => null];
+        $relativePath = 'runtime/uploads/certificates/templates/' . $filename;
+        $storedPath = $this->storeCertificateAsset(
+            $destination,
+            'certificates/templates/' . $filename,
+            $mime,
+            $relativePath
+        );
+        if (strpos($storedPath, 'cloud://') === 0) {
+            @unlink($destination);
+        }
+        return ['path' => $storedPath, 'error' => null];
     }
 
     public function activateCertificateTemplate($id)
@@ -969,7 +1042,7 @@ class Certificates extends Base
             return $this->notFound('Certificate template not found.');
         }
         $asset = ($this->queryParams()['asset'] ?? '') === 'logo' ? ($template['settings']['logo_path'] ?? '') : ($template['file_path'] ?? '');
-        $filePath = $this->privateCertificatePath($asset);
+        $filePath = $this->resolveCertificateAsset($asset);
         if (!$filePath) {
             return $this->notFound('Certificate template file not found.');
         }
@@ -1046,10 +1119,10 @@ class Certificates extends Base
             return $this->actionError($message, 'dashboard', 422);
         }
 
-        $filePath = !empty($certificate['file_path']) ? $this->privateCertificatePath($certificate['file_path']) : null;
+        $filePath = !empty($certificate['file_path']) ? $this->resolveCertificateAsset($certificate['file_path']) : null;
         if (!$filePath) {
             $certificate['file_path'] = $this->generateCertificatePDF($certificate);
-            $filePath = $this->privateCertificatePath($certificate['file_path']);
+            $filePath = $this->resolveCertificateAsset($certificate['file_path']);
             if (!$filePath) {
                 throw new RuntimeException('The generated certificate PDF could not be found.');
             }
