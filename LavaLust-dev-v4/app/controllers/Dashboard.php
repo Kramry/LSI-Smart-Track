@@ -506,8 +506,9 @@ class Dashboard extends Base
 
     private function publishedAnnouncements(): array
     {
-        return $this->db->select('announcement_id, title, content, created_at')->from('announcements')
-            ->where('status', 'published')->order_by('created_at', 'DESC')->limit(5)->get_all();
+        return $this->db->select('announcements.announcement_id, announcements.title, announcements.content, announcements.created_at')
+            ->from('announcements')->where('announcements.status', 'published')
+            ->order_by('announcements.created_at', 'DESC')->limit(5)->get_all();
     }
 
     private function dashboardChartData(array $user): array

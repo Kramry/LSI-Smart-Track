@@ -665,9 +665,7 @@ class Database {
     }
 
     /**
-     * Set the source table for a query without discarding a preceding select().
-     *
-     * Unlike table(), this supports the documented select()->from() chain.
+     * Set the source table and start a fresh query, preserving a preceding select().
      *
      * @param string $table_name
      * @return $this
@@ -675,6 +673,9 @@ class Database {
     public function from($table_name)
     {
         $this->validate_identifier($table_name);
+        $columns = $this->columns;
+        $this->reset_query();
+        $this->columns = $columns;
         $this->table = $this->db_prefix . $table_name;
         return $this;
     }
