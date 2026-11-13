@@ -1916,10 +1916,10 @@ $labels = [
 ) ?>manage/<?= $e($section) ?>/delete/<?= $e(
     $record[$primary_key],
 ) ?>" data-confirm="<?= $section === "programs"
-    ? "Permanently delete this program? Related classes and certificates will also be deleted, and trainees will be unassigned."
+    ? "Permanently delete this program? Related classes and certificates will also be deleted, and trainees will be unassigned. Programs with payment or bond history cannot be deleted."
     : "Delete or deactivate this record?" ?>"><input type="hidden" name="_csrf" value="<?= $e(
     $csrf,
-) ?>"><button class="text-button danger-text" type="submit">Delete</button></form><?php endif; ?>
+) ?>"><button class="text-button danger-text" type="submit"><?= $section === "programs" ? "Delete permanently" : "Delete" ?></button></form><?php endif; ?>
                                         </td><?php endif; ?></tr><?php endforeach; ?>
                                 </tbody></table></div>
                                 <?php if (

@@ -396,6 +396,29 @@ class Dashboard extends Base
         if (!$existing) {
             return $this->deny('That record is not available to your account.');
         }
+        if ($section === 'programs') {
+            $financialHistory = $this->db->select('COUNT(*) AS total')
+                ->from('payments pay')
+                ->join('trainee_fees fee', 'fee.trainee_fee_id = pay.trainee_fee_id')
+                ->join('training_classes class', 'class.class_id = fee.class_id')
+                ->where('class.program_id', (int) $id)
+                ->get();
+            $bondHistory = $this->db->select('COUNT(*) AS total')
+                ->from('bond_transactions bond')
+                ->join('trainee_fees fee', 'fee.trainee_fee_id = bond.trainee_fee_id')
+                ->join('training_classes class', 'class.class_id = fee.class_id')
+                ->where('class.program_id', (int) $id)
+                ->get();
+            if ((int) ($financialHistory['total'] ?? 0) > 0 || (int) ($bondHistory['total'] ?? 0) > 0) {
+                $message = 'This program cannot be permanently deleted because it has payment or bond history. The financial records were kept intact.';
+                if ($this->apiRequest) {
+                    return $this->jsonResponse(['message' => $message], 409);
+                }
+                $this->notice($message);
+                redirect($this->url('manage/' . $section));
+                return;
+            }
+        }
         // Keep user and trainee accounts recoverable; programs are explicitly deleted.
         $deactivate = in_array($section, ['users', 'trainees'], true);
         if ($section === 'users' && (int) $id === (int) $this->user['user_id']) {
