@@ -400,7 +400,10 @@ class Certificates extends Base
         $template['settings'] = is_array($template['settings'] ?? null) ? $template['settings'] : [];
         $logoPath = $this->resolveCertificateAsset($template['settings']['logo_path'] ?? '');
         if (!empty($template['settings']['logo_path']) && !$logoPath) {
-            throw new RuntimeException('The institution logo saved with this certificate is missing.');
+            // A logo is decorative, unlike the certificate background and signatures.
+            // Older Render deployments may have lost local uploads, so keep the
+            // certificate printable and omit a missing logo.
+            error_log('Certificate logo file is unavailable; generating without the optional logo.');
         }
         $template['settings']['logo_file_path'] = $logoPath;
 
