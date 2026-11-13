@@ -34,6 +34,12 @@ class GeminiKnowledgeService
     {
         $this->assertConfigured();
         $size = filesize($path);
+        $documentsBefore = [];
+        try {
+            $documentsBefore = $this->listStoreDocuments($storeName);
+        } catch (Throwable $ignored) {
+            // The upload operation remains authoritative; this snapshot only supports fallback lookup.
+        }
         $start = $this->request('POST', 'https://generativelanguage.googleapis.com/upload/v1beta/' . $storeName . ':uploadToFileSearchStore', [
             'displayName' => $displayName,
         ], [
@@ -60,8 +66,38 @@ class GeminiKnowledgeService
             if (!empty($operation['error'])) throw new RuntimeException('Gemini could not index the document.');
         }
         $remoteName = $operation['response']['name'] ?? $operation['response']['documentName'] ?? $operation['response']['document_name'] ?? $operation['response']['document']['name'] ?? $operation['documentName'] ?? $operation['document_name'] ?? $operation['document']['name'] ?? '';
+        if ($remoteName === '') {
+            $knownNames = [];
+            foreach ($documentsBefore as $document) {
+                if (!empty($document['name'])) $knownNames[(string) $document['name']] = true;
+            }
+            foreach ($this->listStoreDocuments($storeName) as $document) {
+                if (($document['displayName'] ?? '') === $displayName
+                    && !empty($document['name'])
+                    && !isset($knownNames[(string) $document['name']])) {
+                    $remoteName = (string) $document['name'];
+                    break;
+                }
+            }
+        }
         if ($remoteName === '') throw new RuntimeException('Gemini indexing completed without a document reference.');
         return $remoteName;
+    }
+
+    private function listStoreDocuments($storeName)
+    {
+        $documents = [];
+        $pageToken = '';
+        do {
+            $query = '?pageSize=20';
+            if ($pageToken !== '') $query .= '&pageToken=' . rawurlencode($pageToken);
+            $page = $this->request('GET', self::API . '/' . $storeName . '/documents' . $query);
+            foreach (($page['documents'] ?? []) as $document) {
+                if (is_array($document)) $documents[] = $document;
+            }
+            $pageToken = (string) ($page['nextPageToken'] ?? '');
+        } while ($pageToken !== '');
+        return $documents;
     }
 
     public function deleteRemoteDocument($remoteName)
