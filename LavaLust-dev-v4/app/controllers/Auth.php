@@ -35,11 +35,7 @@ class Auth extends Base
         $username = trim((string) $this->input('username'));
         $password = (string) $this->input('password');
         $account = $username !== ''
-            ? $this->db->select('user_id, full_name, username, email, password, role, status')
-                ->from('users')
-                ->where('username', $username)
-                ->limit(1)
-                ->get()
+            ? $this->userModel->userByUsername($username)
             : null;
 
         if (!$account || $account['status'] !== 'active' || !password_verify($password, $account['password'])) {
@@ -60,7 +56,7 @@ class Auth extends Base
 
     public function setup()
     {
-        if ((int) $this->db->from('users')->count() > 0) {
+        if ($this->userModel->userCount() > 0) {
             $this->render('login', ['error' => 'Initial setup is already complete. Sign in to continue.']);
             return;
         }
@@ -83,14 +79,7 @@ class Auth extends Base
             return;
         }
 
-        $this->db->from('users')->insert([
-            'full_name' => $name,
-            'username' => $username,
-            'password' => password_hash($password, PASSWORD_DEFAULT),
-            'role' => 'administrator',
-            'status' => 'active',
-            'created_at' => date('Y-m-d H:i:s'),
-        ]);
+        $this->userModel->createInitialAdmin($name, $username, $password);
         redirect($this->url(''));
     }
 
@@ -128,11 +117,7 @@ class Auth extends Base
             return;
         }
 
-        $existingUser = $this->db->select('user_id')
-            ->from('users')
-            ->where('username', $username)
-            ->limit(1)
-            ->get();
+        $existingUser = $this->userModel->userByUsername($username);
         if ($existingUser) {
             $this->render('register', ['error' => 'That username is already taken.']);
             return;
@@ -143,31 +128,26 @@ class Auth extends Base
             return;
         }
 
-        $this->db->from('users')->insert([
-            'full_name' => $name,
-            'username' => $username,
-            'email' => $email !== '' ? $email : null,
-            'password' => password_hash($password, PASSWORD_DEFAULT),
-            'role' => 'trainee',
-            'status' => 'active',
-            'created_at' => date('Y-m-d H:i:s'),
-        ]);
-        $userId = (int) $this->db->last_id();
-
-        $this->db->from('trainees')->insert([
-            'first_name' => $name,
-            'last_name' => '',
-            'sex' => $sex,
-            'date_of_birth' => $dateOfBirth !== '' ? $dateOfBirth : null,
-            'address' => $address !== '' ? $address : null,
-            'email' => $email !== '' ? $email : null,
-            'contact_number' => $contactNumber !== '' ? $contactNumber : null,
-            'course' => $course !== '' ? $course : null,
-            'program_id' => $programId !== '' ? (int) $programId : null,
-            'status' => 'active',
-            'user_id' => $userId,
-            'qr_code' => 'LSI-' . strtoupper(bin2hex(random_bytes(6))),
-        ]);
+        $this->userModel->registerTrainee(
+            [
+                'full_name' => $name,
+                'username' => $username,
+                'email' => $email !== '' ? $email : null,
+                'password' => $password,
+                'role' => 'trainee',
+            ],
+            [
+                'first_name' => $name,
+                'last_name' => '',
+                'sex' => $sex,
+                'date_of_birth' => $dateOfBirth !== '' ? $dateOfBirth : null,
+                'address' => $address !== '' ? $address : null,
+                'email' => $email !== '' ? $email : null,
+                'contact_number' => $contactNumber !== '' ? $contactNumber : null,
+                'course' => $course !== '' ? $course : null,
+                'program_id' => $programId !== '' ? (int) $programId : null,
+            ]
+        );
 
         $this->notice('Account created successfully. Please sign in.');
         redirect($this->url(''));

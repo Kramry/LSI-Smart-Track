@@ -14,13 +14,13 @@ class Documents extends Base
         $traineeId = (int) $this->input('trainee_id');
         $scope = $this->user['role'] === 'trainee' ? 'trainee' : $this->input('document_scope');
         if ($this->user['role'] === 'trainee') {
-            $trainee = $this->db->from('trainees')->where('user_id', (int) $this->user['user_id'])->limit(1)->get();
+            $trainee = $this->userModel->traineeForUser((int) $this->user['user_id']);
             $traineeId = (int) ($trainee['trainee_id'] ?? 0);
         }
         if ($scope === 'institution') {
             $traineeId = 0;
         }
-        $trainee = $traineeId ? $this->db->select('trainee_id')->from('trainees')->where('trainee_id', $traineeId)->limit(1)->get() : null;
+        $trainee = $traineeId ? $this->documentModel->traineeById($traineeId) : null;
         $file = $_FILES['document'] ?? null;
         if (($scope !== 'institution' && !$trainee) || !in_array($scope, ['trainee', 'institution'], true) || !$file || $file['error'] !== UPLOAD_ERR_OK || $file['size'] > 10 * 1024 * 1024) {
             return $this->actionError('Choose a valid document under 10 MB and a trainee record.', 'manage/documents');
@@ -97,7 +97,7 @@ class Documents extends Base
         }
 
         $reviewStatus = $this->user['role'] === 'trainee' ? 'pending' : 'approved';
-        $this->db->from('trainee_documents')->insert([
+        $this->documentModel->createUploadedDocument([
             'trainee_id' => $traineeId ?: null,
             'class_id' => $classId,
             'uploaded_by' => (int) $this->user['user_id'],
@@ -197,7 +197,7 @@ class Documents extends Base
 
         try {
             $this->recordModel->transactional(function () use ($id, $document, $isCloud) {
-                if (!$this->db->from('trainee_documents')->where('document_id', (int) $id)->delete()) {
+                if (!$this->documentModel->deleteDocument((int) $id)) {
                     throw new RuntimeException('Unable to delete the document record.');
                 }
                 try {
@@ -258,7 +258,7 @@ class Documents extends Base
             return $this->actionError('Document not found.', 'manage/documents', 404);
         }
 
-        $this->db->from('trainee_documents')->where('document_id', (int) $id)->update(['status' => $status]);
+        $this->documentModel->updateDocumentStatus((int) $id, $status);
         try {
             $this->recalculateEligibilityPair($document['trainee_id'] ?? 0, $document['class_id'] ?? 0);
         } catch (Throwable $error) {
@@ -299,20 +299,12 @@ class Documents extends Base
             return $this->deny('You can only review trainee documents for your assigned classes.');
         }
 
-        try {
-            $this->db->from('trainee_documents')->where('document_id', (int) $id)->update([
-                'review_status' => $decision,
-                'reviewed_by' => (int) $this->user['user_id'],
-                'reviewed_at' => date('Y-m-d H:i:s'),
-            ]);
-        } catch (Throwable $error) {
-            $message = strtolower($error->getMessage());
-            $missingAuditColumn = strpos($message, 'unknown column') !== false
-                && (strpos($message, 'reviewed_by') !== false || strpos($message, 'reviewed_at') !== false);
-            if (!$missingAuditColumn) throw $error;
-            error_log('Document review audit columns are unavailable; saving the review decision without audit metadata.');
-            $this->db->from('trainee_documents')->where('document_id', (int) $id)->update(['review_status' => $decision]);
-        }
+        $this->documentModel->reviewDocument(
+            (int) $id,
+            $decision,
+            (int) $this->user['user_id'],
+            date('Y-m-d H:i:s')
+        );
         try {
             $this->recalculateEligibilityPair((int) $document['trainee_id'], (int) ($document['class_id'] ?? 0));
         } catch (Throwable $error) {
@@ -335,7 +327,7 @@ class Documents extends Base
 
         $classId = (int) $this->input('class_id');
         $documentName = trim((string) $this->input('required_document_name'));
-        $class = $this->db->select('class_id')->from('training_classes')->where('class_id', $classId)->limit(1)->get();
+        $class = $this->documentModel->classById($classId);
         if (!$class || $documentName === '' || mb_strlen($documentName) > 150) {
             return $this->actionError('Choose a class and enter a document name up to 150 characters.', 'manage/certificate-config');
         }
@@ -399,23 +391,17 @@ class Documents extends Base
 
     private function documentById(int $id)
     {
-        return $this->db->select('d.document_id, d.trainee_id, d.class_id, d.uploaded_by, d.document_name, d.file_path, d.upload_date, d.status, d.access_level, d.review_status, d.reviewed_by, d.reviewed_at, t.user_id AS trainee_user_id')->from('trainee_documents d')
-            ->left_join('trainees t', 't.trainee_id = d.trainee_id')
-            ->where('d.document_id', $id)->limit(1)->get() ?: null;
+        return $this->documentModel->documentById($id);
     }
 
     private function classForDocumentScope(int $classId, ?int $instructorId = null): bool
     {
-        $query = $this->db->select('class_id')->from('training_classes')->where('class_id', $classId);
-        if ($instructorId !== null) $query->where('instructor_id', $instructorId);
-        return (bool) $query->limit(1)->get();
+        return (bool) $this->documentModel->classForDocumentScope($classId, $instructorId);
     }
 
     private function traineeEnrolledInClass(int $classId, int $userId): bool
     {
-        return (bool) $this->db->select('e.enrollment_id')->from('class_enrollments e')
-            ->join('trainees t', 't.trainee_id = e.trainee_id')
-            ->where('e.class_id', $classId)->where('t.user_id', $userId)->limit(1)->get();
+        return $this->documentModel->traineeEnrolledInClass($classId, $userId);
     }
 }
 

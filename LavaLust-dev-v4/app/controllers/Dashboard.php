@@ -12,13 +12,13 @@ class Dashboard extends Base
         }
 
         $data = [
-            'stats' => $this->dashboardStats($this->user),
-            'attendance' => $this->recentAttendance($this->user),
-            'announcements' => $this->publishedAnnouncements(),
+            'stats' => $this->dashboardModel->dashboardStats($this->user),
+            'attendance' => $this->dashboardModel->recentAttendance($this->user),
+            'announcements' => $this->dashboardModel->announcements(),
         ];
 
         if ($this->inRoleGroup('teaching_staff')) {
-            $data['charts'] = $this->dashboardChartData($this->user);
+            $data['charts'] = $this->dashboardModel->dashboardChartData($this->user);
         }
 
         $this->render('dashboard', $data);
@@ -82,7 +82,7 @@ class Dashboard extends Base
 
         $traineeId = 0;
         if ($section === 'attendance' && ($this->user['role'] ?? '') === 'trainee') {
-            $trainee = $this->db->from('trainees')->where('user_id', (int) $this->user['user_id'])->limit(1)->get();
+            $trainee = $this->userModel->traineeForUser((int) $this->user['user_id']);
             $traineeId = $trainee ? (int) $trainee['trainee_id'] : 0;
         }
 
@@ -102,11 +102,10 @@ class Dashboard extends Base
                 'schedules' => $this->recordModel->options('schedules', $this->user),
             ],
             'summary' => $section === 'attendance' && $this->user['role'] === 'trainee'
-                ? $this->db->select("SUM(status = 'Present') AS present, SUM(status = 'Late') AS late, SUM(status = 'Absent') AS absent")
-                    ->from('attendance_records')->where('trainee_id', $traineeId)->get()
+                ? $this->attendanceModel->attendanceSummary($traineeId)
                 : [],
             'followups' => $section === 'attendance' && $this->user['role'] !== 'trainee'
-                ? $this->absenceFollowUps($this->user)
+                ? $this->dashboardModel->absenceFollowUps($this->user)
                 : [],
             'document_requirements' => $section === 'documents' && $this->user['role'] === 'trainee'
                 ? $this->documentModel->requirementsForTrainee((int) $this->user['user_id'])
@@ -274,7 +273,7 @@ class Dashboard extends Base
         }
         if ($section === 'inquiries') {
             if ($this->user['role'] === 'trainee') {
-                $trainee = $this->db->from('trainees')->where('user_id', (int) $this->user['user_id'])->limit(1)->get();
+                $trainee = $this->userModel->traineeForUser((int) $this->user['user_id']);
                 if (!$trainee) {
                     $errors[] = 'Your trainee profile is not linked to this account.';
                 } else {
@@ -397,19 +396,7 @@ class Dashboard extends Base
             return $this->deny('That record is not available to your account.');
         }
         if ($section === 'programs') {
-            $financialHistory = $this->db->select('COUNT(*) AS total')
-                ->from('payments pay')
-                ->join('trainee_fees fee', 'fee.trainee_fee_id = pay.trainee_fee_id')
-                ->join('training_classes class', 'class.class_id = fee.class_id')
-                ->where('class.program_id', (int) $id)
-                ->get();
-            $bondHistory = $this->db->select('COUNT(*) AS total')
-                ->from('bond_transactions bond')
-                ->join('trainee_fees fee', 'fee.trainee_fee_id = bond.trainee_fee_id')
-                ->join('training_classes class', 'class.class_id = fee.class_id')
-                ->where('class.program_id', (int) $id)
-                ->get();
-            if ((int) ($financialHistory['total'] ?? 0) > 0 || (int) ($bondHistory['total'] ?? 0) > 0) {
+            if ($this->paymentModel->hasProgramFinancialHistory((int) $id)) {
                 $message = 'This program cannot be permanently deleted because it has payment or bond history. The financial records were kept intact.';
                 if ($this->apiRequest) {
                     return $this->jsonResponse(['message' => $message], 409);
@@ -447,148 +434,6 @@ class Dashboard extends Base
         redirect($this->url('manage/' . $section));
     }
 
-    private function dashboardStats(array $user): array
-    {
-        $role = $user['role'] ?? '';
-        $userId = (int) ($user['user_id'] ?? 0);
-
-        if ($role === 'trainee') {
-            $trainee = $this->db->select('trainee_id')
-                ->from('trainees')->where('user_id', $userId)->limit(1)->get();
-            if (!$trainee) {
-                return ['trainees' => 0, 'programs' => 0, 'present_today' => 0, 'follow_up' => 0];
-            }
-            return [
-                'trainees' => 1,
-                'programs' => (int) $this->db->select('COUNT(DISTINCT program_id) AS total')
-                    ->from('trainees')->where('user_id', $userId)->get()['total'],
-                'present_today' => $this->attendanceCount((int) $trainee['trainee_id'], null, date('Y-m-d'), ['Present', 'Late']),
-                'follow_up' => $this->attendanceCount((int) $trainee['trainee_id'], null, date('Y-m-d', strtotime('-7 days')), ['Absent'], true),
-            ];
-        }
-
-        if ($role === 'instructor') {
-            return [
-                'trainees' => (int) $this->db->select('COUNT(DISTINCT t.trainee_id) AS total')
-                    ->from('trainees t')->join('class_enrollments e', 'e.trainee_id = t.trainee_id')
-                    ->join('training_classes c', 'c.class_id = e.class_id')->where('c.instructor_id', $userId)
-                    ->where('t.status', 'active')->get()['total'],
-                'programs' => (int) $this->db->select('COUNT(DISTINCT program_id) AS total')
-                    ->from('training_classes')->where('instructor_id', $userId)->where('status', 'active')->get()['total'],
-                'present_today' => $this->attendanceCount(null, $userId, date('Y-m-d'), ['Present', 'Late']),
-                'follow_up' => $this->attendanceCount(null, $userId, date('Y-m-d', strtotime('-7 days')), ['Absent'], true),
-            ];
-        }
-
-        return [
-            'trainees' => (int) $this->db->from('trainees')->where('status', 'active')->count(),
-            'programs' => (int) $this->db->from('training_programs')->where('status', 'active')->count(),
-            'present_today' => $this->attendanceCount(null, null, date('Y-m-d'), ['Present', 'Late']),
-            'follow_up' => $this->attendanceCount(null, null, date('Y-m-d', strtotime('-7 days')), ['Absent'], true),
-        ];
-    }
-
-    private function attendanceCount(?int $traineeId, ?int $instructorId, string $since, array $statuses, bool $fromDate = false): int
-    {
-        $query = $this->db->select('COUNT(*) AS total')->from('attendance_records a');
-        if ($instructorId !== null) {
-            $query->join('training_classes c', 'c.class_id = a.class_id')->where('c.instructor_id', $instructorId);
-        }
-        if ($traineeId !== null) {
-            $query->where('a.trainee_id', $traineeId);
-        }
-        $query->where('a.attendance_date', $fromDate ? '>=' : '=', $since);
-        if ($statuses) {
-            $query->grouped(function ($builder) use ($statuses) {
-                foreach (array_values($statuses) as $index => $status) {
-                    if ($index === 0) $builder->where('a.status', $status);
-                    else $builder->or_where('a.status', $status);
-                }
-            });
-        }
-        return (int) ($query->get()['total'] ?? 0);
-    }
-
-    private function recentAttendance(array $user): array
-    {
-        $query = $this->db->select('a.attendance_date, a.time_in, a.time_out, a.status, t.first_name, t.last_name, p.program_name')
-            ->from('attendance_records a')->join('trainees t', 't.trainee_id = a.trainee_id')
-            ->left_join('training_programs p', 'p.program_id = t.program_id');
-        if (($user['role'] ?? '') === 'trainee') {
-            $query->where('t.user_id', (int) $user['user_id']);
-        } elseif (($user['role'] ?? '') === 'instructor') {
-            $query->join('training_classes c', 'c.class_id = a.class_id')->where('c.instructor_id', (int) $user['user_id']);
-        }
-        return $query->order_by('a.attendance_date', 'DESC')->order_by('a.time_in', 'DESC')->limit(8)->get_all();
-    }
-
-    private function publishedAnnouncements(): array
-    {
-        return $this->db->select('announcements.announcement_id, announcements.title, announcements.content, announcements.created_at')
-            ->from('announcements')->where('announcements.status', 'published')
-            ->order_by('announcements.created_at', 'DESC')->limit(5)->get_all();
-    }
-
-    private function dashboardChartData(array $user): array
-    {
-        $isAdminOrStaff = in_array($user['role'] ?? '', ['administrator', 'staff'], true);
-        $isInstructor = ($user['role'] ?? '') === 'instructor';
-        $weekly = [];
-        for ($i = 6; $i >= 0; $i--) {
-            $date = date('Y-m-d', strtotime('-' . $i . ' days'));
-            $query = $this->db->select('COUNT(*) AS total')->from('attendance_records a')->where('a.attendance_date', $date);
-            if ($isInstructor) {
-                $query->join('training_classes c', 'c.class_id = a.class_id')->where('c.instructor_id', (int) $user['user_id']);
-            }
-            $weekly[] = ['date' => date('M j', strtotime($date)), 'total' => (int) ($query->get()['total'] ?? 0)];
-        }
-
-        $statusQuery = $this->db->select('a.status, COUNT(*) AS total')->from('attendance_records a')
-            ->where('a.attendance_date', '>=', date('Y-m-d', strtotime('-30 days')))->group_by('a.status');
-        if ($isInstructor) {
-            $statusQuery->join('training_classes c', 'c.class_id = a.class_id')->where('c.instructor_id', (int) $user['user_id']);
-        }
-        $status = ['Present' => 0, 'Late' => 0, 'Absent' => 0];
-        foreach ($statusQuery->get_all() as $row) {
-            if (isset($status[$row['status']])) $status[$row['status']] = (int) $row['total'];
-        }
-
-        $programs = [];
-        if ($isAdminOrStaff) {
-            $rows = $this->db->select('p.program_name, p.program_code, COUNT(DISTINCT t.trainee_id) AS trainee_count, COUNT(DISTINCT a.attendance_id) AS attendance_count')
-                ->from('training_programs p')->left_join('trainees t', "t.program_id = p.program_id AND t.status = 'active'")
-                ->left_join('attendance_records a', 't.trainee_id = a.trainee_id')->where('p.status', 'active')
-                ->group_by(['p.program_id', 'p.program_name', 'p.program_code'])->order_by('attendance_count', 'DESC')->get_all();
-            foreach ($rows as $row) {
-                $programs[] = ['name' => $row['program_name'], 'code' => $row['program_code'], 'trainees' => (int) $row['trainee_count'], 'attendance' => (int) $row['attendance_count']];
-            }
-        }
-
-        return [
-            'weekly' => $weekly,
-            'status' => $status,
-            'programs' => $programs,
-            'late_this_week' => $this->attendanceCount(null, $isInstructor ? (int) $user['user_id'] : null, date('Y-m-d', strtotime('-7 days')), ['Late'], true),
-            'absent_this_week' => $this->attendanceCount(null, $isInstructor ? (int) $user['user_id'] : null, date('Y-m-d', strtotime('-7 days')), ['Absent'], true),
-        ];
-    }
-
-    private function absenceFollowUps(array $user): array
-    {
-        $query = $this->db->select('a.attendance_date, t.first_name, t.last_name, c.class_name, a.remarks')
-            ->from('attendance_records a')->join('trainees t', 't.trainee_id = a.trainee_id')
-            ->left_join('training_classes c', 'c.class_id = a.class_id')->where('a.status', 'Absent')
-            ->where('a.attendance_date', '>=', date('Y-m-d', strtotime('-7 days')));
-        if (($user['role'] ?? '') === 'instructor') $query->where('c.instructor_id', (int) $user['user_id']);
-        if (($user['role'] ?? '') === 'trainee') $query->where('t.user_id', (int) $user['user_id']);
-        $rows = $query->order_by('a.attendance_date', 'DESC')->order_by('t.last_name')->order_by('t.first_name')->get_all();
-        foreach ($rows as &$row) {
-            $row['trainee_name'] = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));
-            unset($row['first_name'], $row['last_name']);
-        }
-        unset($row);
-        return $rows;
-    }
 }
 
 

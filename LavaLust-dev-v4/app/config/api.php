@@ -146,7 +146,7 @@ $config['users_table_id'] = 'user_id';
 | a browser, so set your real domain in production.
 |
 */
-$frontendOrigins = ['https://lsi-vue-frontend.onrender.com'];
+$frontendOrigins = ['https://lsi-vue-frontend.onrender.com', 'https://lsi-vue-frontend.vercel.app'];
 foreach (['SMARTTRACK_FRONTEND_ORIGIN', 'SMARTTRACK_FRONTEND_URL'] as $originVariable) {
     $configuredOrigin = trim((string) (getenv($originVariable) ?: ''));
     if ($configuredOrigin === '') {

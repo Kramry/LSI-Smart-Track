@@ -38,18 +38,52 @@ class User_model extends Base_model
 
     public function createInitialAdmin($name, $username, $password)
     {
-        $this->execute(
-            'INSERT INTO users (full_name, username, password, role, status, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
-            [$name, $username, password_hash($password, PASSWORD_DEFAULT), 'administrator', 'active']
+        return $this->execute(
+            'INSERT INTO users (full_name, username, password, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+            [$name, $username, password_hash($password, PASSWORD_DEFAULT), 'administrator', 'active', date('Y-m-d H:i:s')]
         );
     }
 
     public function createUser($name, $username, $password, $role, $email = null)
     {
         $this->execute(
-            'INSERT INTO users (full_name, username, email, password, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())',
-            [$name, $username, $email, password_hash($password, PASSWORD_DEFAULT), $role, 'active']
+            'INSERT INTO users (full_name, username, email, password, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$name, $username, $email, password_hash($password, PASSWORD_DEFAULT), $role, 'active', date('Y-m-d H:i:s')]
         );
+        return (int) $this->db->last_id();
+    }
+
+    public function registerTrainee(array $user, array $trainee)
+    {
+        if (!$this->db->transaction()) {
+            throw new RuntimeException('Unable to start the account registration transaction.');
+        }
+
+        try {
+            $userId = $this->createUser(
+                $user['full_name'],
+                $user['username'],
+                $user['password'],
+                $user['role'],
+                $user['email'] ?? null
+            );
+            if ($userId < 1) {
+                throw new RuntimeException('Account registration did not return a valid user ID.');
+            }
+
+            $this->createTraineeForUser($userId, $trainee);
+            if (!$this->db->commit()) {
+                throw new RuntimeException('Unable to complete the account registration transaction.');
+            }
+            return $userId;
+        } catch (Throwable $error) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Account registration rollback failed (' . get_class($rollbackError) . ').');
+            }
+            throw $error;
+        }
     }
 
     public function createTraineeForUser($userId, array $data)

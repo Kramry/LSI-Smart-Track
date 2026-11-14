@@ -42,13 +42,14 @@ class Document_model extends Base_model
     public function createUploadedDocument(array $document)
     {
         return $this->execute(
-            'INSERT INTO trainee_documents (trainee_id, class_id, uploaded_by, document_name, file_path, upload_date, status, review_status, access_level) VALUES (?, ?, ?, ?, ?, CURDATE(), ?, ?, ?)',
+            'INSERT INTO trainee_documents (trainee_id, class_id, uploaded_by, document_name, file_path, upload_date, status, review_status, access_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 $document['trainee_id'],
                 $document['class_id'],
                 (int) $document['uploaded_by'],
                 $document['document_name'],
                 $document['file_path'],
+                $document['upload_date'] ?? date('Y-m-d'),
                 $document['status'],
                 $document['review_status'],
                 $document['access_level'],
@@ -70,12 +71,12 @@ class Document_model extends Base_model
             ->update(['status' => $status]);
     }
 
-    public function reviewDocument($documentId, $decision, $reviewedBy)
+    public function reviewDocument($documentId, $decision, $reviewedBy, ?string $reviewedAt = null)
     {
         try {
             return $this->execute(
-                'UPDATE trainee_documents SET review_status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE document_id = ?',
-                [$decision, (int) $reviewedBy, (int) $documentId]
+                'UPDATE trainee_documents SET review_status = ?, reviewed_by = ?, reviewed_at = ? WHERE document_id = ?',
+                [$decision, (int) $reviewedBy, $reviewedAt ?? date('Y-m-d H:i:s'), (int) $documentId]
             );
         } catch (Throwable $error) {
             $message = strtolower($error->getMessage());

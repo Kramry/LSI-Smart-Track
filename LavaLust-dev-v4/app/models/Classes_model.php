@@ -5,6 +5,24 @@ require_once APP_DIR . 'models/Base_model.php';
 
 class Classes_model extends Base_model
 {
+    public function programOptions(): array
+    {
+        return $this->db->table('training_programs')
+            ->select('program_id AS id, program_name AS label')
+            ->where('status', 'active')
+            ->order_by('program_name')
+            ->get_all();
+    }
+
+    public function instructorOptions(): array
+    {
+        return $this->db->table('users')
+            ->select('user_id AS id, full_name AS label')
+            ->where(['role' => 'instructor', 'status' => 'active'])
+            ->order_by('full_name')
+            ->get_all();
+    }
+
     public function classes(array $user, array $filters = [])
     {
         $roomSelect = $this->columnExists('training_classes', 'room') ? 'c.room' : 'NULL AS room';
@@ -91,6 +109,51 @@ class Classes_model extends Base_model
         return $this->db->table('training_classes')
             ->where('class_id', (int) $classId)
             ->update($this->classFields($data));
+    }
+
+    public function persistClass($classId, array $data, array $user, callable $afterSave): array
+    {
+        if (!$this->db->transaction()) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Class transaction initialization cleanup failed (' . get_class($rollbackError) . ').');
+            }
+            throw new RuntimeException('Unable to start the class transaction.');
+        }
+
+        try {
+            if ($classId) {
+                if (!$this->classById((int) $classId, $user)) {
+                    $this->db->roll_back();
+                    return ['success' => false, 'reason' => 'not_found'];
+                }
+                $this->updateClass((int) $classId, $data);
+                $savedId = (int) $classId;
+                $action = 'Updated class';
+            } else {
+                $this->createClass($data);
+                $savedId = (int) $this->db->last_id();
+                if ($savedId < 1) {
+                    throw new RuntimeException('Class insert did not return a valid ID.');
+                }
+                $action = 'Created class';
+            }
+
+            $this->logActivity((int) $user['user_id'], $action, 'Class #' . $savedId);
+            $afterSave($savedId);
+            if (!$this->db->commit()) {
+                throw new RuntimeException('Unable to commit the class transaction.');
+            }
+            return ['success' => true, 'id' => $savedId];
+        } catch (Throwable $error) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Class transaction rollback failed (' . get_class($rollbackError) . ').');
+            }
+            throw $error;
+        }
     }
 
     public function deleteClass($classId)
@@ -182,9 +245,9 @@ class Classes_model extends Base_model
             "SELECT a.attendance_date, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, a.status, a.time_in, a.time_out
              FROM attendance_records a
              JOIN trainees t ON t.trainee_id = a.trainee_id
-             WHERE a.class_id = ? AND a.attendance_date >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+             WHERE a.class_id = ? AND a.attendance_date >= ?
              ORDER BY a.attendance_date DESC, t.last_name, t.first_name",
-            [(int) $classId]
+            [(int) $classId, date('Y-m-d', strtotime('-6 days'))]
         );
     }
 

@@ -698,6 +698,23 @@ class Payment_model extends Base_model
         return $this->rows("SELECT p.payment_date AS report_date, p.entry_type AS report_type, COALESCE(p.receipt_number, CONCAT('REV-', p.payment_id)) AS reference, f.fee_name, f.fee_kind, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, CASE WHEN p.entry_type = 'reversal' THEN -p.amount ELSE p.amount END AS amount, p.method, p.reference_number, p.remarks FROM payments p JOIN trainee_fees f ON f.trainee_fee_id = p.trainee_fee_id JOIN trainees t ON t.trainee_id = f.trainee_id WHERE p.payment_date BETWEEN ? AND ? UNION ALL SELECT b.transaction_date AS report_date, b.transaction_type AS report_type, b.reference_number AS reference, f.fee_name, f.fee_kind, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, b.amount, b.method, b.reference_number, b.remarks FROM bond_transactions b JOIN trainee_fees f ON f.trainee_fee_id = b.trainee_fee_id JOIN trainees t ON t.trainee_id = f.trainee_id WHERE b.transaction_type IN ('refund', 'forfeit') AND b.transaction_date BETWEEN ? AND ? ORDER BY report_date DESC, reference", [$startDate, $endDate, $startDate, $endDate]);
     }
 
+    public function hasProgramFinancialHistory($programId): bool
+    {
+        $result = $this->row(
+            'SELECT
+                (SELECT COUNT(*) FROM payments pay
+                    JOIN trainee_fees fee ON fee.trainee_fee_id = pay.trainee_fee_id
+                    JOIN training_classes class ON class.class_id = fee.class_id
+                    WHERE class.program_id = ?) +
+                (SELECT COUNT(*) FROM bond_transactions bond
+                    JOIN trainee_fees fee ON fee.trainee_fee_id = bond.trainee_fee_id
+                    JOIN training_classes class ON class.class_id = fee.class_id
+                    WHERE class.program_id = ?) AS total',
+            [(int) $programId, (int) $programId]
+        );
+        return (int) ($result['total'] ?? 0) > 0;
+    }
+
     public function outstandingReport()
     {
         return $this->rows("SELECT f.trainee_fee_id, f.fee_name, f.fee_kind, f.amount_due, f.due_date, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, t.qr_code AS trainee_number, c.class_name, GREATEST(f.amount_due - COALESCE(SUM(CASE WHEN p.entry_type = 'payment' THEN p.amount WHEN p.entry_type = 'reversal' THEN -p.amount ELSE 0 END), 0), 0) AS balance FROM trainee_fees f JOIN trainees t ON t.trainee_id = f.trainee_id JOIN training_classes c ON c.class_id = f.class_id LEFT JOIN payments p ON p.trainee_fee_id = f.trainee_fee_id GROUP BY f.trainee_fee_id HAVING balance > 0 ORDER BY f.due_date, trainee_name");

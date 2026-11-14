@@ -5,6 +5,24 @@ require_once APP_DIR . 'models/Base_model.php';
 
 class Reports_model extends Base_model
 {
+    public function programOptions(): array
+    {
+        return $this->db->table('training_programs')
+            ->select('program_id AS id, program_name AS label')
+            ->where('status', 'active')
+            ->order_by('program_name')
+            ->get_all();
+    }
+
+    public function classOptions(): array
+    {
+        return $this->db->table('training_classes')
+            ->select('class_id AS id, class_name AS label')
+            ->where('status', 'active')
+            ->order_by('class_name')
+            ->get_all();
+    }
+
     public function availableReports()
     {
         return [

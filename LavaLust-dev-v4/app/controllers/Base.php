@@ -124,7 +124,7 @@ class Base extends Controller
             $data,
             $this->user,
             $this->session,
-            (int) $this->db->from('users')->count(),
+            $this->userModel->userCount(),
             $this->url(''),
             $this->permissions
         );

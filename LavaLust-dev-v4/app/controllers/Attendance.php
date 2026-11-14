@@ -146,7 +146,7 @@ class Attendance extends Base
         }
 
         try {
-            $records = $this->attendanceReportRows(
+            $records = $this->attendanceModel->attendanceReport(
                 $start->format('Y-m-d'),
                 $end->format('Y-m-d'),
                 $this->user
@@ -237,23 +237,6 @@ class Attendance extends Base
             return $this->jsonResponse(['message' => $message, 'errors' => []], (int) $status);
         }
         return $this->actionError($message, 'manage/attendance', (int) $status);
-    }
-
-    private function attendanceReportRows(string $startDate, string $endDate, array $user): array
-    {
-        $query = $this->db->select('a.attendance_date, t.first_name, t.last_name, p.program_name, c.class_name, a.time_in, a.time_out, a.status, a.remarks')
-            ->from('attendance_records a')
-            ->join('trainees t', 't.trainee_id = a.trainee_id')
-            ->left_join('training_programs p', 'p.program_id = t.program_id')
-            ->left_join('training_classes c', 'c.class_id = a.class_id')
-            ->between('a.attendance_date', $startDate, $endDate);
-        if (($user['role'] ?? '') === 'instructor') {
-            $query->where('c.instructor_id', (int) $user['user_id']);
-        } elseif (($user['role'] ?? '') === 'trainee') {
-            $query->where('t.user_id', (int) $user['user_id']);
-        }
-        return $query->order_by('a.attendance_date', 'DESC')
-            ->order_by('t.last_name')->order_by('t.first_name')->limit(10000)->get_all();
     }
 
     private function safeCsvText($value): string

@@ -13,8 +13,11 @@ class Dashboard_model extends Base_model
         $this->userModel = new User_model($db);
     }
 
-    public function dashboardStats(array $user)
+    public function dashboardStats(array $user, ?string $today = null, ?string $since = null)
     {
+        $today = $today ?? date('Y-m-d');
+        $since = $since ?? date('Y-m-d', strtotime('-7 days'));
+
         if ($user['role'] === 'trainee') {
             $trainee = $this->userModel->traineeForUser($user['user_id']);
             if (!$trainee) {
@@ -26,8 +29,8 @@ class Dashboard_model extends Base_model
                     ->select('COUNT(DISTINCT program_id) AS total')
                     ->where('user_id', (int) $user['user_id'])
                     ->row_array()['total'] ?? 0),
-                'present_today' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE trainee_id = ? AND attendance_date = CURDATE() AND status IN ('Present', 'Late')", [(int) $trainee['trainee_id']])['total'] ?? 0),
-                'follow_up' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE trainee_id = ? AND status = 'Absent' AND attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)", [(int) $trainee['trainee_id']])['total'] ?? 0),
+                'present_today' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE trainee_id = ? AND attendance_date = ? AND status IN ('Present', 'Late')", [(int) $trainee['trainee_id'], $today])['total'] ?? 0),
+                'follow_up' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE trainee_id = ? AND status = 'Absent' AND attendance_date >= ?", [(int) $trainee['trainee_id'], $since])['total'] ?? 0),
             ];
         }
         if ($user['role'] === 'instructor') {
@@ -45,8 +48,8 @@ class Dashboard_model extends Base_model
                     ->where('instructor_id', $id)
                     ->where('status', 'active')
                     ->row_array()['total'] ?? 0),
-                'present_today' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records a JOIN training_classes c ON c.class_id = a.class_id WHERE c.instructor_id = ? AND a.attendance_date = CURDATE() AND a.status IN ('Present', 'Late')", [$id])['total'] ?? 0),
-                'follow_up' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records a JOIN training_classes c ON c.class_id = a.class_id WHERE c.instructor_id = ? AND a.status = 'Absent' AND a.attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)", [$id])['total'] ?? 0),
+                'present_today' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records a JOIN training_classes c ON c.class_id = a.class_id WHERE c.instructor_id = ? AND a.attendance_date = ? AND a.status IN ('Present', 'Late')", [$id, $today])['total'] ?? 0),
+                'follow_up' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records a JOIN training_classes c ON c.class_id = a.class_id WHERE c.instructor_id = ? AND a.status = 'Absent' AND a.attendance_date >= ?", [$id, $since])['total'] ?? 0),
             ];
         }
         return [
@@ -58,8 +61,8 @@ class Dashboard_model extends Base_model
                 ->select('COUNT(*) AS total')
                 ->where('status', 'active')
                 ->row_array()['total'] ?? 0),
-            'present_today' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE attendance_date = CURDATE() AND status IN ('Present', 'Late')")['total'] ?? 0),
-            'follow_up' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE status = 'Absent' AND attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)")['total'] ?? 0),
+            'present_today' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE attendance_date = ? AND status IN ('Present', 'Late')", [$today])['total'] ?? 0),
+            'follow_up' => (int) ($this->row("SELECT COUNT(*) AS total FROM attendance_records WHERE status = 'Absent' AND attendance_date >= ?", [$since])['total'] ?? 0),
         ];
     }
 
@@ -117,8 +120,8 @@ class Dashboard_model extends Base_model
         }
 
         // Attendance by status (last 30 days)
-        $statusSql = "SELECT status, COUNT(*) AS total FROM attendance_records WHERE attendance_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
-        $statusValues = [];
+        $statusSql = 'SELECT status, COUNT(*) AS total FROM attendance_records WHERE attendance_date >= ?';
+        $statusValues = [date('Y-m-d', strtotime('-30 days'))];
 
         if ($isInstructor) {
             $statusSql .= " AND class_id IN (SELECT class_id FROM training_classes WHERE instructor_id = ?)";
@@ -162,8 +165,8 @@ class Dashboard_model extends Base_model
         }
 
         // Late trainees this week
-        $lateSql = "SELECT COUNT(*) AS total FROM attendance_records WHERE status = 'Late' AND attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
-        $lateValues = [];
+        $lateSql = "SELECT COUNT(*) AS total FROM attendance_records WHERE status = 'Late' AND attendance_date >= ?";
+        $lateValues = [date('Y-m-d', strtotime('-7 days'))];
 
         if ($isInstructor) {
             $lateSql .= " AND class_id IN (SELECT class_id FROM training_classes WHERE instructor_id = ?)";
@@ -173,8 +176,8 @@ class Dashboard_model extends Base_model
         $lateCount = (int) ($this->row($lateSql, $lateValues)['total'] ?? 0);
 
         // Absences this week
-        $absentSql = "SELECT COUNT(*) AS total FROM attendance_records WHERE status = 'Absent' AND attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
-        $absentValues = [];
+        $absentSql = "SELECT COUNT(*) AS total FROM attendance_records WHERE status = 'Absent' AND attendance_date >= ?";
+        $absentValues = [date('Y-m-d', strtotime('-7 days'))];
 
         if ($isInstructor) {
             $absentSql .= " AND class_id IN (SELECT class_id FROM training_classes WHERE instructor_id = ?)";
@@ -192,10 +195,10 @@ class Dashboard_model extends Base_model
         ];
     }
 
-    public function absenceFollowUps(array $user)
+    public function absenceFollowUps(array $user, ?string $since = null)
     {
-        $sql = "SELECT a.attendance_date, CONCAT(t.first_name, ' ', t.last_name) AS trainee_name, c.class_name, a.remarks FROM attendance_records a JOIN trainees t ON t.trainee_id = a.trainee_id LEFT JOIN training_classes c ON c.class_id = a.class_id WHERE a.status = 'Absent' AND a.attendance_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
-        $values = [];
+        $sql = "SELECT a.attendance_date, t.first_name, t.last_name, c.class_name, a.remarks FROM attendance_records a JOIN trainees t ON t.trainee_id = a.trainee_id LEFT JOIN training_classes c ON c.class_id = a.class_id WHERE a.status = 'Absent' AND a.attendance_date >= ?";
+        $values = [$since ?? date('Y-m-d', strtotime('-7 days'))];
         if ($user['role'] === 'instructor') {
             $sql .= ' AND c.instructor_id = ?';
             $values[] = (int) $user['user_id'];
@@ -203,6 +206,12 @@ class Dashboard_model extends Base_model
             $sql .= ' AND t.user_id = ?';
             $values[] = (int) $user['user_id'];
         }
-        return $this->rows($sql . ' ORDER BY a.attendance_date DESC, t.last_name, t.first_name', $values);
+        $rows = $this->rows($sql . ' ORDER BY a.attendance_date DESC, t.last_name, t.first_name', $values);
+        foreach ($rows as &$row) {
+            $row['trainee_name'] = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));
+            unset($row['first_name'], $row['last_name']);
+        }
+        unset($row);
+        return $rows;
     }
 }
