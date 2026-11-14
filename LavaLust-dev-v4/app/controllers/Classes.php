@@ -467,7 +467,7 @@ class Classes extends Base
         }
 
         try {
-            $this->db->from('training_classes')->where('class_id', $classId)->delete();
+            $this->classesModel->deleteClass($classId);
             $this->logClassActivity((int) $this->user['user_id'], 'Deleted class', 'Class #' . $classId);
             $this->notice('Class deleted.');
             redirect($this->url('manage/classes'));
@@ -527,7 +527,7 @@ class Classes extends Base
         }
 
         try {
-            $this->db->from('training_classes')->where('class_id', $classId)->delete();
+            $this->classesModel->deleteClass($classId);
             $this->logClassActivity((int) $this->user['user_id'], 'Deleted class', 'Class #' . $classId);
             return $this->jsonResponse(['message' => 'Class deleted.']);
         } catch (Throwable $error) {

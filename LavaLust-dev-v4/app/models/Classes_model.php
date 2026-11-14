@@ -95,9 +95,39 @@ class Classes_model extends Base_model
 
     public function deleteClass($classId)
     {
-        return $this->db->table('training_classes')
-            ->where('class_id', (int) $classId)
-            ->delete();
+        $classId = (int) $classId;
+        if ($classId < 1) {
+            return false;
+        }
+
+        if (!$this->db->transaction()) {
+            throw new RuntimeException('Unable to start the class deletion transaction.');
+        }
+
+        try {
+            // Timed assessments use a restrictive class foreign key. Delete them first;
+            // their dependent records are removed by their cascading foreign keys.
+            $this->db->table('timed_assessments')
+                ->where('class_id', $classId)
+                ->delete();
+
+            $deleted = $this->db->table('training_classes')
+                ->where('class_id', $classId)
+                ->delete();
+
+            if (!$this->db->commit()) {
+                throw new RuntimeException('Unable to commit the class deletion transaction.');
+            }
+
+            return $deleted > 0;
+        } catch (Throwable $error) {
+            try {
+                $this->db->roll_back();
+            } catch (Throwable $rollbackError) {
+                error_log('Class deletion rollback failed (' . get_class($rollbackError) . ').');
+            }
+            throw $error;
+        }
     }
 
     private function classFields(array $data)
