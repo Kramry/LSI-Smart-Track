@@ -399,7 +399,7 @@ class Documents extends Base
 
     private function documentById(int $id)
     {
-        return $this->db->select('d.*, t.user_id AS trainee_user_id')->from('trainee_documents d')
+        return $this->db->select('d.document_id, d.trainee_id, d.class_id, d.uploaded_by, d.document_name, d.file_path, d.upload_date, d.status, d.access_level, d.review_status, d.reviewed_by, d.reviewed_at, t.user_id AS trainee_user_id')->from('trainee_documents d')
             ->left_join('trainees t', 't.trainee_id = d.trainee_id')
             ->where('d.document_id', $id)->limit(1)->get() ?: null;
     }
