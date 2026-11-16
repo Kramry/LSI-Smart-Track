@@ -520,6 +520,11 @@ class Certificates extends Base
         if ($remotePath === '' || strpos($remotePath, '..') !== false) {
             return null;
         }
+        $extension = strtolower(pathinfo($remotePath, PATHINFO_EXTENSION));
+        if (!in_array($extension, ['png', 'jpg', 'jpeg', 'pdf'], true)) {
+            error_log('Certificate cloud asset has an unsupported file extension.');
+            return null;
+        }
         $tempPath = null;
         try {
             $this->call->library('CloudStorage');
@@ -537,6 +542,13 @@ class Certificates extends Base
                 error_log('Unable to create a private temporary file for a cloud certificate asset.');
                 return null;
             }
+            $extendedTempPath = $tempPath . '.' . $extension;
+            if (!rename($tempPath, $extendedTempPath)) {
+                @unlink($tempPath);
+                error_log('Unable to preserve the extension for a cloud certificate asset.');
+                return null;
+            }
+            $tempPath = $extendedTempPath;
             if (!$storage->download($remotePath, $tempPath)) {
                 @unlink($tempPath);
                 return null;
@@ -557,19 +569,12 @@ class Certificates extends Base
     }
 
     /** Upload a local certificate asset when cloud storage is available. */
-    private function storeCertificateAsset($localPath, $remotePath, $mime, $fallbackPath, $requireCloudWhenConfigured = false)
+    private function storeCertificateAsset($localPath, $remotePath, $mime, $fallbackPath)
     {
         $this->call->library('CloudStorage');
         $storage = new CloudStorage();
-        if ($storage->isEnabled()) {
-            if ($storage->upload($localPath, $remotePath, $mime)) {
-                return 'cloud://' . ltrim($remotePath, '/');
-            }
-            if ($requireCloudWhenConfigured) {
-                throw new RuntimeException('Cloud storage upload failed.');
-            }
-        } elseif ($requireCloudWhenConfigured && getenv('CLOUD_STORAGE_ENABLED') === 'true') {
-            throw new RuntimeException('Cloud storage is enabled but unavailable.');
+        if ($storage->isEnabled() && $storage->upload($localPath, $remotePath, $mime)) {
+            return 'cloud://' . ltrim($remotePath, '/');
         }
         return $fallbackPath;
     }
@@ -798,19 +803,12 @@ class Certificates extends Base
             return ['path' => null, 'error' => 'The signature image could not be saved.'];
         }
         $relativePath = 'runtime/uploads/certificates/signatures/' . $filename;
-        try {
-            $storedPath = $this->storeCertificateAsset(
-                $destination,
-                'certificates/signatures/' . $filename,
-                'image/png',
-                $relativePath,
-                true
-            );
-        } catch (RuntimeException $error) {
-            @unlink($destination);
-            error_log('Unable to store certificate signature durably: ' . $error->getMessage());
-            return ['path' => null, 'error' => 'The signature could not be saved to cloud storage. Check the cloud storage configuration and try again.'];
-        }
+        $storedPath = $this->storeCertificateAsset(
+            $destination,
+            'certificates/signatures/' . $filename,
+            'image/png',
+            $relativePath
+        );
         if (strpos($storedPath, 'cloud://') === 0) {
             @unlink($destination);
         }
