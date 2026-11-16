@@ -401,7 +401,14 @@ class Certificates extends Base
         if (($template['mode'] ?? '') === 'upload') {
             $filePath = $this->resolveCertificateAsset($template['file_path'] ?? '');
             if (!$filePath) {
-                throw new RuntimeException('The certificate background saved with this certificate is missing.');
+                if (!$persist && $previewSignature) {
+                    // Preview the certificate with its saved design settings if a
+                    // locally stored background was lost on an ephemeral host.
+                    error_log('Certificate signing preview is missing its uploaded background; using the generated layout.');
+                    $template['mode'] = 'generated';
+                } else {
+                    throw new RuntimeException('The certificate background saved with this certificate is missing.');
+                }
             }
         }
         $template['settings'] = is_array($template['settings'] ?? null) ? $template['settings'] : [];
