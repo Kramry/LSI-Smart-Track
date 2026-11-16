@@ -9,15 +9,14 @@ RUN php vendor/tecnickcom/tc-lib-pdf-font/util/build_fonts.php \
 
 FROM php:${PHP_VERSION}-apache
 
-# The SmartTrack schema and every query in SmartTrack_model are MySQL specific.
-# In the official PHP image, cURL is already available; attempting to rebuild it via
-# docker-php-ext-install can fail during deployment. Install only the MySQL PDO drivers.
+# Certificate signature images require GD for the PDF renderer to resize and embed them.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libcurl4-openssl-dev libzip-dev \
+    && apt-get install -y --no-install-recommends libcurl4-openssl-dev libzip-dev libfreetype6-dev libjpeg62-turbo-dev libpng-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && docker-php-ext-install pdo pdo_mysql zip \
-    && docker-php-ext-enable zip \
-    && php -r "exit(extension_loaded('zip') ? 0 : 1);"
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install pdo pdo_mysql zip gd \
+    && docker-php-ext-enable gd zip \
+    && php -r "exit(extension_loaded('zip') && extension_loaded('gd') ? 0 : 1);"
 
 # mod_rewrite drives the fronilet controller routes (/login, /manage/..., /documents/...).
 RUN a2enmod rewrite headers

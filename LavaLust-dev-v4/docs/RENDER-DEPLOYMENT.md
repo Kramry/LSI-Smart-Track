@@ -181,6 +181,7 @@ import `lsi_smarttrack-upgrade.sql` instead; it only adds the missing tables.
 | "could not find driver" | Wrong `DB_DRIVER` or missing PDO driver | Use `DB_DRIVER=mysql`; the image installs `pdo_mysql` |
 | Login succeeds then the session is lost | A `.env` file in the image | The image removes `.env`; rebuild after merging the current `Dockerfile` |
 | 500 on every page | `APP_ENV` left at `development` with warnings | Set `APP_ENV=production` |
+| Certificate signing preview returns 500 when rendering signature images | PHP GD is missing from the backend image | Rebuild and redeploy from the current `Dockerfile`, which installs and verifies GD |
 
 Apache writes its error and access logs to stdout/stderr, so they appear in the
 Render dashboard under **Logs**.
