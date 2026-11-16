@@ -643,7 +643,7 @@ INSERT INTO `certificate_signatures` (`signature_id`, `certificate_id`, `signato
 CREATE TABLE `certificate_templates` (
   `template_id` int UNSIGNED NOT NULL,
   `version` int UNSIGNED NOT NULL,
-  `mode` enum('upload','generate') NOT NULL,
+  `mode` varchar(20) NOT NULL,
   `file_path` varchar(255) DEFAULT NULL,
   `file_mime` varchar(100) DEFAULT NULL,
   `field_layout` json NOT NULL,

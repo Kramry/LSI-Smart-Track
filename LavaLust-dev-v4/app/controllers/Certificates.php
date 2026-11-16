@@ -863,7 +863,12 @@ class Certificates extends Base
             'field_layout' => $layout,
             'settings' => $settings,
         ];
-        $saved = $this->certificateModel->saveTemplate($template, (int) $this->user['user_id'], $saveAction === 'activate');
+        try {
+            $saved = $this->certificateModel->saveTemplate($template, (int) $this->user['user_id'], $saveAction === 'activate');
+        } catch (Throwable $error) {
+            error_log('Certificate template save failed (' . get_class($error) . '): ' . $error->getMessage());
+            return $this->actionError('The certificate template could not be saved. Refresh and try again.', 'manage/certificate-config', 500);
+        }
 
         foreach ([
             'min_attendance_percentage' => (string) $minimumAttendance,
