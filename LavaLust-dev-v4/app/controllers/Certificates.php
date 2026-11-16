@@ -527,8 +527,14 @@ class Certificates extends Base
             if (!$storage->isEnabled()) {
                 return null;
             }
-            $tempPath = tempnam(sys_get_temp_dir(), 'smarttrack-cert-');
+            $certificateDirectory = ROOT_DIR . 'runtime/uploads/certificates';
+            if (!is_dir($certificateDirectory) && !mkdir($certificateDirectory, 0750, true) && !is_dir($certificateDirectory)) {
+                error_log('Unable to create the private certificate directory for a cloud asset download.');
+                return null;
+            }
+            $tempPath = tempnam($certificateDirectory, 'smarttrack-cert-');
             if ($tempPath === false) {
+                error_log('Unable to create a private temporary file for a cloud certificate asset.');
                 return null;
             }
             if (!$storage->download($remotePath, $tempPath)) {
