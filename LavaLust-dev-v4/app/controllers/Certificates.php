@@ -520,25 +520,34 @@ class Certificates extends Base
         if ($remotePath === '' || strpos($remotePath, '..') !== false) {
             return null;
         }
-        $this->call->library('CloudStorage');
-        $storage = new CloudStorage();
-        if (!$storage->isEnabled()) {
-            return null;
-        }
-        $tempPath = tempnam(sys_get_temp_dir(), 'smarttrack-cert-');
-        if ($tempPath === false) {
-            return null;
-        }
-        if (!$storage->download($remotePath, $tempPath)) {
-            @unlink($tempPath);
-            return null;
-        }
-        register_shutdown_function(static function () use ($tempPath) {
-            if (is_file($tempPath)) {
+        $tempPath = null;
+        try {
+            $this->call->library('CloudStorage');
+            $storage = new CloudStorage();
+            if (!$storage->isEnabled()) {
+                return null;
+            }
+            $tempPath = tempnam(sys_get_temp_dir(), 'smarttrack-cert-');
+            if ($tempPath === false) {
+                return null;
+            }
+            if (!$storage->download($remotePath, $tempPath)) {
+                @unlink($tempPath);
+                return null;
+            }
+            register_shutdown_function(static function () use ($tempPath) {
+                if (is_file($tempPath)) {
+                    @unlink($tempPath);
+                }
+            });
+            return $tempPath;
+        } catch (Throwable $error) {
+            if (is_string($tempPath) && is_file($tempPath)) {
                 @unlink($tempPath);
             }
-        });
-        return $tempPath;
+            error_log('Certificate cloud asset download failed (' . get_class($error) . '): ' . $error->getMessage());
+            return null;
+        }
     }
 
     /** Upload a local certificate asset when cloud storage is available. */
