@@ -269,7 +269,14 @@ class Certificates extends Base
         if (!$certificate) {
             return $this->deny('This certificate is not assigned to your signing account.');
         }
-        $pdf = $this->generateCertificatePDF($certificate, false, $certificate);
+        try {
+            $pdf = $this->generateCertificatePDF($certificate, false, $certificate);
+        } catch (Throwable $error) {
+            error_log('Certificate signing preview failed for certificate #' . (int) $id . ' (' . get_class($error) . '): ' . $error->getMessage());
+            http_response_code(500);
+            header('Content-Type: text/plain; charset=utf-8');
+            exit('The certificate preview could not be generated. Please refresh and try again.');
+        }
         header('Content-Type: application/pdf');
         header('Content-Disposition: inline; filename="certificate-preview_' . $certificate['certificate_number'] . '.pdf"');
         header('Content-Length: ' . strlen($pdf));
@@ -436,7 +443,15 @@ class Certificates extends Base
         if ($previewSignature) {
             $signaturePath = $this->resolveCertificateAsset($previewSignature['signature_path']);
             if (!$signaturePath) {
-                throw new RuntimeException('Your protected signatory image is missing.');
+                $currentSignatory = !empty($previewSignature['signatory_id'])
+                    ? $this->certificateModel->signatoryById((int) $previewSignature['signatory_id'])
+                    : null;
+                $signaturePath = $currentSignatory
+                    ? $this->resolveCertificateAsset($currentSignatory['signature_path'] ?? '')
+                    : null;
+                if (!$signaturePath) {
+                    error_log('Certificate signing preview is missing its signatory image; rendering a placeholder.');
+                }
             }
             $signatories[] = [
                 'signatory_name' => $previewSignature['signatory_name'],
