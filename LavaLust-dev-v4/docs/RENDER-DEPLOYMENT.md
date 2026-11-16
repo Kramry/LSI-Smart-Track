@@ -62,7 +62,7 @@ Set these in **Render → Environment** (they are not read from a file):
 | `XENDIT_WEBHOOK_TOKEN` | Callback verification token configured for the Xendit webhook |
 | `GEMINI_API_KEY` | Google AI Studio Gemini API key (backend only; never add it to the Vue environment) |
 | `GEMINI_MODEL` | `gemini-3.5-flash-lite` (or a File Search capable model enabled for the account) |
-| `CLOUD_STORAGE_ENABLED` | `true` for durable AI source documents on Render |
+| `CLOUD_STORAGE_ENABLED` | `true` for durable AI source documents and certificate assets on Render |
 | `CLOUD_STORAGE_PROVIDER` | `aws` |
 | `AWS_ACCESS_KEY_ID` | S3 IAM access key with private object access |
 | `AWS_SECRET_ACCESS_KEY` | S3 IAM secret |

@@ -19,7 +19,7 @@ AWS_BUCKET=your-bucket-name
 AWS_PREFIX=smarttrack-documents/
 ```
 
-Replace the example bucket and credential values with real AWS values. Cloud storage will remain unavailable while these placeholders are present. When enabled but misconfigured, uploads are stored locally and the user is notified.
+Replace the example bucket and credential values with real AWS values. Cloud storage will remain unavailable while these placeholders are present. Other uploads may fall back to local storage when cloud storage is misconfigured; certificate-signature uploads fail instead so an ephemeral local file is not mistaken for a durable signature.
 
 ### 2. Install project dependencies
 
@@ -69,6 +69,7 @@ The AWS SDK is required for authenticated S3 operations. The application loads C
 - When cloud storage is enabled, documents are automatically uploaded to S3
 - File path in database is prefixed with `cloud://`
 - Automatic fallback to local storage if cloud upload fails
+- Certificate-signature uploads report an error rather than falling back locally when cloud storage is enabled but unavailable.
 
 ### Secure Downloads
 - Generates temporary presigned URLs (valid for 1 hour)

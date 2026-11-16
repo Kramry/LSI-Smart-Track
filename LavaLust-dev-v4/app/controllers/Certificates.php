@@ -557,12 +557,19 @@ class Certificates extends Base
     }
 
     /** Upload a local certificate asset when cloud storage is available. */
-    private function storeCertificateAsset($localPath, $remotePath, $mime, $fallbackPath)
+    private function storeCertificateAsset($localPath, $remotePath, $mime, $fallbackPath, $requireCloudWhenConfigured = false)
     {
         $this->call->library('CloudStorage');
         $storage = new CloudStorage();
-        if ($storage->isEnabled() && $storage->upload($localPath, $remotePath, $mime)) {
-            return 'cloud://' . ltrim($remotePath, '/');
+        if ($storage->isEnabled()) {
+            if ($storage->upload($localPath, $remotePath, $mime)) {
+                return 'cloud://' . ltrim($remotePath, '/');
+            }
+            if ($requireCloudWhenConfigured) {
+                throw new RuntimeException('Cloud storage upload failed.');
+            }
+        } elseif ($requireCloudWhenConfigured && getenv('CLOUD_STORAGE_ENABLED') === 'true') {
+            throw new RuntimeException('Cloud storage is enabled but unavailable.');
         }
         return $fallbackPath;
     }
@@ -791,12 +798,19 @@ class Certificates extends Base
             return ['path' => null, 'error' => 'The signature image could not be saved.'];
         }
         $relativePath = 'runtime/uploads/certificates/signatures/' . $filename;
-        $storedPath = $this->storeCertificateAsset(
-            $destination,
-            'certificates/signatures/' . $filename,
-            'image/png',
-            $relativePath
-        );
+        try {
+            $storedPath = $this->storeCertificateAsset(
+                $destination,
+                'certificates/signatures/' . $filename,
+                'image/png',
+                $relativePath,
+                true
+            );
+        } catch (RuntimeException $error) {
+            @unlink($destination);
+            error_log('Unable to store certificate signature durably: ' . $error->getMessage());
+            return ['path' => null, 'error' => 'The signature could not be saved to cloud storage. Check the cloud storage configuration and try again.'];
+        }
         if (strpos($storedPath, 'cloud://') === 0) {
             @unlink($destination);
         }
