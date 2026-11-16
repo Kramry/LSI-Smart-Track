@@ -965,7 +965,7 @@ CREATE TABLE `trainee_fees` (
   `trainee_fee_id` int UNSIGNED NOT NULL,
   `fee_type_id` int UNSIGNED DEFAULT NULL,
   `trainee_id` int UNSIGNED NOT NULL,
-  `class_id` int UNSIGNED NOT NULL,
+  `class_id` int UNSIGNED DEFAULT NULL,
   `fee_kind` varchar(20) NOT NULL,
   `fee_name` varchar(150) NOT NULL,
   `amount_due` decimal(12,2) NOT NULL,
@@ -1804,7 +1804,7 @@ ALTER TABLE `trainee_documents`
 -- Constraints for table `trainee_fees`
 --
 ALTER TABLE `trainee_fees`
-  ADD CONSTRAINT `smarttrack_trainee_fee_class_fk` FOREIGN KEY (`class_id`) REFERENCES `training_classes` (`class_id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `smarttrack_trainee_fee_class_fk` FOREIGN KEY (`class_id`) REFERENCES `training_classes` (`class_id`) ON DELETE SET NULL ON UPDATE CASCADE,
   ADD CONSTRAINT `smarttrack_trainee_fee_trainee_fk` FOREIGN KEY (`trainee_id`) REFERENCES `trainees` (`trainee_id`) ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `smarttrack_trainee_fee_type_fk` FOREIGN KEY (`fee_type_id`) REFERENCES `fee_types` (`fee_type_id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
@@ -1878,7 +1878,7 @@ CREATE TABLE IF NOT EXISTS timed_assessments (
   PRIMARY KEY (timed_assessment_id),
   KEY idx_timed_assessment_class (class_id, status, start_at),
   KEY idx_timed_assessment_creator (created_by, created_at),
-  CONSTRAINT fk_timed_assessment_class FOREIGN KEY (class_id) REFERENCES training_classes (class_id),
+  CONSTRAINT fk_timed_assessment_class FOREIGN KEY (class_id) REFERENCES training_classes (class_id) ON DELETE CASCADE,
   CONSTRAINT fk_timed_assessment_creator FOREIGN KEY (created_by) REFERENCES users (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

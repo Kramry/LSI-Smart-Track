@@ -118,12 +118,24 @@ class SmartTrack_api extends Base
         if (!$this->requireUser() || $this->user['role'] !== 'administrator' || !$this->validCsrf()) {
             return $this->jsonResponse(['message' => 'Only administrators can delete notification history.'], 403);
         }
+        if (!ctype_digit((string) $id) || (int) $id < 1) {
+            return $this->jsonResponse(['message' => 'Notification history record not found.'], 404);
+        }
+
         $notification = $this->recordModel->notificationExists((int) $id);
         if (!$notification) {
             return $this->jsonResponse(['message' => 'Notification history record not found.'], 404);
         }
-        $this->recordModel->deleteNotification((int) $id);
-        return $this->jsonResponse(['message' => 'Notification history record deleted.']);
+
+        try {
+            if (!$this->recordModel->deleteNotification((int) $id)) {
+                return $this->jsonResponse(['message' => 'Notification history record could not be deleted.'], 409);
+            }
+            return $this->jsonResponse(['message' => 'Notification history record deleted.']);
+        } catch (Throwable $error) {
+            error_log('Notification history deletion failed (' . get_class($error) . '): ' . $error->getMessage());
+            return $this->jsonResponse(['message' => 'Notification history could not be deleted. Please refresh and try again.'], 500);
+        }
     }
 
     public function apiSaveNotificationSettings()
