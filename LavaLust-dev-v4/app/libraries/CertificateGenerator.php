@@ -20,12 +20,19 @@ class CertificateGenerator
         $settings = $this->template['settings'] ?? [];
         $filePath = $data['template_file_path'] ?? null;
 
-        if (($this->template['mode'] ?? 'generated') === 'upload') {
+        $mode = $this->template['mode'] ?? 'generated';
+        // Older template rows and certificate snapshots used `generate`.
+        // Keep those certificates previewable after the mode was renamed.
+        if ($mode === 'generate') {
+            $mode = 'generated';
+        }
+
+        if ($mode === 'upload') {
             if (!$filePath || !is_file($filePath)) {
                 throw new RuntimeException('An uploaded certificate background is required to render this template.');
             }
             $this->generateFromUploadedTemplate($filePath, $data, $settings);
-        } elseif (($this->template['mode'] ?? 'generated') === 'generated') {
+        } elseif ($mode === 'generated') {
             $this->generateDesignedCertificate($data, $settings);
         } else {
             throw new RuntimeException('The saved certificate template mode is invalid.');
