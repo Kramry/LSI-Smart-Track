@@ -1186,12 +1186,38 @@ class Certificates extends Base
             return $this->actionError($message, 'dashboard', 422);
         }
 
-        // Regenerate from the saved certificate snapshot so layout fixes and
-        // recovered durable assets are reflected in preview/downloads.
-        $certificate['file_path'] = $this->generateCertificatePDF($certificate);
-        $filePath = $this->resolveCertificateAsset($certificate['file_path']);
-        if (!$filePath) {
-            throw new RuntimeException('The generated certificate PDF could not be found.');
+        $filePath = !empty($certificate['file_path'])
+            ? $this->resolveCertificateAsset($certificate['file_path'])
+            : null;
+        $pdfStream = $filePath ? @fopen($filePath, 'rb') : false;
+        if ($pdfStream && fread($pdfStream, 5) === '%PDF-') {
+            rewind($pdfStream);
+        } else {
+            if (is_resource($pdfStream)) {
+                fclose($pdfStream);
+            }
+            $pdfStream = false;
+        }
+
+        if (!$pdfStream) {
+            try {
+                $certificate['file_path'] = $this->generateCertificatePDF($certificate);
+                $filePath = $this->resolveCertificateAsset($certificate['file_path']);
+                $pdfStream = $filePath ? @fopen($filePath, 'rb') : false;
+                if (!$pdfStream || fread($pdfStream, 5) !== '%PDF-') {
+                    if (is_resource($pdfStream)) {
+                        fclose($pdfStream);
+                    }
+                    throw new RuntimeException('The generated certificate file is missing or is not a valid PDF.');
+                }
+                rewind($pdfStream);
+            } catch (Throwable $error) {
+                error_log('Certificate download failed for certificate #' . (int) $id . ' (' . get_class($error) . '): ' . $error->getMessage());
+                if ($this->apiRequest) {
+                    return $this->jsonResponse(['message' => 'The certificate PDF could not be prepared. Please try again or contact staff.'], 500);
+                }
+                return $this->actionError('The certificate PDF could not be prepared. Please try again or contact staff.', 'my-certificates', 500);
+            }
         }
 
         $this->certificateModel->logCertificateAction((int) $this->user['user_id'], (int) $certificate['certificate_id'], 'download', 'Certificate downloaded by ' . $this->user['role']);
@@ -1199,9 +1225,14 @@ class Certificates extends Base
         header('Content-Type: application/pdf');
         $query = $this->queryParams();
         $disposition = isset($query['preview']) && $query['preview'] === '1' ? 'inline' : 'attachment';
-        header('Content-Disposition: ' . $disposition . '; filename="certificate_' . $certificate['certificate_number'] . '.pdf"');
-        header('Content-Length: ' . filesize($filePath));
-        readfile($filePath);
+        $filename = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $certificate['certificate_number']);
+        header('Content-Disposition: ' . $disposition . '; filename="certificate_' . $filename . '.pdf"');
+        $fileStats = fstat($pdfStream);
+        if (is_array($fileStats) && isset($fileStats['size'])) {
+            header('Content-Length: ' . $fileStats['size']);
+        }
+        fpassthru($pdfStream);
+        fclose($pdfStream);
         exit;
     }
 
