@@ -182,6 +182,7 @@ import `lsi_smarttrack-upgrade.sql` instead; it only adds the missing tables.
 | Login succeeds then the session is lost | A `.env` file in the image | The image removes `.env`; rebuild after merging the current `Dockerfile` |
 | 500 on every page | `APP_ENV` left at `development` with warnings | Set `APP_ENV=production` |
 | Certificate signing preview returns 500 when rendering signature images | PHP GD is missing from the backend image | Rebuild and redeploy from the current `Dockerfile`, which installs and verifies GD |
+| Certificate download uses a fallback design | Render's ephemeral filesystem lost a locally stored template background | Configure durable S3 storage and re-upload the background in Certificate Settings; missing backgrounds now fall back to the saved generated design so downloads remain available |
 
 Apache writes its error and access logs to stdout/stderr, so they appear in the
 Render dashboard under **Logs**.
